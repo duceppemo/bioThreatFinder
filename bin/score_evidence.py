@@ -19,8 +19,29 @@ suppressed_control      Present in a negative control at a comparable level.
                         Reagent/index contamination until proven otherwise.
 control_background      What the negative control itself contains. Reported for
                         QC, never as a finding about a specimen.
+marker_veto             A marker that argues AGAINST the target was found (a
+                        neighbour-specific gene, or a region the target lacks).
+vaccine_strain          Marker evidence indicates a vaccine or attenuated strain
+                        rather than wild type. Actionable as a stand-down, so it
+                        is reported prominently rather than suppressed.
 supported               Real alignment evidence, below confirmation bar.
 confirmed_in_silico     Meets every threshold. Still requires wet-lab confirmation.
+
+MARKER GATING
+
+For many taxa the chromosome is not the actionable signal, so alignment metrics
+alone cannot reach `confirmed_in_silico`. Where packs/<pack>/marker_rules.yaml
+defines a rule, it gates promotion under three-valued logic:
+
+  confirm_requires TRUE     -> promotion allowed
+  confirm_requires FALSE    -> capped at `supported`, with the failing rule named
+  confirm_requires UNKNOWN  -> capped at `supported`, because the markers were
+                               never tested. A database gap must not read as a
+                               clean negative.
+
+This is why a chromosomally convincing B. anthracis signal with no pXO1/pXO2
+evidence stops at `supported`: without plasmid markers the call is not
+defensible, whatever the breadth says.
 
 Nothing here is a diagnosis.
 """
@@ -34,12 +55,22 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+# marker_rules lives beside this script in bin/. Imported rather than
+# reimplemented so the three-valued semantics have exactly one definition.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+try:
+    import marker_rules as mr
+except ImportError:  # pragma: no cover - marker gating simply disabled
+    mr = None
+
 TIER_ORDER = [
     "no_reference",
     "control_background",
     "screened_only",
     "attributed_to_neighbour",
+    "marker_veto",
     "suppressed_control",
+    "vaccine_strain",
     "supported",
     "confirmed_in_silico",
 ]
@@ -86,6 +117,10 @@ def load_pack_thresholds(pack_yaml: Path) -> dict:
     return defaults
 
 
+def rank_order(tier: str) -> int:
+    return TIER_ORDER.index(tier) if tier in TIER_ORDER else 0
+
+
 def as_float(value, default=0.0) -> float:
     if value is None or value == "":
         return default
@@ -114,10 +149,53 @@ def main() -> int:
                     help="target reads must exceed best neighbour by this factor [1.5]")
     ap.add_argument("--control-ratio", type=float, default=5.0,
                     help="sample RPM must exceed control RPM by this factor [5.0]")
+    ap.add_argument("--marker-evidence", nargs="*", type=Path, default=[],
+                    help="per-sample marker state TSVs from marker_evidence.py")
+    ap.add_argument("--marker-rules", type=Path, default=None,
+                    help="packs/<pack>/marker_rules.yaml")
     ap.add_argument("--out", required=True, type=Path)
     args = ap.parse_args()
 
     thresholds = load_pack_thresholds(args.pack_yaml)
+
+    # ---- marker evidence and rules -------------------------------------
+    # marker_state[sample][marker_id] = mr.TRUE / mr.FALSE. A marker that is
+    # UNKNOWN is deliberately ABSENT FROM THE DICT, so the rule engine's default
+    # of UNKNOWN applies and indeterminacy propagates correctly.
+    marker_state: dict[str, dict[str, int]] = defaultdict(dict)
+    marker_seen = 0
+    for path in args.marker_evidence:
+        for row in read_tsv(path):
+            state = (row.get("state") or "").strip().upper()
+            sample = row.get("sample", "")
+            mid = row.get("marker_id", "")
+            if not mid or not sample or mr is None:
+                continue
+            marker_seen += 1
+            if state == "PRESENT":
+                marker_state[sample][mid] = mr.TRUE
+            elif state == "ABSENT":
+                marker_state[sample][mid] = mr.FALSE
+            # UNKNOWN: intentionally not recorded.
+
+    marker_rules: dict[str, dict] = {}
+    if args.marker_rules and mr is not None:
+        if not args.marker_rules.exists():
+            sys.exit(f"ERROR: --marker-rules {args.marker_rules} not found")
+        try:
+            marker_rules = mr.load_rules(args.marker_rules)
+        except mr.RuleError as exc:
+            sys.exit(f"ERROR: cannot parse {args.marker_rules}: {exc}")
+        sys.stderr.write(
+            f"[score] marker gating active: {len(marker_rules)} rule set(s), "
+            f"{marker_seen} marker observation(s)\n"
+        )
+    elif args.marker_evidence:
+        sys.stderr.write(
+            "[score] WARNING: marker evidence supplied without --marker-rules; "
+            "marker gating is INACTIVE and taxa needing marker confirmation may be "
+            "promoted on alignment evidence alone\n"
+        )
 
     # Per-taxon threshold overrides. A single global breadth cutoff cannot serve
     # a 5 kb virus and a 23 Mb Plasmodium genome at once.
@@ -210,6 +288,45 @@ def main() -> int:
                         f"({rpm / ctrl:.1f}x)"
                     )
 
+        # ---- marker gating -------------------------------------------
+        marker_summary = ""
+        spec = marker_rules.get(row.get("taxon") or meta.get("name", ""))
+        if spec and mr is not None and tier in ("supported", "confirmed_in_silico"):
+            verdict = mr.evaluate(row.get("taxon", ""), spec, marker_state.get(row.get("sample", ""), {}))
+            marker_summary = "; ".join(verdict["reasons"])
+
+            if verdict["veto"] == mr.TRUE:
+                tier = "marker_veto"
+                reasons.append(f"MARKER VETO: {spec.get('veto_if')} is satisfied")
+            elif verdict["vaccine"] == mr.TRUE:
+                tier = "vaccine_strain"
+                reasons.append(
+                    f"VACCINE/ATTENUATED STRAIN indicated ({spec.get('vaccine_if')}). "
+                    "Not wild type - do not report as disease.")
+            elif verdict["support"] == mr.FALSE:
+                tier = "screened_only"
+                reasons.append(
+                    f"minimum marker evidence not met ({spec.get('support_requires')})")
+            elif tier == "confirmed_in_silico" or verdict["confirm"] is not None:
+                if verdict["confirm"] == mr.TRUE:
+                    reasons.append(f"marker rule satisfied: {spec.get('confirm_requires')}")
+                elif verdict["confirm"] == mr.FALSE:
+                    tier = "supported"
+                    reasons.append(
+                        f"HELD at supported: required markers not found "
+                        f"({spec.get('confirm_requires')})")
+                elif verdict["confirm"] == mr.UNKNOWN:
+                    tier = "supported"
+                    reasons.append(
+                        "HELD at supported: marker evidence INCOMPLETE - untested "
+                        f"marker(s) {', '.join(verdict['untested']) or 'unknown'}. "
+                        "This is a database gap, not a negative result.")
+                elif spec.get("confirm_requires") is None:
+                    tier = min(tier, "supported", key=lambda t: rank_order(t))
+                    reasons.append(
+                        "no confirm_requires rule for this taxon - cannot reach "
+                        "confirmed_in_silico by design (see marker_rules.yaml rationale)")
+
         if n_controls == 0 and row.get("role") != "control":
             reasons.append(
                 "NO NEGATIVE CONTROL IN RUN - contamination cannot be excluded"
@@ -253,6 +370,7 @@ def main() -> int:
             "orthogonal_concordance": "yes" if concordant else "no",
             "reference_bp": row.get("reference_bp", ""),
             "taxon_notes": meta.get("notes", ""),
+            "marker_verdict": marker_summary,
             "reasons": " | ".join(reasons),
         })
 
@@ -275,6 +393,7 @@ def main() -> int:
                 "screen_reads": screen.get((sample, taxid), {}).get("assigned_reads", ""),
                 "sylph_abundance": "", "orthogonal_concordance": "",
                 "reference_bp": "", "taxon_notes": meta.get("notes", ""),
+                "marker_verdict": "",
                 "reasons": "DATABASE GAP: no reference genome in pack; stage-2 "
                            "confirmation could not run. Build refs and rerun.",
             })

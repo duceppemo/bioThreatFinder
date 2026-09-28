@@ -1,0 +1,225 @@
+# bioThreatFinder marker catalogue - human health pack
+#
+# WHY THIS FILE EXISTS
+# For a large share of the watchlist, the chromosome is NOT the actionable
+# signal. B. anthracis is chromosomally near-identical to the B. cereus group;
+# what makes it anthrax is pXO1/pXO2. C. botulinum is polyphyletic and the
+# actionable signal is the BoNT cluster, which also occurs in C. butyricum.
+# E. coli presence is uninformative - only the pathotype matters. Reporting any
+# of these from chromosomal breadth alone is not defensible.
+#
+# KEYED BY GENE SYMBOL, NOT ACCESSION - on purpose, exactly as watchlist.tsv is
+# keyed by name. Accession numbers written from memory are a fabrication risk in
+# a file that gates a high-consequence call. scripts/build_marker_db.py resolves
+# each row to real sequences via the named query_strategy and records the
+# accession, source and retrieval date in markers.manifest.tsv. Provenance is
+# part of the result.
+#
+# EVIDENCE TYPES
+#   dna       read alignment to the marker nucleotide sequence
+#   protein   translated search (MMseqs2/DIAMOND blastx) - catches a divergent
+#             or engineered allele that nucleotide alignment would miss
+#   hmm       profile search - the most remote-homology-sensitive tier, for
+#             marker families where novel variants are expected (BoNT, Stx)
+#   Most rows are dna+protein. Nucleotide alone is not sufficient for a tool that
+#   must detect divergent agents.
+#
+# MARKER CLASSES
+#   required          Must be present to reach confirmed_in_silico.
+#   discriminating    Presence separates the target from a named near neighbour.
+#   absence_expected  Presence argues AGAINST the target (e.g. a region the
+#                     target has deleted, or a neighbour-specific gene).
+#   pathotype         Defines the actionable pathotype rather than the species.
+#   resistance        Reported alongside, never gating.
+#   vaccine_strain    Presence indicates a vaccine/attenuated strain, not wild
+#                     type. Suppresses escalation - see marker_rules.yaml.
+#   lineage           Subtyping/genotyping only.
+#
+# copy_expectation: single | multi   ('multi' markers must never be used alone -
+# multi-copy elements are the classic false-positive route, e.g. IS481.)
+marker_id	taxon	gene	aliases	marker_class	evidence_type	locus	min_coverage	min_identity	copy_expectation	query_strategy	source_db	notes
+#---- Bacillus anthracis: chromosome is not enough --------------------------
+banth_pxo1_pagA	Bacillus anthracis	pagA	pag;PA;protective antigen	required	dna+protein	pXO1	0.80	0.95	single	gene_in_organism	NCBI;VFDB	Protective antigen, pXO1. Core of the anthrax toxin.
+banth_pxo1_lef	Bacillus anthracis	lef	lethal factor;LF	required	dna+protein	pXO1	0.80	0.95	single	gene_in_organism	NCBI;VFDB	Lethal factor, pXO1.
+banth_pxo1_cya	Bacillus anthracis	cya	edema factor;EF	required	dna+protein	pXO1	0.80	0.95	single	gene_in_organism	NCBI;VFDB	Oedema factor, pXO1.
+banth_pxo2_capB	Bacillus anthracis	capB	capsule biosynthesis	required	dna+protein	pXO2	0.80	0.95	single	gene_in_organism	NCBI;VFDB	Poly-gamma-D-glutamate capsule, pXO2.
+banth_pxo2_capA	Bacillus anthracis	capA	-	required	dna+protein	pXO2	0.80	0.95	single	gene_in_organism	NCBI;VFDB	pXO2 capsule locus.
+banth_pxo2_acpA	Bacillus anthracis	acpA	-	discriminating	dna+protein	pXO2	0.70	0.95	single	gene_in_organism	NCBI	pXO2 capsule regulator.
+banth_chr_BA_sap	Bacillus anthracis	sap	surface array protein	discriminating	dna+protein	chromosome	0.70	0.98	single	gene_in_organism	NCBI	Chromosomal; supports species but cannot confirm alone.
+bcereus_chr_ces	Bacillus cereus	cesB	cereulide synthetase	absence_expected	dna+protein	plasmid	0.60	0.95	single	gene_in_organism	NCBI;VFDB	Emetic B. cereus. Presence argues the signal is B. cereus, not anthracis.
+#---- Yersinia pestis ------------------------------------------------------
+ypest_ppcp1_pla	Yersinia pestis	pla	plasminogen activator	required	dna+protein	pPCP1	0.80	0.95	single	gene_in_organism	NCBI;VFDB	pPCP1. Absent from Y. pseudotuberculosis.
+ypest_pmt1_caf1	Yersinia pestis	caf1	F1 capsular antigen	required	dna+protein	pMT1	0.80	0.95	single	gene_in_organism	NCBI;VFDB	F1 antigen, pMT1.
+ypest_pmt1_ymt	Yersinia pestis	ymt	murine toxin	required	dna+protein	pMT1	0.80	0.95	single	gene_in_organism	NCBI	pMT1. Note F1-negative virulent strains exist - do not require caf1 alone.
+ypest_pcd1_lcrV	Yersinia pestis	lcrV	V antigen	discriminating	dna+protein	pCD1	0.70	0.95	single	gene_in_organism	NCBI;VFDB	pCD1 shared with other pathogenic Yersinia; supporting only.
+ypseudo_chr_inv	Yersinia pseudotuberculosis	inv	invasin	absence_expected	dna+protein	chromosome	0.60	0.95	single	gene_in_organism	NCBI;VFDB	Functional inv is intact in pseudotuberculosis, pseudogene in pestis.
+#---- Francisella tularensis ----------------------------------------------
+ftul_lpnA	Francisella tularensis	lpnA	tul4;t	required	dna+protein	chromosome	0.80	0.95	single	gene_in_organism	NCBI	Genus-level lipoprotein; shared with F. novicida - not discriminating alone.
+ftul_fopA	Francisella tularensis	fopA	-	required	dna+protein	chromosome	0.80	0.95	single	gene_in_organism	NCBI	Outer membrane protein.
+ftul_fupA	Francisella tularensis	fupA	fslE	discriminating	dna+protein	chromosome	0.70	0.97	single	gene_in_organism	NCBI	fupA/fupB junction separates subsp. tularensis from holarctica.
+ftul_pdpD	Francisella tularensis	pdpD	-	discriminating	dna+protein	FPI	0.70	0.97	multi	gene_in_organism	NCBI	Intact in subsp. tularensis, truncated in holarctica. FPI is duplicated - copy-aware.
+ftul_RD1	Francisella tularensis	RD1	region of difference 1	lineage	dna	chromosome	0.60	0.97	single	named_region	NCBI	RD1 PCR distinguishes subspecies. VERIFY coordinates at build.
+fnov_specific	Francisella novicida	-	-	absence_expected	dna+protein	chromosome	0.60	0.95	single	curate_required	NCBI	CURATION NEEDED: F. novicida is environmental and the dominant false positive. Needs curated novicida-specific loci.
+#---- Burkholderia --------------------------------------------------------
+bpseudo_TTS1	Burkholderia pseudomallei	TTS1	orf2;type III secretion cluster 1	required	dna+protein	chromosome	0.80	0.97	single	named_region	NCBI	The standard discriminating target vs B. thailandensis.
+bpseudo_bimA	Burkholderia pseudomallei	bimA	-	lineage	dna+protein	chromosome	0.60	0.95	single	gene_in_organism	NCBI	bimA allele separates pseudomallei from mallei.
+bthai_ara	Burkholderia thailandensis	araBAD	arabinose assimilation	absence_expected	dna+protein	chromosome	0.60	0.95	single	gene_in_organism	NCBI	B. thailandensis assimilates arabinose; pseudomallei cannot. Presence argues thailandensis.
+bmallei_deletions	Burkholderia mallei	-	-	discriminating	dna	chromosome	0.00	0.00	single	curate_required	NCBI	CURATION NEEDED: B. mallei is a deletion clone of pseudomallei, so it is defined by ABSENCE of regions. Needs curated absent-region coordinates; cannot be done with presence markers.
+#---- Vibrio cholerae: species is not the finding -------------------------
+vchol_ctxA	Vibrio cholerae	ctxA	cholera toxin A	pathotype	dna+protein	CTXphi	0.80	0.95	single	gene_in_organism	NCBI;VFDB	Toxigenicity. Species presence without ctxAB is not notifiable cholera.
+vchol_ctxB	Vibrio cholerae	ctxB	cholera toxin B	pathotype	dna+protein	CTXphi	0.80	0.95	single	gene_in_organism	NCBI;VFDB	Also gives classical vs El Tor genotype.
+vchol_tcpA	Vibrio cholerae	tcpA	toxin co-regulated pilus	pathotype	dna+protein	VPI	0.70	0.95	single	gene_in_organism	NCBI;VFDB	Colonisation factor.
+vchol_ompW	Vibrio cholerae	ompW	-	required	dna+protein	chromosome	0.80	0.95	single	gene_in_organism	NCBI	Species confirmation.
+vchol_wbeO1	Vibrio cholerae	wbeO1	rfbO1	lineage	dna	chromosome	0.60	0.95	single	gene_in_organism	NCBI	O1 serogroup.
+vchol_wbfZ	Vibrio cholerae	wbfZ	-	lineage	dna	chromosome	0.60	0.95	single	gene_in_organism	NCBI	O139 serogroup.
+#---- Clostridium botulinum: the cluster is the finding -------------------
+cbot_bont	Clostridium botulinum	bont	botA;botB;botE;botF;BoNT	pathotype	dna+protein+hmm	variable	0.70	0.90	single	gene_family	NCBI;VFDB	Neurotoxin gene family. HMM tier is essential - novel/mosaic subtypes are regularly described and would be missed by exact matching.
+cbot_ntnh	Clostridium botulinum	ntnh	non-toxic non-haemagglutinin	pathotype	dna+protein+hmm	variable	0.70	0.90	single	gene_family	NCBI	Co-located with bont in the toxin cluster; corroborates.
+cbut_bont	Clostridium butyricum	bont	botE	discriminating	dna+protein+hmm	variable	0.70	0.90	single	gene_family	NCBI	BoNT/E in C. butyricum. Toxin present, species is not C. botulinum - report accurately.
+#---- Diarrhoeagenic E. coli / Shigella: pathotype only -------------------
+ecoli_stx1	Escherichia coli	stx1	verotoxin 1;VT1	pathotype	dna+protein+hmm	prophage	0.80	0.95	single	gene_family	NCBI;VFDB	STEC. Phage-borne; subtypes a-d.
+ecoli_stx2	Escherichia coli	stx2	verotoxin 2;VT2	pathotype	dna+protein+hmm	prophage	0.80	0.95	single	gene_family	NCBI;VFDB	STEC. stx2a/2d associate with HUS severity - subtype matters.
+ecoli_eae	Escherichia coli	eae	intimin	pathotype	dna+protein	LEE	0.70	0.95	single	gene_in_organism	NCBI;VFDB	EPEC/EHEC attaching-effacing.
+ecoli_ehxA	Escherichia coli	ehxA	enterohaemolysin	pathotype	dna+protein	plasmid	0.70	0.95	single	gene_in_organism	NCBI;VFDB	Supports EHEC.
+ecoli_aggR	Escherichia coli	aggR	-	pathotype	dna+protein	plasmid	0.70	0.95	single	gene_in_organism	NCBI;VFDB	EAEC regulator.
+ecoli_eltB_estA	Escherichia coli	eltB	LT;estA;ST	pathotype	dna+protein	plasmid	0.70	0.95	single	gene_family	NCBI;VFDB	ETEC heat-labile/heat-stable toxins.
+shig_ipaH	Shigella dysenteriae	ipaH	-	pathotype	dna+protein	plasmid+chromosome	0.70	0.95	multi	gene_in_organism	NCBI;VFDB	Shigella/EIEC. MULTI-COPY - never call on ipaH alone.
+shig_virA	Shigella dysenteriae	virA	-	pathotype	dna+protein	plasmid	0.70	0.95	single	gene_in_organism	NCBI;VFDB	Invasion plasmid.
+shig_stx1_Sd1	Shigella dysenteriae	stx	Shiga toxin	pathotype	dna+protein+hmm	chromosome	0.80	0.95	single	gene_family	NCBI;VFDB	S. dysenteriae type 1 Shiga toxin.
+#---- Corynebacterium diphtheriae ----------------------------------------
+cdiph_tox	Corynebacterium diphtheriae	tox	diphtheria toxin	pathotype	dna+protein+hmm	prophage	0.80	0.95	single	gene_in_organism	NCBI;VFDB	Phage-borne. Non-toxigenic strains are not notifiable diphtheria. Also carried by C. ulcerans/pseudotuberculosis.
+cdiph_dtxR	Corynebacterium diphtheriae	dtxR	-	required	dna+protein	chromosome	0.70	0.95	single	gene_in_organism	NCBI	Chromosomal regulator; species support.
+cdiph_rpoB	Corynebacterium diphtheriae	rpoB	-	required	dna+protein	chromosome	0.70	0.97	single	gene_in_organism	NCBI	Species identification.
+#---- Bordetella pertussis: IS481 is a trap ------------------------------
+bpert_ptxA	Bordetella pertussis	ptxA	pertussis toxin subunit 1	required	dna+protein	chromosome	0.80	0.97	single	gene_in_organism	NCBI;VFDB	Species-level with ptxP promoter allele.
+bpert_ptxP	Bordetella pertussis	ptxP	pertussis toxin promoter	lineage	dna	chromosome	0.70	0.98	single	named_region	NCBI	ptxP3 lineage.
+bpert_IS481	Bordetella pertussis	IS481	-	discriminating	dna	chromosome	0.60	0.97	multi	gene_in_organism	NCBI	MULTI-COPY (~100x) and SHARED WITH B. holmesii. The classic false positive. Never gating on its own.
+bpert_IS1002	Bordetella pertussis	IS1002	-	discriminating	dna	chromosome	0.60	0.97	multi	gene_in_organism	NCBI	Present in pertussis and parapertussis.
+bpara_IS1001	Bordetella parapertussis	IS1001	-	absence_expected	dna	chromosome	0.60	0.97	multi	gene_in_organism	NCBI	Presence argues parapertussis.
+bholm_recA	Bordetella holmesii	recA	-	absence_expected	dna+protein	chromosome	0.60	0.97	single	gene_in_organism	NCBI	Discriminates the IS481-sharing commensal.
+#---- Listeria monocytogenes --------------------------------------------
+lmono_hly	Listeria monocytogenes	hly	hlyA;listeriolysin O;LLO	required	dna+protein	LIPI-1	0.80	0.95	single	gene_in_organism	NCBI;VFDB	LIPI-1. Absent from L. innocua.
+lmono_prfA	Listeria monocytogenes	prfA	-	required	dna+protein	LIPI-1	0.80	0.95	single	gene_in_organism	NCBI;VFDB	LIPI-1 master regulator.
+lmono_inlA	Listeria monocytogenes	inlA	internalin A	discriminating	dna+protein	chromosome	0.70	0.95	single	gene_in_organism	NCBI;VFDB	Premature stop codons attenuate - allele matters.
+lmono_llsX	Listeria monocytogenes	llsX	listeriolysin S	lineage	dna+protein	LIPI-3	0.60	0.95	single	gene_in_organism	NCBI	LIPI-3, hypervirulent lineage I.
+lmono_LIPI4	Listeria monocytogenes	LIPI-4	-	lineage	dna	chromosome	0.60	0.95	single	named_region	NCBI	Associated with CNS/placental tropism. VERIFY at build.
+#---- Legionella / Neisseria / Haemophilus / Streptococcus ---------------
+lpneu_mip	Legionella pneumophila	mip	-	required	dna+protein	chromosome	0.80	0.95	single	gene_in_organism	NCBI;VFDB	Species confirmation.
+lpneu_lag1	Legionella pneumophila	lag-1	-	lineage	dna+protein	chromosome	0.60	0.95	single	gene_in_organism	NCBI	Serogroup 1 / mAb3-1 epitope.
+nmen_ctrA	Neisseria meningitidis	ctrA	-	required	dna+protein	cps	0.80	0.95	single	gene_in_organism	NCBI;VFDB	Capsule transport; absent from most commensals.
+nmen_sodC	Neisseria meningitidis	sodC	-	required	dna+protein	chromosome	0.70	0.95	single	gene_in_organism	NCBI	Species confirmation with ctrA.
+nmen_csb	Neisseria meningitidis	csb	siaD;synD	lineage	dna+protein	cps	0.60	0.95	single	gene_family	NCBI	Serogroup B. Sister markers csa/csc/csw/csy give A/C/W/Y.
+hinf_hpd	Haemophilus influenzae	hpd	protein D	required	dna+protein	chromosome	0.80	0.95	single	gene_in_organism	NCBI	Discriminates from H. haemolyticus better than 16S.
+hinf_bexA	Haemophilus influenzae	bexA	-	lineage	dna+protein	cap	0.60	0.95	single	gene_in_organism	NCBI	Encapsulated strains; with cap locus gives serotype b.
+spyo_emm	Streptococcus pyogenes	emm	M protein	lineage	dna+protein	chromosome	0.60	0.90	single	gene_family	NCBI;VFDB	emm typing. Hypervariable - low identity floor is intentional.
+spyo_speB	Streptococcus pyogenes	speB	-	required	dna+protein	chromosome	0.70	0.95	single	gene_in_organism	NCBI;VFDB	Species support.
+#---- Coxiella / Rickettsia / Leptospira / Chlamydia --------------------
+cburn_IS1111	Coxiella burnetii	IS1111	-	discriminating	dna	chromosome	0.60	0.97	multi	gene_in_organism	NCBI	MULTI-COPY - sensitive but must be corroborated.
+cburn_icd	Coxiella burnetii	icd	-	required	dna+protein	chromosome	0.70	0.95	single	gene_in_organism	NCBI	Single-copy species confirmation.
+cburn_com1	Coxiella burnetii	com1	-	required	dna+protein	chromosome	0.70	0.95	single	gene_in_organism	NCBI	Outer membrane protein.
+rprow_gltA	Rickettsia prowazekii	gltA	citrate synthase	required	dna+protein	chromosome	0.70	0.95	single	gene_in_organism	NCBI	Genus-level; combine with ompB.
+rprow_ompB	Rickettsia prowazekii	ompB	sca5	discriminating	dna+protein	chromosome	0.70	0.95	single	gene_in_organism	NCBI	Species resolution within Rickettsia.
+rprow_17kDa	Rickettsia prowazekii	17kDa	htrA	required	dna+protein	chromosome	0.70	0.95	single	gene_in_organism	NCBI	Genus antigen.
+lepto_lipL32	Leptospira interrogans	lipL32	hap1	required	dna+protein	chromosome	0.80	0.95	single	gene_in_organism	NCBI	PATHOGENIC-CLADE SPECIFIC - absent from saprophytic L. biflexa. The key discriminator.
+lepto_secY	Leptospira interrogans	secY	-	lineage	dna+protein	chromosome	0.60	0.95	single	gene_in_organism	NCBI	Species-level phylogeny.
+cpsit_ompA	Chlamydia psittaci	ompA	MOMP	required	dna+protein	chromosome	0.70	0.92	single	gene_in_organism	NCBI	Genotyping; variable domains separate C. psittaci from abortus/trachomatis.
+cpsit_incA	Chlamydia psittaci	incA	-	discriminating	dna+protein	chromosome	0.60	0.95	single	gene_in_organism	NCBI	Species support.
+#---- Mycobacterium tuberculosis complex: RD regions are the answer -----
+mtb_IS6110	Mycobacterium tuberculosis	IS6110	-	discriminating	dna	chromosome	0.60	0.97	multi	gene_in_organism	NCBI	MULTI-COPY (0-25x). Sensitive, not specific within MTBC.
+mtb_rpoB	Mycobacterium tuberculosis	rpoB	-	required	dna+protein	chromosome	0.80	0.98	single	gene_in_organism	NCBI	Species plus rifampicin resistance (RRDR).
+mtb_RD9	Mycobacterium tuberculosis	RD9	region of difference 9	discriminating	dna	chromosome	0.70	0.98	single	named_region	NCBI	PRESENT in M. tuberculosis sensu stricto, DELETED in M. bovis/africanum/microti. The cleanest MTBC discriminator.
+mtb_RD1	Mycobacterium tuberculosis	RD1	region of difference 1	vaccine_strain	dna	chromosome	0.70	0.98	single	named_region	NCBI	DELETED IN BCG. Absence of RD1 with MTBC signal indicates BCG vaccine strain, not disease. Inverted logic - see marker_rules.yaml.
+mtb_katG_inhA	Mycobacterium tuberculosis	katG	inhA	resistance	dna+protein	chromosome	0.70	0.97	single	gene_family	NCBI	Isoniazid resistance. Reported, never gating.
+#---- Brucella: species calls are usually not defensible ----------------
+bruc_BCSP31	Brucella melitensis	bcsp31	BCSP31	required	dna+protein	chromosome	0.80	0.97	single	gene_in_organism	NCBI	GENUS-level. Appropriate reporting unit for metagenomes.
+bruc_IS711	Brucella melitensis	IS711	IS6501	discriminating	dna	chromosome	0.60	0.97	multi	gene_in_organism	NCBI	MULTI-COPY; species-specific flanking positions (AMOS) are the discriminator, not the element.
+bruc_omp2	Brucella melitensis	omp2a	omp2b	lineage	dna+protein	chromosome	0.60	0.95	single	gene_family	NCBI	Species-level typing.
+bruc_RB51_wboA	Brucella abortus	wboA	-	vaccine_strain	dna	chromosome	0.70	0.97	single	named_region	NCBI	RB51 vaccine has an IS711 disruption in wboA. Detects vaccine strain.
+bruc_S19_eri	Brucella abortus	eri	-	vaccine_strain	dna	chromosome	0.70	0.97	single	named_region	NCBI	S19 vaccine carries an eri region deletion. VERIFY coordinates at build.
+#---- Viruses: essential genes and pathogenicity determinants -----------
+flua_M	Influenza A virus	M	MP;matrix	required	dna+protein	segment 7	0.70	0.90	single	gene_family	NCBI	Universal influenza A target. Segment - see notes on reassortment.
+flua_HA_H5	Influenza A virus	HA	H5	pathotype	dna+protein+hmm	segment 4	0.60	0.85	single	gene_family	NCBI	H5 subtype. Low identity floor is intentional - HA is diverse.
+flua_HA_H7	Influenza A virus	HA	H7	pathotype	dna+protein+hmm	segment 4	0.60	0.85	single	gene_family	NCBI	H7 subtype.
+flua_HA_cleavage	Influenza A virus	HA	polybasic cleavage site	pathotype	protein+hmm	segment 4	0.30	0.80	single	motif	NCBI	HIGH-PATHOGENICITY DETERMINANT: a polybasic insertion at the HA1/HA2 junction distinguishes HPAI from LPAI. Protein-level motif, not whole-gene alignment.
+flua_PB2_627K	Influenza A virus	PB2	627K;701N	lineage	protein	segment 1	0.30	0.85	single	motif	NCBI	Mammalian adaptation markers. Reported, not gating.
+orthopox_ATI	Variola virus	ATI	A-type inclusion	discriminating	dna+protein	genome	0.60	0.92	single	gene_in_organism	NCBI	ATI gene LENGTH separates orthopoxvirus species. VERIFY approach at build.
+orthopox_crmB	Variola virus	crmB	TNF receptor homolog	discriminating	dna+protein	genome	0.60	0.92	single	gene_in_organism	NCBI	Orthopoxvirus species discrimination.
+orthopox_HA	Variola virus	HA	haemagglutinin	discriminating	dna+protein	genome	0.60	0.92	single	gene_in_organism	NCBI	Orthopoxvirus HA typing.
+vaccinia_specific	Vaccinia virus	-	-	vaccine_strain	dna+protein	genome	0.60	0.95	single	curate_required	NCBI	CURATION NEEDED: vaccinia is the dominant false positive for variola AND a live vaccine. Needs curated vaccinia-specific loci to suppress escalation.
+mpox_C3L	Monkeypox virus	C3L	complement control protein	lineage	dna+protein	genome	0.60	0.92	single	gene_in_organism	NCBI	Clade I vs II discrimination.
+ebola_NP	Zaire ebolavirus	NP	nucleoprotein	required	dna+protein+hmm	genome	0.60	0.85	single	gene_family	NCBI	Filovirus core gene. HMM tier catches divergent lineages.
+ebola_GP	Zaire ebolavirus	GP	glycoprotein	discriminating	dna+protein+hmm	genome	0.60	0.85	single	gene_family	NCBI	Species resolution within Ebolavirus - essential, since Reston is not pathogenic to humans.
+polio_VP1	Enterovirus C	VP1	-	required	dna+protein	genome	0.70	0.88	single	gene_family	NCBI	Serotype and wild-vs-vaccine determination.
+polio_sabin	Enterovirus C	VP1	Sabin attenuating sites	vaccine_strain	dna+protein	genome	0.30	0.90	single	motif	NCBI	Sabin attenuating positions; reversion gives VDPV. Distinguishes vaccine from wild type - see marker_rules.yaml.
+measles_N	Measles morbillivirus	N	nucleoprotein	required	dna+protein	genome	0.70	0.90	single	gene_in_organism	NCBI	N-450 window is the genotyping standard.
+measles_vaccine	Measles morbillivirus	N	Edmonston lineage	vaccine_strain	dna	genome	0.50	0.97	single	motif	NCBI	Genotype A / vaccine lineage. Post-vaccination detection is common.
+yf_17D	Yellow fever virus	E	17D vaccine substitutions	vaccine_strain	dna+protein	genome	0.40	0.95	single	motif	NCBI	17D vaccine strain discrimination.
+rabies_N	Rabies lyssavirus	N	nucleoprotein	required	dna+protein+hmm	genome	0.70	0.88	single	gene_family	NCBI	Lyssavirus species resolution.
+rabies_vaccine	Rabies lyssavirus	G	ERA;SAD-B19;Pasteur	vaccine_strain	dna+protein	genome	0.40	0.96	single	motif	NCBI	Vaccine/bait strains are common wildlife and lab contaminants.
+veev_TC83	Venezuelan equine encephalitis virus	E2	TC-83	vaccine_strain	dna+protein	genome	0.40	0.96	single	motif	NCBI	TC-83 vaccine strain.
+cchf_L	Crimean-Congo hemorrhagic fever orthonairovirus	L	polymerase	required	dna+protein+hmm	L segment	0.50	0.80	single	gene_family	NCBI	CCHFV is extremely diverse - low floors are deliberate. HMM tier is essential here.
+sars2_N_E	Severe acute respiratory syndrome coronavirus 2	N	E;ORF1ab	required	dna+protein	genome	0.70	0.95	single	gene_family	NCBI	Multiple targets; ubiquitous contaminant so corroboration matters more than sensitivity.
+#---- Parasites --------------------------------------------------------
+pfal_18S	Plasmodium falciparum	18S	SSU rRNA	required	dna	rDNA	0.70	0.97	multi	gene_in_organism	NCBI	Species; multi-copy so sensitive.
+pfal_k13	Plasmodium falciparum	kelch13	K13	resistance	dna+protein	chromosome	0.70	0.95	single	gene_in_organism	NCBI	Artemisinin partial resistance. Public-health actionable.
+pfal_hrp2	Plasmodium falciparum	hrp2	hrp3;pfhrp2	resistance	dna+protein	chromosome	0.70	0.95	single	gene_in_organism	NCBI	DELETION causes rapid-diagnostic-test failure. Absence is the finding - inverted logic.
+pfal_crt_dhfr	Plasmodium falciparum	pfcrt	dhfr;dhps	resistance	dna+protein	chromosome	0.70	0.95	single	gene_family	NCBI	Chloroquine / antifolate resistance.
+ehist_ssu	Entamoeba histolytica	18S	SSU rRNA	required	dna	rDNA	0.80	0.98	multi	gene_in_organism	NCBI	Discriminating positions vs E. dispar are few - high identity floor is essential.
+ehist_srehp	Entamoeba histolytica	srehp	serine-rich protein	discriminating	dna+protein	chromosome	0.70	0.95	single	gene_in_organism	NCBI	Separates from the non-pathogenic E. dispar.
+ehist_hly	Entamoeba histolytica	ehcp	amoebapore	discriminating	dna+protein	chromosome	0.60	0.95	single	gene_family	NCBI	Pathogenicity-associated.
+tbg_TgsGP	Trypanosoma brucei	TgsGP	-	pathotype	dna+protein	chromosome	0.70	0.95	single	gene_in_organism	NCBI	HUMAN-INFECTIVE subsp. gambiense. T. b. brucei is not human-infective, so this is the actionable marker.
+tbr_SRA	Trypanosoma brucei	SRA	serum resistance associated	pathotype	dna+protein	chromosome	0.70	0.95	single	gene_in_organism	NCBI	HUMAN-INFECTIVE subsp. rhodesiense.
+crypto_gp60	Cryptosporidium parvum	gp60	gp40/15	lineage	dna+protein	chromosome	0.60	0.92	single	gene_in_organism	NCBI	Subtyping; drives outbreak attribution.
+crypto_ssu	Cryptosporidium parvum	18S	SSU rRNA	required	dna	rDNA	0.80	0.98	multi	gene_in_organism	NCBI	parvum vs hominis discrimination.
+giardia_tpi	Giardia intestinalis	tpi	bg;gdh	required	dna+protein	chromosome	0.70	0.92	single	gene_family	NCBI	Assemblage A/B (human) vs C-H (animal).
+toxo_B1	Toxoplasma gondii	B1	REP-529	required	dna	chromosome	0.70	0.95	multi	gene_in_organism	NCBI	Multi-copy, standard target. Discriminates from Hammondia.
+toxo_GRA6	Toxoplasma gondii	GRA6	SAG2	lineage	dna+protein	chromosome	0.60	0.95	single	gene_family	NCBI	Type I/II/III genotyping.
+leish_hsp70	Leishmania donovani	hsp70	ITS1	required	dna+protein	chromosome	0.70	0.92	single	gene_family	NCBI	Species complex resolution.
+schisto_cox1	Schistosoma mansoni	cox1	ITS	required	dna+protein	mitochondrion	0.70	0.92	single	gene_family	NCBI	Mito/nuclear discordance reveals hybridisation with animal schistosomes.
+#---- Fungi -----------------------------------------------------------
+afum_cyp51A	Aspergillus fumigatus	cyp51A	TR34;L98H;TR46;Y121F;T289A	resistance	dna+protein	chromosome	0.80	0.95	single	gene_in_organism	NCBI	AZOLE RESISTANCE - the actionable signal, since A. fumigatus presence alone means little. Tandem-repeat promoter insertions require careful coverage handling.
+cauris_ERG11	Candida auris	ERG11	Y132F;K143R	resistance	dna+protein	chromosome	0.80	0.95	single	gene_in_organism	NCBI	Azole resistance.
+cauris_FKS1	Candida auris	FKS1	S639F	resistance	dna+protein	chromosome	0.80	0.95	single	gene_in_organism	NCBI	Echinocandin resistance - limits treatment options.
+cauris_clade	Candida auris	-	clade markers	lineage	dna	chromosome	0.60	0.97	single	curate_required	NCBI	CURATION NEEDED: clade I-VI assignment is epidemiologically important.
+cgatt_CAP59	Cryptococcus gattii	CAP59	URA5;PLB1	discriminating	dna+protein	chromosome	0.70	0.95	single	gene_family	NCBI	gattii vs neoformans. gattii affects immunocompetent hosts, so the distinction changes interpretation.
+pjiro_mtLSU	Pneumocystis jirovecii	mtLSU	-	required	dna	mitochondrion	0.70	0.95	multi	gene_in_organism	NCBI	Standard target; cannot be cultured so sequence detection is primary.
+pjiro_DHPS	Pneumocystis jirovecii	DHPS	-	resistance	dna+protein	chromosome	0.70	0.95	single	gene_in_organism	NCBI	Sulfa resistance mutations.
+cocci_Ag2	Coccidioides immitis	Ag2	PRA;CTS1	required	dna+protein	chromosome	0.70	0.95	single	gene_family	NCBI	Genus confirmation; immitis/posadasii separation needs genome-wide data.
+#---- Filoviruses, arenaviruses, bunyaviruses, henipaviruses ---------------
+# These are the taxa where divergence, not abundance, is the limiting factor.
+# Every row carries the hmm tier: a novel lineage at 70-80% nucleotide identity
+# is invisible to nucleotide alignment but obvious in profile space.
+ebolaS_NP	Sudan ebolavirus	NP	nucleoprotein	required	dna+protein+hmm	genome	0.60	0.85	single	gene_family	NCBI	Filovirus core gene.
+ebolaS_GP	Sudan ebolavirus	GP	glycoprotein	discriminating	dna+protein+hmm	genome	0.60	0.85	single	gene_family	NCBI	Species resolution within Ebolavirus.
+marburg_NP	Marburg marburgvirus	NP	nucleoprotein	required	dna+protein+hmm	genome	0.60	0.85	single	gene_family	NCBI	Filovirus core gene.
+marburg_L	Marburg marburgvirus	L	polymerase	required	dna+protein+hmm	genome	0.50	0.80	single	gene_family	NCBI	Most conserved filovirus gene; best HMM target.
+marburg_GP	Marburg marburgvirus	GP	glycoprotein	discriminating	dna+protein+hmm	genome	0.60	0.85	single	gene_family	NCBI	Separates Marburg from Ravn lineage.
+lassa_GPC	Lassa mammarenavirus	GPC	glycoprotein precursor	required	dna+protein+hmm	S segment	0.60	0.80	single	gene_family	NCBI	Arenavirus S segment. Lassa lineages I-IV are highly divergent.
+lassa_NP	Lassa mammarenavirus	NP	nucleoprotein	required	dna+protein+hmm	S segment	0.60	0.80	single	gene_family	NCBI	S segment.
+lassa_L	Lassa mammarenavirus	L	polymerase	required	dna+protein+hmm	L segment	0.50	0.78	single	gene_family	NCBI	L segment - a second segment is required to confirm.
+lassa_Z	Lassa mammarenavirus	Z	matrix	discriminating	dna+protein+hmm	L segment	0.50	0.80	single	gene_family	NCBI	L segment.
+lcmv_specific	Lymphocytic choriomeningitis virus	NP	-	absence_expected	dna+protein	S segment	0.60	0.88	single	gene_family	NCBI	Old World arenavirus mimic; widespread in rodents and laboratory colonies.
+junin_GPC	Junin mammarenavirus	GPC	glycoprotein precursor	required	dna+protein+hmm	S segment	0.60	0.82	single	gene_family	NCBI	New World arenavirus S segment.
+junin_NP	Junin mammarenavirus	NP	nucleoprotein	required	dna+protein+hmm	S segment	0.60	0.82	single	gene_family	NCBI	S segment.
+junin_L	Junin mammarenavirus	L	polymerase	required	dna+protein+hmm	L segment	0.50	0.78	single	gene_family	NCBI	L segment.
+junin_Candid1	Junin mammarenavirus	GPC	Candid#1	vaccine_strain	dna+protein	S segment	0.40	0.96	single	motif	NCBI	Candid#1 live attenuated vaccine strain.
+rvfv_L	Rift Valley fever phlebovirus	L	polymerase	required	dna+protein+hmm	L segment	0.50	0.80	single	gene_family	NCBI	Phlebovirus L segment.
+rvfv_Gn	Rift Valley fever phlebovirus	Gn	Gc;M segment glycoprotein	required	dna+protein+hmm	M segment	0.60	0.85	single	gene_family	NCBI	M segment - second segment for confirmation.
+rvfv_N	Rift Valley fever phlebovirus	N	nucleoprotein;NSs	required	dna+protein+hmm	S segment	0.60	0.85	single	gene_family	NCBI	S segment.
+rvfv_NSs_vaccine	Rift Valley fever phlebovirus	NSs	Clone 13;MP-12	vaccine_strain	dna	S segment	0.40	0.95	single	motif	NCBI	Clone 13 carries a large NSs deletion; MP-12 is attenuated. Veterinary vaccines in endemic regions.
+nipah_N	Nipah henipavirus	N	nucleoprotein	required	dna+protein+hmm	genome	0.60	0.85	single	gene_family	NCBI	Henipavirus core gene.
+nipah_L	Nipah henipavirus	L	polymerase	required	dna+protein+hmm	genome	0.50	0.80	single	gene_family	NCBI	Most conserved henipavirus gene.
+nipah_G	Nipah henipavirus	G	attachment glycoprotein	discriminating	dna+protein+hmm	genome	0.60	0.88	single	gene_family	NCBI	Separates Nipah from Hendra and Cedar. Bangladesh vs Malaysia genotype differs.
+hendra_N	Hendra henipavirus	N	nucleoprotein	required	dna+protein+hmm	genome	0.60	0.85	single	gene_family	NCBI	Henipavirus core gene.
+hendra_G	Hendra henipavirus	G	attachment glycoprotein	discriminating	dna+protein+hmm	genome	0.60	0.88	single	gene_family	NCBI	Separates Hendra from Nipah. Overlaps the animal pack (equine).
+henipa_cedar	Cedar henipavirus	N	-	absence_expected	dna+protein	genome	0.60	0.88	single	gene_family	NCBI	Non-pathogenic henipavirus; presence argues against Nipah/Hendra.
+mers_ORF1a	Middle East respiratory syndrome-related coronavirus	ORF1a	upE	required	dna+protein	genome	0.60	0.90	single	gene_family	NCBI	upE and ORF1a are the established screening targets.
+mers_N	Middle East respiratory syndrome-related coronavirus	N	nucleocapsid	required	dna+protein	genome	0.60	0.90	single	gene_family	NCBI	Confirmatory target.
+mers_S	Middle East respiratory syndrome-related coronavirus	S	spike	discriminating	dna+protein+hmm	genome	0.50	0.85	single	gene_family	NCBI	Separates MERS-CoV from related bat merbecoviruses. Camelid reservoir - overlaps the animal pack.
+eeev_nsP	Eastern equine encephalitis virus	nsP1	nsP4	required	dna+protein+hmm	genome	0.60	0.85	single	gene_family	NCBI	Alphavirus non-structural polyprotein.
+eeev_E1	Eastern equine encephalitis virus	E1	E2	discriminating	dna+protein+hmm	genome	0.60	0.85	single	gene_family	NCBI	Separates EEEV from WEEV and VEEV. Overlaps the animal pack.
+#---- Free-living amoebae -------------------------------------------------
+nfow_18S	Naegleria fowleri	18S	SSU rRNA	required	dna	rDNA	0.80	0.98	multi	gene_in_organism	NCBI	Multi-copy. Discriminating positions vs N. gruberi and N. lovaniensis are few, hence the high identity floor.
+nfow_Mp2CL5	Naegleria fowleri	Mp2CL5	-	discriminating	dna	chromosome	0.70	0.96	single	gene_in_organism	NCBI	N. fowleri specific target. VERIFY at build.
+bmand_18S	Balamuthia mandrillaris	18S	SSU rRNA;16S mito	required	dna	rDNA	0.80	0.97	multi	gene_in_organism	NCBI	Often detected only by sequencing, so low read counts remain meaningful.
+bmand_mito	Balamuthia mandrillaris	mito	mitochondrial 16S	discriminating	dna	mitochondrion	0.70	0.96	multi	gene_in_organism	NCBI	Separates from Acanthamoeba.

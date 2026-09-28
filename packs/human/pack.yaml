@@ -50,6 +50,8 @@ confirm:
   # neighbours simultaneously, then assigned to best hit. Without this, a
   # common environmental relative reads out as its high-consequence cousin.
   competitive_mapping: true
+  # Marker tier (stage 2b). Built by scripts/build_marker_db.py --pack human.
+  markers_dir: "${db_root}/bioThreatFinder/packs/human/markers"
 
 # ---------------------------------------------------------------------------
 # Default confirmation thresholds (per-taxon overrides live in watchlist.tsv)
