@@ -15,7 +15,44 @@
 
 ## Next feature, in priority order
 
-### 1. Marker-gene / plasmid module (highest value)
+### DONE - Marker-gene / plasmid module
+Implemented in v0.2.0: 163 markers, 58 rule sets, three-valued rule engine,
+three evidence tiers (dna/protein/hmm). Every high_consequence taxon has a rule.
+See README for the design and validation. Remaining marker work:
+  * 31 notifiable taxa still have no rule
+  * curate_required markers: B. mallei absent regions, vaccinia-specific loci,
+    F. novicida discriminating loci, C. auris clades
+  * absence-region logic as a first-class marker class (B. mallei needs it)
+
+### 1. Benchmark harness (now the highest value - nothing is measured)
+Without ground truth, "accurate" is not assertable and every threshold is a guess.
+  * Simulated reads: ART / InSilicoSeq (Illumina), NanoSim / Badread (ONT)
+  * Deliberate near-neighbour spike-ins: B. cereus for anthracis, B. thailandensis
+    for pseudomallei, E. dispar for histolytica, vaccinia for variola, Reston for
+    Zaire, B. holmesii for pertussis
+  * Vaccine-strain spike-ins: BCG, vaccinia, Sabin, 17D, RB51, TC-83
+  * Mock communities (ZymoBIOMICS) and a spiked dilution series for limit of
+    detection per taxon
+  * Report sensitivity, specificity and LOD per taxon; commit the results
+
+### 2. Empirical null and calibrated FDR
+Replace fixed cutoffs with per-taxon background distributions from a panel of
+negative and unrelated metagenomes. Report a calibrated statistic alongside the
+interpretable gate breakdown.
+
+### 3. Accuracy upgrades to stages 1 and 2
+  * Stage 1: KrakenUniq (unique k-mer counts via HyperLogLog) or Metabuli
+    (joint DNA + amino acid) instead of Kraken2 alone - cuts species-level false
+    positives at the source
+  * Stage 2: multi-reference / pangenome bundles per taxon instead of one
+    reference, with skani for ANI-based assignment
+  * Assembly tier: metaSPAdes / Flye on candidate reads, then confirm on contigs
+
+### 4. Containerisation
+Pinned digests per process, Apptainer on HPC. Required before any result is
+defensible or publishable.
+
+### 5. Old priority - vaccine / attenuated-strain discrimination
 For several watchlist organisms the chromosome is NOT the actionable signal, so the
 current pipeline cannot make a defensible call:
 
@@ -35,9 +72,11 @@ Design: add a `markers/` directory per pack keyed by watchlist taxid, align cand
 reads against the marker set, and make `confirmed_in_silico` conditional on marker
 coverage where the watchlist demands it. This needs a new `requires_marker` column.
 
-### 2. Vaccine / attenuated-strain discrimination
-Vaccinia, BCG, Sabin, 17D, RB51, S19, TC-83, ERA/SAD-B19 are routine confounders.
-Currently only a free-text caveat. Should be explicit competitive references.
+Partially DONE: vaccine_strain markers and a `vaccine_if` rule exist for BCG,
+RB51/S19, Sabin, 17D, Candid#1, TC-83, MP-12/Clone 13, measles Edmonston and
+rabies ERA/SAD. Still needed: curated vaccinia-specific loci (the dominant
+variola false positive), and explicit competitive references for each vaccine
+strain rather than marker motifs alone.
 
 ### 3. Read extraction for candidates
 An analyst cannot currently eyeball alignments. Emit per-finding BAM slices plus a

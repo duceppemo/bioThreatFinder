@@ -1,0 +1,492 @@
+# Marker gating rules - human health pack
+#
+# Keys are watchlist taxon names, exactly as in watchlist.tsv.
+# Expressions are evaluated by bin/marker_rules.py under three-valued logic:
+# a rule that depends on an untested marker returns UNKNOWN and HOLDS the finding
+# at `supported` rather than confirming or clearing it.
+#
+#   confirm_requires  must be TRUE to reach confirmed_in_silico
+#   support_requires  minimum marker evidence to reach supported
+#   veto_if           TRUE means the evidence points elsewhere - downgrade
+#   vaccine_if        TRUE means vaccine/attenuated strain, not wild type
+#   report_always     markers always surfaced (resistance, subtyping)
+#
+# Operators: and, or, not, present(x), absent(x), any_of(...), all_of(...),
+# n_of(k, ...). absent(x) is TRUE only when x was TESTED and not found.
+
+"Bacillus anthracis":
+    confirm_requires: (banth_pxo1_pagA or banth_pxo1_lef or banth_pxo1_cya) and (banth_pxo2_capB or banth_pxo2_capA)
+    support_requires: any_of(banth_pxo1_pagA, banth_pxo1_lef, banth_pxo1_cya, banth_pxo2_capB, banth_pxo2_capA, banth_chr_BA_sap)
+    veto_if: bcereus_chr_ces
+    rationale: >
+      The chromosome is near-identical across the B. cereus group, so chromosomal
+      breadth cannot confirm anthrax. Virulence needs both pXO1 (toxin) and pXO2
+      (capsule). A single plasmid is reportable as supported but is not anthrax -
+      pXO2-negative and pXO1-negative isolates both occur, and B. cereus
+      biovar anthracis carries anthrax-like plasmids.
+
+"Yersinia pestis":
+    confirm_requires: ypest_ppcp1_pla and (ypest_pmt1_caf1 or ypest_pmt1_ymt)
+    support_requires: any_of(ypest_ppcp1_pla, ypest_pmt1_caf1, ypest_pmt1_ymt, ypest_pcd1_lcrV)
+    veto_if: ypseudo_chr_inv
+    rationale: >
+      Chromosomal ANI to Y. pseudotuberculosis exceeds 97 percent, so plasmid
+      content is the discriminator. caf1 alone is not required because
+      F1-negative virulent strains are documented; ymt is accepted in its place.
+
+"Francisella tularensis":
+    confirm_requires: all_of(ftul_lpnA, ftul_fopA) and any_of(ftul_fupA, ftul_pdpD, ftul_RD1)
+    support_requires: any_of(ftul_lpnA, ftul_fopA)
+    veto_if: fnov_specific
+    rationale: >
+      lpnA and fopA are shared with the environmental F. novicida, so they
+      establish genus but cannot confirm species. At least one discriminating
+      locus is required. Subspecies matters clinically and fupA or pdpD speak
+      to it.
+
+"Burkholderia pseudomallei":
+    confirm_requires: bpseudo_TTS1
+    support_requires: any_of(bpseudo_TTS1, bpseudo_bimA)
+    veto_if: bthai_ara
+    rationale: >
+      B. thailandensis is common soil flora and the dominant false positive.
+      TTS1 is the established discriminating target; arabinose assimilation genes
+      argue for thailandensis instead.
+
+"Vibrio cholerae":
+    confirm_requires: vchol_ompW and any_of(vchol_ctxA, vchol_ctxB)
+    support_requires: vchol_ompW
+    report_always: vchol_wbeO1, vchol_wbfZ, vchol_tcpA
+    rationale: >
+      Non-toxigenic environmental V. cholerae is widespread. Species presence is
+      not notifiable cholera - toxigenicity via ctxAB is the actionable signal,
+      so species without toxin genes stops at supported.
+
+"Clostridium botulinum":
+    confirm_requires: cbot_bont
+    support_requires: any_of(cbot_bont, cbot_ntnh)
+    veto_if: cbut_bont
+    rationale: >
+      The species is polyphyletic and the actionable signal is the neurotoxin
+      cluster, which also occurs in C. butyricum and C. baratii. If the
+      butyricum-associated allele is what is present, report that organism
+      accurately rather than calling C. botulinum.
+
+"Escherichia coli":
+    confirm_requires: any_of(ecoli_stx1, ecoli_stx2, ecoli_eae, ecoli_aggR, ecoli_eltB_estA)
+    report_always: ecoli_ehxA
+    rationale: >
+      E. coli presence in a specimen is uninformative - it is commensal. Only a
+      defined pathotype is actionable, so confirmation is gated on virulence
+      loci rather than on species-level alignment.
+
+"Shigella dysenteriae":
+    confirm_requires: shig_ipaH and any_of(shig_virA, shig_stx1_Sd1)
+    support_requires: shig_ipaH
+    rationale: >
+      Shigella is genomically E. coli, so species-level separation from
+      metagenomes is unreliable. ipaH is multi-copy and cannot stand alone;
+      corroboration by a single-copy plasmid or toxin locus is required.
+
+"Corynebacterium diphtheriae":
+    confirm_requires: any_of(cdiph_dtxR, cdiph_rpoB) and cdiph_tox
+    support_requires: any_of(cdiph_dtxR, cdiph_rpoB)
+    rationale: >
+      Toxigenic infection is the notifiable event. tox is phage-borne, so a
+      non-toxigenic strain is correctly held at supported. tox is also carried by
+      C. ulcerans and C. pseudotuberculosis, hence the species anchor.
+
+"Bordetella pertussis":
+    confirm_requires: bpert_ptxA and absent(bholm_recA) and absent(bpara_IS1001)
+    support_requires: any_of(bpert_ptxA, bpert_IS481)
+    veto_if: bholm_recA or bpara_IS1001
+    rationale: >
+      IS481 is present at high copy number and is SHARED WITH B. holmesii, making
+      it the classic false positive in pertussis diagnostics. Confirmation
+      requires the single-copy ptxA plus confident absence of the two mimics.
+      Note the absent() calls - if holmesii was never tested the rule returns
+      UNKNOWN and the finding is held rather than confirmed.
+
+"Listeria monocytogenes":
+    confirm_requires: lmono_hly and lmono_prfA
+    support_requires: any_of(lmono_hly, lmono_prfA, lmono_inlA)
+    report_always: lmono_llsX, lmono_inlA
+    rationale: >
+      LIPI-1 discriminates from the frequent co-isolate L. innocua. inlA allele
+      matters because premature stop codons attenuate virulence.
+
+"Mycobacterium tuberculosis":
+    confirm_requires: mtb_rpoB and mtb_RD9
+    support_requires: any_of(mtb_rpoB, mtb_IS6110)
+    vaccine_if: absent(mtb_RD1) and mtb_rpoB
+    report_always: mtb_katG_inhA
+    rationale: >
+      MTBC members are roughly 99.9 percent identical, so region-of-difference
+      logic does the work that ANI cannot. RD9 is PRESENT in M. tuberculosis
+      sensu stricto and deleted in M. bovis, africanum and microti. RD1 is
+      DELETED IN BCG, so MTBC signal with RD1 absent indicates the vaccine
+      strain rather than disease. IS6110 is multi-copy and supporting only.
+
+"Brucella melitensis":
+    confirm_requires: bruc_BCSP31
+    support_requires: any_of(bruc_BCSP31, bruc_IS711)
+    report_always: bruc_omp2
+    rationale: >
+      Brucella species exceed 99 percent ANI, so species-level calls from
+      metagenomes are generally not defensible. Confirmation is deliberately at
+      GENUS level via BCSP31; species assignment is reported as advisory only.
+
+"Brucella abortus":
+    confirm_requires: bruc_BCSP31
+    support_requires: any_of(bruc_BCSP31, bruc_IS711)
+    vaccine_if: bruc_RB51_wboA or bruc_S19_eri
+    rationale: >
+      As for B. melitensis, plus vaccine-strain discrimination. RB51 and S19 are
+      live attenuated cattle vaccines and a realistic source of signal in
+      veterinary and abattoir-adjacent specimens.
+
+"Variola virus":
+    confirm_requires: all_of(orthopox_ATI, orthopox_crmB, orthopox_HA)
+    support_requires: any_of(orthopox_ATI, orthopox_crmB, orthopox_HA)
+    veto_if: vaccinia_specific
+    vaccine_if: vaccinia_specific
+    rationale: >
+      The highest-stakes call in the pack, so all three discriminating loci are
+      required rather than any one. Orthopoxviruses are highly collinear and
+      vaccinia - a live vaccine and a ubiquitous laboratory strain - is the
+      dominant false positive. Any credible variola signal should be escalated
+      immediately regardless of tier.
+
+"Zaire ebolavirus":
+    confirm_requires: ebola_NP and ebola_GP
+    support_requires: any_of(ebola_NP, ebola_GP)
+    rationale: >
+      GP carries the species-resolving signal, which is essential rather than
+      optional because Reston ebolavirus is not pathogenic to humans. The HMM
+      tier on both genes is what catches a divergent or novel filovirus lineage.
+
+"Crimean-Congo hemorrhagic fever orthonairovirus":
+    confirm_requires: cchf_L
+    rationale: >
+      CCHFV is exceptionally diverse, so identity floors are set low and the HMM
+      tier carries the detection. Strict nucleotide thresholds here would produce
+      false negatives on genuinely divergent strains.
+
+"Influenza A virus":
+    confirm_requires: flua_M
+    report_always: flua_HA_H5, flua_HA_H7, flua_HA_cleavage, flua_PB2_627K
+    rationale: >
+      The M gene confirms influenza A, but species is not the actionable unit -
+      subtype is. A polybasic HA cleavage site is a high-pathogenicity
+      determinant and is always reported, as are mammalian-adaptation markers in
+      PB2. Segment reassortment means subtype must come from a segment-aware
+      caller, not from whole-genome breadth.
+
+"Enterovirus C":
+    confirm_requires: polio_VP1
+    vaccine_if: polio_sabin
+    rationale: >
+      VP1 resolves serotype and wild-versus-vaccine. Sabin vaccine strains and
+      vaccine-derived polioviruses must be separated from wild type, since the
+      public-health response differs entirely.
+
+"Measles morbillivirus":
+    confirm_requires: measles_N
+    vaccine_if: measles_vaccine
+    rationale: >
+      Post-vaccination detection of the Edmonston-derived vaccine lineage is
+      common and must not be reported as measles disease.
+
+"Yellow fever virus":
+    vaccine_if: yf_17D
+    rationale: >
+      The 17D live vaccine is a frequent confounder in travel-associated
+      specimens.
+
+"Rabies lyssavirus":
+    confirm_requires: rabies_N
+    vaccine_if: rabies_vaccine
+    rationale: >
+      ERA, SAD-B19 and Pasteur vaccine strains are common laboratory and
+      wildlife-bait contaminants. N gene with the HMM tier resolves lyssavirus
+      species, which matters because several bat lyssaviruses are distinct.
+
+"Venezuelan equine encephalitis virus":
+    vaccine_if: veev_TC83
+    rationale: >
+      TC-83 is a live attenuated vaccine strain used in laboratory and
+      veterinary settings.
+
+"Coxiella burnetii":
+    confirm_requires: n_of(2, cburn_icd, cburn_com1, cburn_IS1111)
+    support_requires: any_of(cburn_icd, cburn_com1, cburn_IS1111)
+    rationale: >
+      Obligate intracellular and low biomass, so sensitivity matters. IS1111 is
+      multi-copy and sensitive but not specific alone, hence a two-of-three rule
+      that lets either single-copy gene corroborate it.
+
+"Leptospira interrogans":
+    confirm_requires: lepto_lipL32
+    report_always: lepto_secY
+    rationale: >
+      lipL32 is restricted to the pathogenic clade and absent from the
+      saprophytic L. biflexa, which is the key environmental discriminator.
+
+"Legionella pneumophila":
+    confirm_requires: lpneu_mip
+    report_always: lpneu_lag1
+    rationale: >
+      Water-system organisms can contaminate reagents, so control subtraction
+      matters as much as the marker here.
+
+"Neisseria meningitidis":
+    confirm_requires: nmen_ctrA and nmen_sodC
+    report_always: nmen_csb
+    rationale: >
+      Commensal Neisseria in the nasopharynx cross-map heavily. ctrA plus sodC
+      separates the pathogen; serogroup needs the capsule locus.
+
+"Haemophilus influenzae":
+    confirm_requires: hinf_hpd
+    report_always: hinf_bexA
+    rationale: >
+      hpd discriminates from the commensal mimic H. haemolyticus more reliably
+      than 16S.
+
+"Streptococcus pyogenes":
+    confirm_requires: spyo_speB
+    report_always: spyo_emm
+    rationale: >
+      Invasive disease is the notifiable event rather than carriage, which
+      sequence alone cannot establish. emm type is reported for epidemiology.
+
+"Rickettsia prowazekii":
+    confirm_requires: n_of(2, rprow_gltA, rprow_ompB, rprow_17kDa)
+    rationale: >
+      Obligate intracellular and low biomass. gltA and the 17 kDa antigen are
+      genus-level, so ompB is what resolves species - a two-of-three rule keeps
+      sensitivity without calling species on genus evidence alone.
+
+"Chlamydia psittaci":
+    confirm_requires: cpsit_ompA
+    report_always: cpsit_incA
+    rationale: >
+      ompA variable domains separate C. psittaci from C. abortus and
+      C. trachomatis. Zoonotic, so this overlaps the animal pack.
+
+"Entamoeba histolytica":
+    confirm_requires: ehist_ssu and any_of(ehist_srehp, ehist_hly)
+    support_requires: ehist_ssu
+    rationale: >
+      E. dispar is morphologically identical, non-pathogenic and the single most
+      important false positive in this genus. The discriminating rRNA positions
+      are few, so a pathogenicity-associated locus is required to confirm.
+
+"Trypanosoma brucei":
+    confirm_requires: tbg_TgsGP or tbr_SRA
+    rationale: >
+      T. b. brucei is not human-infective. TgsGP (gambiense) and SRA
+      (rhodesiense) are the markers that make the finding clinically meaningful,
+      so confirmation is gated on human-infective subspecies rather than species.
+
+"Plasmodium falciparum":
+    confirm_requires: pfal_18S
+    report_always: pfal_k13, pfal_hrp2, pfal_crt_dhfr
+    rationale: >
+      Species via multi-copy rRNA. Resistance markers are always reported:
+      kelch13 for artemisinin partial resistance, and hrp2/hrp3 DELETION because
+      it causes rapid-diagnostic-test failure and changes case detection.
+
+"Toxoplasma gondii":
+    confirm_requires: toxo_B1
+    report_always: toxo_GRA6
+    rationale: >
+      B1 and REP-529 are multi-copy and sensitive, and discriminate from the
+      non-pathogenic Hammondia hammondi which is roughly 99 percent identical.
+
+"Cryptosporidium parvum":
+    confirm_requires: crypto_ssu
+    report_always: crypto_gp60
+    rationale: >
+      parvum versus hominis drives the outbreak investigation - zoonotic against
+      anthroponotic transmission - and gp60 subtyping drives attribution.
+
+"Giardia intestinalis":
+    confirm_requires: giardia_tpi
+    rationale: >
+      Assemblages A and B are human-infective while C to H are animal, so
+      assemblage assignment is the meaningful output.
+
+"Leishmania donovani":
+    confirm_requires: leish_hsp70
+    rationale: >
+      The donovani/infantum complex is barely separable, so reporting is at
+      complex level.
+
+"Schistosoma mansoni":
+    confirm_requires: schisto_cox1
+    rationale: >
+      Mitochondrial and nuclear discordance reveals hybridisation with animal
+      schistosomes, which is documented and produces chimeric signal.
+
+"Aspergillus fumigatus":
+    report_always: afum_cyp51A
+    rationale: >
+      Ubiquitous airborne contaminant, so presence means little without clinical
+      context. Azole resistance via cyp51A is the actionable signal, and the
+      tandem-repeat promoter insertions need coverage-aware handling.
+
+"Candida auris":
+    report_always: cauris_ERG11, cauris_FKS1, cauris_clade
+    rationale: >
+      Outbreak-prone in healthcare settings. Echinocandin resistance via FKS1
+      materially limits treatment options, so resistance is reported alongside
+      every detection.
+
+"Cryptococcus gattii":
+    confirm_requires: cgatt_CAP59
+    rationale: >
+      C. gattii affects immunocompetent hosts, so separating it from
+      C. neoformans changes clinical interpretation. Endemic in BC and the
+      Pacific Northwest.
+
+"Pneumocystis jirovecii":
+    confirm_requires: pjiro_mtLSU
+    report_always: pjiro_DHPS
+    rationale: >
+      Cannot be cultured, so sequence detection is a primary route. Colonisation
+      versus disease is NOT resolvable by sequence and must not be implied.
+
+"Coccidioides immitis":
+    confirm_requires: cocci_Ag2
+    rationale: >
+      Genus-level confirmation. immitis versus posadasii separation needs
+      genome-wide data rather than a single marker.
+
+"Severe acute respiratory syndrome coronavirus 2":
+    confirm_requires: sars2_N_E
+    rationale: >
+      Ubiquitous, so laboratory and index-hopping contamination is the norm.
+      Control subtraction matters more than marker sensitivity here.
+
+# ---------------------------------------------------------------------------
+# Filoviruses, arenaviruses, bunyaviruses, henipaviruses, amoebae
+#
+# Identity floors here are deliberately LOW and the HMM tier carries the
+# detection. Strict nucleotide thresholds on these taxa buy specificity at the
+# cost of false negatives on divergent strains, which is the wrong trade for a
+# tool meant to catch a novel agent.
+#
+# For SEGMENTED viruses confirmation requires evidence from TWO segments. A
+# single-segment hit is a common artifact of database cross-mapping and of
+# reassortant or co-infecting relatives.
+# ---------------------------------------------------------------------------
+
+"Sudan ebolavirus":
+    confirm_requires: ebolaS_NP and ebolaS_GP
+    support_requires: any_of(ebolaS_NP, ebolaS_GP)
+    rationale: >
+      GP resolves species, which is essential because Reston ebolavirus is not
+      pathogenic to humans and Sudan and Zaire differ in case fatality and
+      countermeasure availability.
+
+"Marburg marburgvirus":
+    confirm_requires: n_of(2, marburg_NP, marburg_L, marburg_GP)
+    support_requires: any_of(marburg_NP, marburg_L, marburg_GP)
+    rationale: >
+      L is the most conserved filovirus gene and the best profile target; GP
+      separates Marburg from the Ravn lineage. Two of three keeps sensitivity on
+      a divergent lineage without confirming on one gene.
+
+"Lassa mammarenavirus":
+    confirm_requires: any_of(lassa_GPC, lassa_NP) and any_of(lassa_L, lassa_Z)
+    support_requires: any_of(lassa_GPC, lassa_NP, lassa_L, lassa_Z)
+    veto_if: lcmv_specific
+    rationale: >
+      Bi-segmented, so confirmation requires one S-segment and one L-segment
+      gene. Lassa lineages I-IV are highly divergent, which is why identity
+      floors are low. LCMV is a widespread rodent and laboratory-colony
+      arenavirus and the main Old World mimic.
+
+"Junin mammarenavirus":
+    confirm_requires: any_of(junin_GPC, junin_NP) and junin_L
+    support_requires: any_of(junin_GPC, junin_NP, junin_L)
+    vaccine_if: junin_Candid1
+    rationale: >
+      Bi-segmented, so one S-segment and one L-segment gene are required.
+      Candid#1 is a live attenuated vaccine used in Argentina and must not be
+      reported as wild-type Junin.
+
+"Rift Valley fever phlebovirus":
+    confirm_requires: n_of(2, rvfv_L, rvfv_Gn, rvfv_N)
+    support_requires: any_of(rvfv_L, rvfv_Gn, rvfv_N)
+    vaccine_if: rvfv_NSs_vaccine
+    rationale: >
+      Tri-segmented, so two segments are required. Clone 13 and MP-12 are
+      veterinary vaccines in endemic regions and a realistic source of signal.
+      Overlaps the animal pack.
+
+"Nipah henipavirus":
+    confirm_requires: any_of(nipah_N, nipah_L) and nipah_G
+    support_requires: any_of(nipah_N, nipah_L, nipah_G)
+    veto_if: henipa_cedar
+    rationale: >
+      G separates Nipah from Hendra and from the non-pathogenic Cedar virus, so
+      it is required rather than supporting. L carries the HMM signal for a
+      divergent henipavirus.
+
+"Hendra henipavirus":
+    confirm_requires: hendra_N and hendra_G
+    support_requires: any_of(hendra_N, hendra_G)
+    veto_if: henipa_cedar
+    rationale: >
+      G separates Hendra from Nipah. Equine reservoir means this overlaps the
+      animal pack.
+
+"Middle East respiratory syndrome-related coronavirus":
+    confirm_requires: any_of(mers_ORF1a, mers_N) and mers_S
+    support_requires: any_of(mers_ORF1a, mers_N)
+    rationale: >
+      S is required because related bat merbecoviruses share the conserved
+      screening targets. Camelid reservoir - overlaps the animal pack.
+
+"Eastern equine encephalitis virus":
+    confirm_requires: eeev_nsP and eeev_E1
+    support_requires: any_of(eeev_nsP, eeev_E1)
+    rationale: >
+      E1 and E2 separate EEEV from WEEV and VEEV, which co-circulate and
+      cross-map. Overlaps the animal pack.
+
+"Naegleria fowleri":
+    confirm_requires: nfow_18S and nfow_Mp2CL5
+    support_requires: nfow_18S
+    rationale: >
+      Free-living and present in water systems, so reagent contamination is
+      plausible. rRNA discriminating positions against N. gruberi and
+      N. lovaniensis are few, so a species-specific target is required.
+
+"Balamuthia mandrillaris":
+    confirm_requires: bmand_18S and bmand_mito
+    support_requires: bmand_18S
+    rationale: >
+      Rare and frequently detected only by sequencing, so low read counts remain
+      meaningful. The mitochondrial target separates it from Acanthamoeba.
+
+"Brucella suis":
+    confirm_requires: bruc_BCSP31
+    support_requires: any_of(bruc_BCSP31, bruc_IS711)
+    rationale: >
+      As for the other Brucella entries, confirmation is deliberately at GENUS
+      level - the species exceed 99 percent ANI and species-level calls from
+      metagenomes are not defensible.
+
+"Burkholderia mallei":
+    support_requires: any_of(bpseudo_TTS1, bpseudo_bimA)
+    veto_if: bthai_ara
+    rationale: >
+      DELIBERATELY HAS NO confirm_requires. B. mallei is a clonal deletion
+      derivative of B. pseudomallei and is therefore defined by the ABSENCE of
+      regions, which presence markers cannot express. Until the absent-region
+      coordinates are curated (see bmallei_deletions), this taxon cannot reach
+      confirmed_in_silico and will correctly cap at supported rather than
+      producing an unsupportable call.

@@ -22,6 +22,8 @@ include { KRAKEN2; BRACKEN; SYLPH_PROFILE   } from './modules/local/detect'
 include { PARSE_SCREEN                      } from './modules/local/detect'
 include { MINIMAP2_COMPETITIVE              } from './modules/local/detect'
 include { COVERAGE_STATS                    } from './modules/local/detect'
+include { MARKER_ALIGN_NT; MARKER_SEARCH_AA } from './modules/local/detect'
+include { MARKER_SEARCH_HMM; MARKER_EVIDENCE } from './modules/local/detect'
 include { SCORE_EVIDENCE; MAKE_REPORT       } from './modules/local/detect'
 
 // ---------------------------------------------------------------------------
@@ -243,6 +245,38 @@ workflow {
     MINIMAP2_COMPETITIVE(ch_confirm_in.present.map { meta, reads, ref, _row -> tuple(meta, reads, ref) })
     COVERAGE_STATS(MINIMAP2_COMPETITIVE.out.bam)
 
+    // -- Stage 2b: marker tier --------------------------------------------
+    // Run per sample, not per candidate: the marker DB is small, so one pass
+    // serves every taxon's rule more cheaply than a fan-out.
+    def no_file = file("${projectDir}/assets/NO_FILE")
+    if (params.skip_markers) {
+        ch_marker_states = Channel.empty()
+    } else {
+        ch_markers_dir = file(pack.confirm.markers_dir ?: "${pack.confirm.refs_dir}/../markers")
+        ch_marker_cat  = file("${pack.dir}/markers.tsv", checkIfExists: true)
+
+        MARKER_ALIGN_NT(ch_clean, ch_markers_dir)
+        MARKER_SEARCH_AA(ch_clean, ch_markers_dir)
+
+        if (params.skip_marker_hmm) {
+            ch_hmm = ch_clean.map { meta, _r -> tuple(meta, no_file) }
+        } else {
+            MARKER_SEARCH_HMM(MARKER_SEARCH_AA.out.hit_reads, ch_markers_dir)
+            ch_hmm = MARKER_SEARCH_HMM.out.hits
+        }
+
+        ch_marker_in = MARKER_ALIGN_NT.out.bam
+            .join(MARKER_SEARCH_AA.out.hits, remainder: true)
+            .join(ch_hmm, remainder: true)
+            .map { meta, bam, bai, aa, hmm ->
+                tuple(meta, bam ?: no_file, bai ?: no_file,
+                      aa ?: no_file, hmm ?: no_file)
+            }
+
+        MARKER_EVIDENCE(ch_marker_in, ch_marker_cat, ch_markers_dir)
+        ch_marker_states = MARKER_EVIDENCE.out.states
+    }
+
     // -- Evidence scoring, control subtraction, tiering -------------------
     SCORE_EVIDENCE(
         COVERAGE_STATS.out.stats.map { meta, tsv -> tsv }.collect().ifEmpty([]),
@@ -250,7 +284,9 @@ workflow {
         ch_missing_ref.map { meta, row -> "${meta.id}\t${meta.taxid}\t${meta.taxon}\tno_reference" }
             .collectFile(name: 'missing_refs.tsv', newLine: true).ifEmpty(file("${projectDir}/assets/NO_FILE")),
         ch_watchlist.first(),
-        file("${pack.dir}/pack.yaml")
+        file("${pack.dir}/pack.yaml"),
+        ch_marker_states.map { meta, tsv -> tsv }.collect().ifEmpty([]),
+        params.skip_markers ? no_file : file("${pack.dir}/marker_rules.yaml", checkIfExists: true)
     )
 
     MAKE_REPORT(

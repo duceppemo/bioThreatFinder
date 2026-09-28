@@ -249,6 +249,8 @@ process SCORE_EVIDENCE {
     path missing_refs
     path watchlist
     path pack_yaml
+    path marker_states
+    path marker_rules
 
     output:
     path "findings.tsv", emit: findings
@@ -258,11 +260,15 @@ process SCORE_EVIDENCE {
     def cov_arg  = coverage   ? "--coverage ${coverage.join(' ')}"     : ''
     def cand_arg = candidates ? "--candidates ${candidates.join(' ')}" : ''
     def miss_arg = missing_refs.name != 'NO_FILE' ? "--missing-refs ${missing_refs}" : ''
+    def mk_arg   = marker_states ? "--marker-evidence ${marker_states.join(' ')}" : ''
+    def mr_arg   = marker_rules.name != 'NO_FILE' ? "--marker-rules ${marker_rules}" : ''
     """
     score_evidence.py \\
         ${cov_arg} \\
         ${cand_arg} \\
         ${miss_arg} \\
+        ${mk_arg} \\
+        ${mr_arg} \\
         --watchlist ${watchlist} \\
         --pack-yaml ${pack_yaml} \\
         --control-ratio ${params.control_ratio} \\
@@ -300,5 +306,149 @@ process MAKE_REPORT {
         --command '${workflow.commandLine.replace("'", "")}' \\
         --html biothreatfinder_report.html \\
         --summary biothreatfinder_summary.tsv
+    """
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * Marker tier (stage 2b)
+ *
+ * Runs once per sample against the combined marker database rather than once
+ * per candidate taxon: the marker DB is small, so one pass is cheaper than a
+ * fan-out and gives every taxon's rule the evidence it needs.
+ *
+ * Three tiers, complementary rather than a consensus vote - see
+ * bin/marker_evidence.py for why.
+ * ---------------------------------------------------------------------------
+ */
+
+process MARKER_ALIGN_NT {
+    tag   "${meta.id}"
+    label 'process_medium'
+    conda "bioconda::minimap2=2.28 bioconda::samtools=1.20"
+
+    input:
+    tuple val(meta), path(reads)
+    path markers_dir
+
+    output:
+    tuple val(meta), path("${meta.id}.markers.nt.bam"), path("${meta.id}.markers.nt.bam.bai"), emit: bam
+
+    script:
+    def preset = meta.platform == 'illumina' ? 'sr' : 'map-ont'
+    """
+    # Markers are short (single genes / regions), so --secondary=no plus the
+    # MAPQ filter downstream is what keeps a paralogue from claiming a hit.
+    minimap2 -ax ${preset} -t ${task.cpus} --secondary=no \\
+        ${markers_dir}/markers.nt.fna ${reads} 2> mm2.log \\
+      | samtools sort -@ ${task.cpus} -o ${meta.id}.markers.nt.bam -
+    samtools index -@ ${task.cpus} ${meta.id}.markers.nt.bam
+    """
+}
+
+process MARKER_SEARCH_AA {
+    tag   "${meta.id}"
+    label 'process_high'
+    conda "bioconda::mmseqs2=15.6f452 bioconda::seqkit=2.8.2"
+
+    input:
+    tuple val(meta), path(reads)
+    path markers_dir
+
+    output:
+    tuple val(meta), path("${meta.id}.markers.aa.m8"), emit: hits
+    tuple val(meta), path("${meta.id}.marker_hit_reads.fasta.gz"), emit: hit_reads
+
+    script:
+    """
+    cat ${reads} > all.fastq.gz
+    seqkit fq2fa all.fastq.gz -o reads.fasta
+
+    # Translated search. This is the tier that sees through synonymous
+    # divergence, so an allele that nucleotide alignment misses is still found.
+    # -s 7.5 is near-maximum sensitivity; on an HPC node the cost is acceptable
+    # and a missed divergent toxin gene is not.
+    mmseqs easy-search reads.fasta ${markers_dir}/markers.aa.faa \\
+        ${meta.id}.markers.aa.m8 tmp_mmseqs \\
+        --threads ${task.cpus} \\
+        -s 7.5 \\
+        -e 1e-5 \\
+        --format-output 'query,target,fident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits' \\
+        2> mmseqs.log
+
+    # Reads with any marker-region hit, so the HMM tier runs on a small subset
+    # instead of the whole library. Six-frame translating every read would cost
+    # far more than it returns.
+    cut -f1 ${meta.id}.markers.aa.m8 | sort -u > hit_ids.txt || true
+    if [ -s hit_ids.txt ]; then
+        seqkit grep -f hit_ids.txt reads.fasta | gzip -c > ${meta.id}.marker_hit_reads.fasta.gz
+    else
+        : | gzip -c > ${meta.id}.marker_hit_reads.fasta.gz
+    fi
+    rm -rf tmp_mmseqs reads.fasta all.fastq.gz
+    """
+}
+
+process MARKER_SEARCH_HMM {
+    tag   "${meta.id}"
+    label 'process_medium'
+    conda "bioconda::hmmer=3.4 bioconda::seqkit=2.8.2"
+
+    input:
+    tuple val(meta), path(hit_reads)
+    path markers_dir
+
+    output:
+    tuple val(meta), path("${meta.id}.markers.hmm.domtbl"), emit: hits
+
+    // An empty hit set is a legitimate outcome, not a failure.
+    errorStrategy 'ignore'
+
+    script:
+    """
+    touch ${meta.id}.markers.hmm.domtbl
+    if [ -s ${hit_reads} ] && [ "\$(gzip -cd ${hit_reads} | head -c1 | wc -c)" != "0" ]; then
+        # Six-frame translation: read orientation and frame are unknown, and
+        # missing a frame would silently lose the hit the HMM tier exists for.
+        seqkit translate -f 6 --allow-unknown-codon ${hit_reads} -o translated.faa 2>> seqkit.log
+        if [ -s translated.faa ]; then
+            hmmsearch --cpu ${task.cpus} \\
+                --domtblout ${meta.id}.markers.hmm.domtbl \\
+                -E 1e-3 --domE 1e-3 \\
+                ${markers_dir}/markers.hmm translated.faa > hmmsearch.log 2>&1 || true
+        fi
+    fi
+    """
+}
+
+process MARKER_EVIDENCE {
+    tag   "${meta.id}"
+    label 'process_low'
+    conda "bioconda::samtools=1.20 conda-forge::python=3.11"
+    publishDir "${params.outdir}/markers", mode: params.publish_dir_mode
+
+    input:
+    tuple val(meta), path(nt_bam), path(nt_bai), path(aa_hits), path(hmm_hits)
+    path markers_catalogue
+    path markers_dir
+
+    output:
+    tuple val(meta), path("${meta.id}.marker_states.tsv"), emit: states
+    path "${meta.id}.marker.log"                         , emit: log
+
+    script:
+    def nt_arg  = nt_bam.name   != 'NO_FILE' ? "--nt-bam ${nt_bam}"     : ''
+    def aa_arg  = aa_hits.name  != 'NO_FILE' ? "--aa-hits ${aa_hits} --aa-fasta ${markers_dir}/markers.aa.faa" : ''
+    def hmm_arg = hmm_hits.name != 'NO_FILE' ? "--hmm-hits ${hmm_hits}" : ''
+    """
+    marker_evidence.py \\
+        --markers ${markers_catalogue} \\
+        --manifest ${markers_dir}/markers.manifest.tsv \\
+        --sample ${meta.id} \\
+        ${nt_arg} ${aa_arg} ${hmm_arg} \\
+        --mapq-min ${params.mapq_min} \\
+        --out ${meta.id}.marker_states.tsv \\
+        2> ${meta.id}.marker.log
+    cat ${meta.id}.marker.log >&2
     """
 }

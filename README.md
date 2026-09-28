@@ -60,6 +60,100 @@ gate decided it. Nothing is a bare verdict.
 | `control_background` | What the control itself contains (QC, not a finding) |
 | `screened_only` | Stage-1 lead that failed stage-2 — the expected fate of classifier noise |
 
+## Marker genes (stage 2b)
+
+For a large share of the watchlist, **the chromosome is not the actionable
+signal**, so alignment metrics alone cannot produce a defensible call:
+
+| Organism | What actually matters | Why breadth is not enough |
+|---|---|---|
+| *B. anthracis* | pXO1 toxin + pXO2 capsule | Chromosome is near-identical across the B. cereus group |
+| *Y. pestis* | pPCP1 / pMT1 plasmids | >97% chromosomal ANI to *Y. pseudotuberculosis* |
+| *C. botulinum* | BoNT cluster | Species is polyphyletic; cluster also in *C. butyricum* |
+| STEC | stx1 / stx2 / eae | *E. coli* presence is commensal and uninformative |
+| *V. cholerae* | ctxAB | Non-toxigenic environmental strains are widespread |
+| *C. diphtheriae* | tox | Phage-borne, not chromosomal |
+| *B. pertussis* | ptxA, not IS481 | IS481 is multi-copy and shared with *B. holmesii* |
+| MTBC | RD9 present / RD1 absent | Members are ~99.9% identical; RD1 absence means BCG vaccine |
+| *T. brucei* | TgsGP / SRA | *T. b. brucei* is not human-infective |
+| *A. fumigatus* | cyp51A alleles | Presence is meaningless; resistance is the finding |
+
+So a marker tier gates promotion to `confirmed_in_silico`. It runs three
+complementary evidence tiers per sample:
+
+- **dna** — read alignment to marker nucleotide sequence. Precise, blind to a
+  divergent allele.
+- **protein** — translated search (MMseqs2, high sensitivity). Sees through
+  synonymous divergence.
+- **hmm** — profile search. The remote-homology tier, and the reason a *novel*
+  BoNT or Stx subtype, or a divergent filovirus gene, is still caught. This is
+  what separates detecting a known strain from detecting a new agent.
+
+A marker is PRESENT if **any** tier passes. They are complementary, not a
+consensus vote — requiring agreement would discard exactly the sensitivity the
+protein and HMM tiers exist to provide.
+
+### Three-valued logic, and why it matters
+
+Rules are boolean expressions over marker IDs, evaluated under **Kleene
+three-valued logic** because a marker has three possible states, not two:
+
+```
+PRESENT   searched for, found above threshold
+ABSENT    searched for, confidently not found
+UNKNOWN   never actually searched
+```
+
+"Absent" is evidence. "Untested" is not. Collapsing them is a correctness bug
+with real consequences: it lets a gap in the marker database read as a negative
+result, so the pipeline would happily conclude *"RD1 absent, therefore BCG"* for
+a sample it never tested, or *"no pXO2, therefore not anthrax"* for a marker it
+never had.
+
+The consequence that does the work: `UNKNOWN and FALSE` is FALSE (one confident
+failure decides), but `UNKNOWN and TRUE` is UNKNOWN — you cannot claim success on
+untested evidence. **A rule evaluating to UNKNOWN never promotes a finding.** It
+holds it at `supported` and names the untested markers.
+
+`scripts/build_marker_db.py` writes a manifest recording, per marker, whether
+usable sequence was actually obtained. That manifest — not the absence of
+alignment hits — is what makes ABSENT calls legitimate.
+
+Rules are parsed by a recursive-descent parser, never `eval()`, so a rules file
+cannot execute code. Operators: `and or not present(x) absent(x) any_of(...)
+all_of(...) n_of(k, ...)`.
+
+```yaml
+"Bacillus anthracis":
+    confirm_requires: (banth_pxo1_pagA or banth_pxo1_lef or banth_pxo1_cya) and (banth_pxo2_capB or banth_pxo2_capA)
+    veto_if: bcereus_chr_ces
+```
+
+Validated behaviour — **identical** alignment evidence (breadth 0.38, occupancy
+0.60, 900 reads, beating neighbours 64:1) produces four different outcomes
+depending only on markers:
+
+| Marker state | Tier |
+|---|---|
+| pXO1 + pXO2 present | `confirmed_in_silico` |
+| pXO1 only, pXO2 confidently absent | `supported` — required markers not found |
+| pXO1 only, pXO2 **untested** | `supported` — marker evidence incomplete (database gap) |
+| pXO1 + pXO2 present, *B. cereus* cereulide also present | `marker_veto` |
+
+And MTBC with rpoB present, RD1 absent → `vaccine_strain` (BCG), not disease.
+
+Markers are **keyed by gene symbol, not accession**, for the same reason the
+watchlist is keyed by name: accession numbers written from memory are a
+fabrication risk in a file that gates a high-consequence call.
+`scripts/build_marker_db.py` resolves each row to real sequence and records the
+accession, source and retrieval date.
+
+Coverage: 163 markers, 58 rule sets over 89 watchlist taxa. **Every
+`high_consequence` taxon has a rule.** *B. mallei* deliberately has no
+`confirm_requires` — it is a clonal deletion derivative defined by ABSENT
+regions, which presence markers cannot express, so it correctly caps at
+`supported` rather than producing an unsupportable call.
+
 ## Domain packs
 
 You were right that one database for all three domains would be unusable. The
@@ -180,12 +274,24 @@ results/
   pipeline_info/    timeline, trace, DAG
 ```
 
+## Target platform
+
+Design targets, set deliberately rather than by what happened to be installed:
+
+- **HPC cluster** (SLURM/PBS). Nextflow handles the executor natively. This is
+  what makes the translated-search and assembly tiers affordable.
+- **Containers with pinned versions**, not loose conda specs. A method you may
+  need to defend cannot depend on how a solver felt that day.
+- **Novel and divergent agents in scope.** Nucleotide k-mers alone miss a
+  divergent relative of a known threat entirely, which is the wrong failure mode
+  for this tool. Hence the protein and HMM tiers.
+
 ## Requirements
 
-- **Nextflow >= 23.10** — the version currently on this box is 21.10.4 and
-  needs upgrading
-- conda/mamba (all tool envs are declared per process)
-- ~200 GB RAM for a PlusPF-scale Kraken2 index; everything else is modest
+- **Nextflow >= 23.10** — the version on this box is 21.10.4 and needs upgrading
+- Containers (Apptainer/Singularity on HPC); conda specs exist for development
+- ~200 GB RAM for a PlusPF-scale Kraken2 index; MMseqs2 sensitivity settings
+  dominate CPU time
 - Analysis scripts in `bin/` are **stdlib-only Python 3** plus `samtools`, so
   they run in whatever env the pipeline hands them
 
@@ -197,16 +303,36 @@ v0.1.0 — scaffold complete and internally validated:
 - Evidence tiering validated against synthetic fixtures covering every decision
   path (true positive, conserved-repeat artifact, neighbour attribution, control
   suppression, database gap, weak lead)
+- Marker rule engine: three-valued logic self-test passes, including
+  present/absent/untested separation, operator precedence, parser rejection of
+  malformed input, and no code execution
+- Marker gating validated end to end: 6/6 synthetic cases, including anthrax held
+  back for missing plasmids and BCG identified as vaccine strain
+- All 58 rule sets compile, reference only catalogue markers, and name only real
+  watchlist taxa
 - Nextflow config and workflow graph parse
 
 Not yet run on real sequencing data, and no databases built yet.
 
 ### Known gaps
 
+- **Nothing is measured.** Every threshold is a reasoned guess until the
+  benchmark harness exists. No accuracy claim is assertable yet.
+- Calling is fixed-threshold; the intended design is an empirical null built from
+  a background panel, giving calibrated FDR instead of guessed cutoffs
+- No assembly tier. A contig spanning pPCP1 is far stronger evidence than 50
+  scattered reads
+- Single reference genome per taxon; intraspecies diversity means breadth
+  understates a divergent strain. Multi-reference/pangenome bundles are the
+  accurate version
+- Stage 1 is Kraken2-based; KrakenUniq or Metabuli would cut species-level false
+  positives at the source instead of leaving it all to stage 2
 - Animal and plant packs are directory stubs — no watchlist or host genomes
-- Marker-gene and plasmid logic is specified in the watchlist notes but not yet
-  implemented, so calls for *B. anthracis*, *C. botulinum*, STEC and toxigenic
-  *V. cholerae* are not yet defensible
+- 31 of 89 watchlist taxa have no marker rule (all `notifiable`, none
+  `high_consequence`)
+- Several markers are flagged `curate_required` and cannot be automated:
+  *B. mallei* absent regions, vaccinia-specific loci, *F. novicida* discriminating
+  loci, *C. auris* clades
 - Influenza A segment-aware subtyping is out of scope and needs a dedicated
   subtyper
 - No AMR characterisation (CARD/ResFinder/DeepARG are already on this box and

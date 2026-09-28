@@ -32,12 +32,18 @@ TIERS = [
      "Met every alignment threshold. Requires orthogonal laboratory confirmation."),
     ("supported", "Supported",
      "Real alignment evidence present but below the confirmation bar."),
+    ("vaccine_strain", "Vaccine or attenuated strain",
+     "Marker evidence indicates a vaccine or attenuated strain rather than wild "
+     "type. Actionable as a stand-down, not as disease."),
     ("no_reference", "Not assessed - database gap",
      "On the watchlist and raised by the screen, but no reference genome was "
      "available, so confirmation could not run. This is NOT a negative result."),
     ("suppressed_control", "Suppressed by control",
      "Detected at a level comparable to a negative control. Treated as reagent "
      "or index contamination."),
+    ("marker_veto", "Vetoed by marker evidence",
+     "A marker arguing against the target was found - a neighbour-specific gene, "
+     "or a region the target is known to lack."),
     ("attributed_to_neighbour", "Attributed to a near neighbour",
      "Reads aligned better to a related organism than to the watchlist target."),
     ("control_background", "Negative-control background",
@@ -56,6 +62,8 @@ TIER_TONE = {
     "attributed_to_neighbour": "muted",
     "screened_only": "muted",
     "control_background": "muted",
+    "marker_veto": "muted",
+    "vaccine_strain": "gap",
 }
 
 CSS = """
@@ -165,6 +173,7 @@ def render_table(rows: list[dict]) -> str:
         ("mean_depth", "Depth", "num"), ("depth_cv", "Depth CV", "num"),
         ("mean_identity", "Identity", "num"), ("neighbour_ratio", "Nb ratio", "num"),
         ("orthogonal_concordance", "Sylph", ""),
+        ("marker_verdict", "Marker rules", "why"),
         ("reasons", "Why this tier", "why"),
         ("taxon_notes", "Taxon caveats", "note"),
     ]
