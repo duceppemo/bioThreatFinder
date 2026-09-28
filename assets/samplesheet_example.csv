@@ -1,0 +1,4 @@
+sample,platform,fastq_1,fastq_2,role
+SPEC001,illumina,/data/SPEC001_R1.fastq.gz,/data/SPEC001_R2.fastq.gz,sample
+SPEC002,ont,/data/SPEC002.fastq.gz,,sample
+NTC01,illumina,/data/NTC01_R1.fastq.gz,/data/NTC01_R2.fastq.gz,control

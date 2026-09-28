@@ -1,0 +1,326 @@
+#!/usr/bin/env python3
+"""
+Resolve a bioThreatFinder watchlist from names to NCBI taxonomy IDs.
+
+Why this exists
+---------------
+Watchlists keyed by taxid rot. NCBI merges, splits and retires nodes; a stale
+taxid silently stops matching and the organism drops out of screening with no
+error. So watchlists are keyed by NAME and resolved against a pinned local
+taxdump at build time. Anything that does not resolve to exactly one node is a
+hard error with candidates printed, so a human fixes it deliberately.
+
+Also emits, for each watchlist taxon, the full set of descendant taxids. Kraken2
+assigns reads to internal nodes (often genus or above), so matching only the
+species taxid misses most of the signal.
+
+Usage
+-----
+  resolve_watchlist.py --watchlist packs/human/watchlist.tsv \\
+                       --taxdump /media/36tb/db/taxdump \\
+                       --out packs/human/watchlist.resolved.tsv
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+REQUIRED_COLUMNS = [
+    "name", "rank", "group", "category",
+    "min_unique_reads", "min_breadth", "near_neighbours", "notes", "source",
+]
+
+# NCBI name classes we accept, in order of preference. A scientific name always
+# wins; synonyms are accepted because virus and fungal taxonomy churns and the
+# official disease lists lag NCBI by years.
+NAME_CLASS_PREFERENCE = [
+    "scientific name",
+    "equivalent name",
+    "synonym",
+    "genbank synonym",
+    "includes",
+]
+
+
+def read_watchlist(path: Path) -> list[dict]:
+    rows = []
+    with path.open() as fh:
+        lines = [ln for ln in fh if not ln.startswith("#")]
+    if not lines:
+        sys.exit(f"ERROR: {path} contains no non-comment lines")
+    reader = csv.DictReader(lines, delimiter="\t")
+    missing = [c for c in REQUIRED_COLUMNS if c not in (reader.fieldnames or [])]
+    if missing:
+        sys.exit(f"ERROR: {path} is missing required columns: {', '.join(missing)}")
+    for i, row in enumerate(reader, start=2):
+        name = (row.get("name") or "").strip()
+        if not name:
+            continue
+        row["name"] = name
+        row["_line"] = i
+        rows.append(row)
+    if not rows:
+        sys.exit(f"ERROR: {path} yielded no watchlist entries")
+    return rows
+
+
+def load_names(taxdump: Path) -> dict[str, list[tuple[int, str]]]:
+    """Map lowercased name -> [(taxid, name_class), ...]."""
+    names_dmp = taxdump / "names.dmp"
+    if not names_dmp.exists():
+        sys.exit(f"ERROR: {names_dmp} not found. Point --taxdump at an unpacked NCBI taxdump.")
+    index: dict[str, list[tuple[int, str]]] = defaultdict(list)
+    with names_dmp.open(encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) < 4:
+                continue
+            try:
+                taxid = int(parts[0])
+            except ValueError:
+                continue
+            index[parts[1].lower()].append((taxid, parts[3]))
+    return index
+
+
+def load_nodes(taxdump: Path) -> tuple[dict[int, int], dict[int, str]]:
+    """Return (child -> parent, taxid -> rank)."""
+    nodes_dmp = taxdump / "nodes.dmp"
+    if not nodes_dmp.exists():
+        sys.exit(f"ERROR: {nodes_dmp} not found")
+    parent: dict[int, int] = {}
+    rank: dict[int, str] = {}
+    with nodes_dmp.open(encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) < 3:
+                continue
+            try:
+                tid, pid = int(parts[0]), int(parts[1])
+            except ValueError:
+                continue
+            parent[tid] = pid
+            rank[tid] = parts[2]
+    return parent, rank
+
+
+def load_merged(taxdump: Path) -> dict[int, int]:
+    """Old taxid -> current taxid, so historical lists keep working."""
+    merged = taxdump / "merged.dmp"
+    out: dict[int, int] = {}
+    if not merged.exists():
+        return out
+    with merged.open() as fh:
+        for line in fh:
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) >= 2:
+                try:
+                    out[int(parts[0])] = int(parts[1])
+                except ValueError:
+                    pass
+    return out
+
+
+def build_children(parent: dict[int, int]) -> dict[int, list[int]]:
+    children: dict[int, list[int]] = defaultdict(list)
+    for child, par in parent.items():
+        if child != par:
+            children[par].append(child)
+    return children
+
+
+def descendants(taxid: int, children: dict[int, list[int]]) -> set[int]:
+    """Iterative DFS - the tree is deep enough that recursion is a real risk."""
+    seen = {taxid}
+    stack = [taxid]
+    while stack:
+        node = stack.pop()
+        for kid in children.get(node, ()):
+            if kid not in seen:
+                seen.add(kid)
+                stack.append(kid)
+    return seen
+
+
+def resolve_one(name: str, names_idx, rank_of, expected_rank: str):
+    """Resolve a single name. Returns (taxid, note) or raises ValueError."""
+    hits = names_idx.get(name.lower())
+    if not hits:
+        raise ValueError(f"no taxonomy node matches name {name!r}")
+
+    # Collapse to unique taxids, keeping the best name class per taxid.
+    best: dict[int, str] = {}
+    for taxid, name_class in hits:
+        cur = best.get(taxid)
+        if cur is None:
+            best[taxid] = name_class
+            continue
+        def pref(nc: str) -> int:
+            return NAME_CLASS_PREFERENCE.index(nc) if nc in NAME_CLASS_PREFERENCE else 99
+        if pref(name_class) < pref(cur):
+            best[taxid] = name_class
+
+    accepted = {t: nc for t, nc in best.items() if nc in NAME_CLASS_PREFERENCE}
+    if not accepted:
+        classes = sorted(set(best.values()))
+        raise ValueError(
+            f"name {name!r} exists but only as {classes}; not an accepted name class"
+        )
+
+    if len(accepted) == 1:
+        taxid, name_class = next(iter(accepted.items()))
+        note = "" if name_class == "scientific name" else f"matched via {name_class}"
+        return taxid, note
+
+    # Ambiguous. Try to break the tie on the expected rank.
+    by_rank = {t: nc for t, nc in accepted.items()
+               if rank_of.get(t, "no rank") == expected_rank}
+    if len(by_rank) == 1:
+        taxid, name_class = next(iter(by_rank.items()))
+        note = f"ambiguous name disambiguated by rank={expected_rank}"
+        return taxid, note
+
+    # Then on name class - a scientific name beats a synonym.
+    sci = {t: nc for t, nc in accepted.items() if nc == "scientific name"}
+    if len(sci) == 1:
+        taxid = next(iter(sci))
+        return taxid, "ambiguous name disambiguated by scientific-name class"
+
+    detail = ", ".join(
+        f"{t} (rank={rank_of.get(t, '?')}, class={nc})"
+        for t, nc in sorted(accepted.items())
+    )
+    raise ValueError(f"name {name!r} is ambiguous across {len(accepted)} nodes: {detail}")
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--watchlist", required=True, type=Path)
+    ap.add_argument("--taxdump", required=True, type=Path)
+    ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--descendants-out", type=Path,
+                    help="optional TSV of watchlist_taxid -> descendant taxid")
+    ap.add_argument("--allow-unresolved", action="store_true",
+                    help="warn instead of failing on unresolved names (NOT for operational use)")
+    args = ap.parse_args()
+
+    rows = read_watchlist(args.watchlist)
+    sys.stderr.write(f"[resolve] {len(rows)} watchlist entries from {args.watchlist}\n")
+
+    sys.stderr.write(f"[resolve] loading taxonomy from {args.taxdump}\n")
+    names_idx = load_names(args.taxdump)
+    parent, rank_of = load_nodes(args.taxdump)
+    merged = load_merged(args.taxdump)
+    children = build_children(parent)
+    sys.stderr.write(f"[resolve] {len(parent)} taxonomy nodes, {len(merged)} merged ids\n")
+
+    resolved: list[dict] = []
+    failures: list[str] = []
+
+    for row in rows:
+        try:
+            taxid, note = resolve_one(row["name"], names_idx, rank_of, row["rank"].strip())
+        except ValueError as exc:
+            failures.append(f"  line {row['_line']}: {exc}")
+            continue
+
+        taxid = merged.get(taxid, taxid)
+        actual_rank = rank_of.get(taxid, "no rank")
+        if actual_rank != row["rank"].strip():
+            note = (note + "; " if note else "") + \
+                   f"rank is {actual_rank}, watchlist expected {row['rank'].strip()}"
+
+        desc = descendants(taxid, children)
+
+        # Near neighbours are advisory - a missing one degrades competitive
+        # mapping but must not block the run.
+        nn_names = [n.strip() for n in (row.get("near_neighbours") or "").split(";")
+                    if n.strip() and n.strip() != "-"]
+        nn_taxids, nn_missing = [], []
+        for nn in nn_names:
+            try:
+                nn_taxid, _ = resolve_one(nn, names_idx, rank_of, "species")
+                nn_taxids.append(str(merged.get(nn_taxid, nn_taxid)))
+            except ValueError:
+                nn_missing.append(nn)
+        if nn_missing:
+            note = (note + "; " if note else "") + \
+                   f"unresolved near neighbours: {', '.join(nn_missing)}"
+
+        resolved.append({
+            "taxid": taxid,
+            "name": row["name"],
+            "resolved_rank": actual_rank,
+            "group": row["group"],
+            "category": row["category"],
+            "min_unique_reads": row["min_unique_reads"],
+            "min_breadth": row["min_breadth"],
+            "near_neighbour_taxids": ";".join(nn_taxids),
+            "n_descendants": len(desc),
+            "notes": row["notes"],
+            "source": row["source"],
+            "resolution_note": note,
+            "_descendants": desc,
+        })
+
+    if failures:
+        sys.stderr.write(
+            f"\n{'WARNING' if args.allow_unresolved else 'ERROR'}: "
+            f"{len(failures)} watchlist entries did not resolve:\n"
+        )
+        sys.stderr.write("\n".join(failures) + "\n")
+        sys.stderr.write(
+            "\nFix the names in the watchlist, or update the taxdump. Names must match\n"
+            "NCBI taxonomy exactly (scientific name or accepted synonym).\n"
+        )
+        if not args.allow_unresolved:
+            return 1
+
+    # Warn on duplicates - two watchlist rows mapping to one node means
+    # conflicting thresholds and a double-counted report.
+    seen: dict[int, str] = {}
+    for r in resolved:
+        if r["taxid"] in seen:
+            sys.stderr.write(
+                f"WARNING: {r['name']!r} and {seen[r['taxid']]!r} both resolve to "
+                f"taxid {r['taxid']}\n"
+            )
+        else:
+            seen[r["taxid"]] = r["name"]
+
+    cols = [c for c in resolved[0] if not c.startswith("_")] if resolved else []
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    with args.out.open("w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=cols, delimiter="\t", extrasaction="ignore")
+        w.writeheader()
+        for r in resolved:
+            w.writerow(r)
+    sys.stderr.write(f"[resolve] wrote {len(resolved)} resolved entries to {args.out}\n")
+
+    if args.descendants_out:
+        with args.descendants_out.open("w") as fh:
+            fh.write("watchlist_taxid\twatchlist_name\tdescendant_taxid\n")
+            for r in resolved:
+                for d in sorted(r["_descendants"]):
+                    fh.write(f"{r['taxid']}\t{r['name']}\t{d}\n")
+        total = sum(len(r["_descendants"]) for r in resolved)
+        sys.stderr.write(
+            f"[resolve] wrote {total} descendant mappings to {args.descendants_out}\n"
+        )
+
+    notes = [r for r in resolved if r["resolution_note"]]
+    if notes:
+        sys.stderr.write(f"\n[resolve] {len(notes)} entries resolved with notes:\n")
+        for r in notes:
+            sys.stderr.write(f"  {r['name']} -> {r['taxid']}: {r['resolution_note']}\n")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

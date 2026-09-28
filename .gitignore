@@ -1,0 +1,6 @@
+work/
+results/
+.nextflow*
+packs/*/watchlist.descendants.tsv
+__pycache__/
+*.pyc

@@ -1,0 +1,76 @@
+# bioThreatFinder domain pack: human health
+#
+# A pack is DATA, not code. Adding or retargeting a domain means editing this
+# file plus its watchlist - never the pipeline.
+
+name: human
+description: >
+  High-consequence and notifiable human pathogens. Intended for public-health
+  and clinical-adjacent metagenomic screening.
+
+# ---------------------------------------------------------------------------
+# Host depletion
+# ---------------------------------------------------------------------------
+# Reads matching the host are removed before classification. T2T-CHM13 is
+# preferred over GRCh38: it closes the gaps that otherwise leak host reads into
+# bacterial bins (centromeric/satellite repeats are a notorious source of
+# spurious hits).
+host:
+  label: Homo sapiens
+  taxid: 9606
+  # Built by scripts/fetch_host_genome.sh human
+  fasta: "${db_root}/bioThreatFinder/host/human/chm13v2.0.fa.gz"
+  minimap2_index_sr: "${db_root}/bioThreatFinder/host/human/chm13v2.0.sr.mmi"
+  minimap2_index_lr: "${db_root}/bioThreatFinder/host/human/chm13v2.0.map-ont.mmi"
+  # Human reads are the bulk of most clinical specimens; keep them out of the
+  # published output by default. Set to true only for validation runs.
+  retain_host_reads: false
+
+# ---------------------------------------------------------------------------
+# Stage 1: broad screen
+# ---------------------------------------------------------------------------
+screen:
+  # Shared across packs - one general-purpose index answers "what is in here".
+  kraken2_db: "${db_root}/bioThreatFinder/kraken2/pluspf"
+  # Orthogonal, ANI-based, very low false-positive rate for bacteria/archaea.
+  sylph_db: "${db_root}/sylph/gtdb-r220-c200-dbv1.syldb"
+  # Eukaryotic pathogens (parasites, fungi) are poorly served by GTDB; rely on
+  # Kraken2 PlusPF plus stage-2 alignment for these.
+  eukaryote_strategy: kraken2_then_align
+
+# ---------------------------------------------------------------------------
+# Stage 2: targeted confirmation
+# ---------------------------------------------------------------------------
+confirm:
+  # Curated reference genomes for watchlist taxa + their near neighbours.
+  # Built by scripts/build_pack_refs.py --pack human
+  refs_dir: "${db_root}/bioThreatFinder/packs/human/refs"
+  refs_manifest: "${db_root}/bioThreatFinder/packs/human/refs/manifest.tsv"
+  # Competitive mapping: reads are mapped against the target AND its near
+  # neighbours simultaneously, then assigned to best hit. Without this, a
+  # common environmental relative reads out as its high-consequence cousin.
+  competitive_mapping: true
+
+# ---------------------------------------------------------------------------
+# Default confirmation thresholds (per-taxon overrides live in watchlist.tsv)
+# ---------------------------------------------------------------------------
+thresholds:
+  min_unique_reads: 20
+  min_breadth: 0.10
+  max_depth_cv: 2.5
+  min_read_identity: 0.90
+  mapq_min: 10
+
+# ---------------------------------------------------------------------------
+# Reporting
+# ---------------------------------------------------------------------------
+reporting:
+  watchlist: watchlist.tsv
+  # Every finding carries this. The pipeline produces analytical evidence, not
+  # a diagnosis or a notification decision.
+  disclaimer: >
+    In-silico screening result. Sequence-based detection alone does not
+    establish presence of viable organism, infection, or exposure. All findings
+    require orthogonal laboratory confirmation and interpretation by a
+    qualified laboratorian before any clinical or public-health action.
+  escalate_tiers: [confirmed_in_silico, supported]
