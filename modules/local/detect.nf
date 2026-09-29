@@ -552,24 +552,44 @@ process MARKER_SEARCH_AA {
     # divergence, so an allele that nucleotide alignment misses is still found.
     # -s 7.5 is near-maximum sensitivity; on an HPC node the cost is acceptable
     # and a missed divergent toxin gene is not.
+    # THE HMM TIER MUST SEE MORE THAN THE PROTEIN TIER ALREADY FOUND.
+    #
+    # hit_reads used to be built from this search at -e 1e-5, i.e. only reads the
+    # protein tier had ALREADY called a hit on. MARKER_SEARCH_HMM therefore ran on a
+    # subset of what the protein tier found and could only ever confirm a subset of it -
+    # so a read divergent enough to NEED a profile search never reached hmmsearch, and
+    # the marker came back ABSENT with no indication the HMM tier had never seen it.
+    # The README describes this tier as "the reason a novel BoNT or Stx subtype, or a
+    # divergent filovirus gene, is still caught", which as wired it structurally could
+    # not do.
+    #
+    # One search at the LOOSE cutoff, then two views of it: rows at or below
+    # marker_aa_evalue are the protein tier's hits (unchanged semantics), while the
+    # candidate read set for the HMM tier comes from every row. Same compute as before -
+    # the cost is in the search, not the cutoff.
     mmseqs easy-search reads.fasta ${markers_dir}/markers.aa.faa \\
-        ${meta.id}.markers.aa.m8 tmp_mmseqs \\
+        all_hits.m8 tmp_mmseqs \\
         --threads ${task.cpus} \\
         -s 7.5 \\
-        -e 1e-5 \\
+        -e ${params.marker_hmm_prefilter_evalue} \\
         --format-output 'query,target,fident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits' \\
         2> mmseqs.log
 
-    # Reads with any marker-region hit, so the HMM tier runs on a small subset
-    # instead of the whole library. Six-frame translating every read would cost
-    # far more than it returns.
-    cut -f1 ${meta.id}.markers.aa.m8 | sort -u > hit_ids.txt || true
+    # The protein tier's own hits: the strict cutoff, applied to the shared search.
+    awk -F'\\t' -v e=${params.marker_aa_evalue} \\
+        'NF >= 11 && (\$11 + 0) <= e' all_hits.m8 > ${meta.id}.markers.aa.m8 || true
+
+    # Candidate reads for the HMM tier: every row of the loose search, so a read too
+    # divergent to clear the protein cutoff still gets a profile search. Still a small
+    # subset of the library - six-frame translating every read would cost far more than
+    # it returns.
+    cut -f1 all_hits.m8 | sort -u > hit_ids.txt || true
     if [ -s hit_ids.txt ]; then
         seqkit grep -f hit_ids.txt reads.fasta | gzip -c > ${meta.id}.marker_hit_reads.fasta.gz
     else
         : | gzip -c > ${meta.id}.marker_hit_reads.fasta.gz
     fi
-    rm -rf tmp_mmseqs reads.fasta all.fastq.gz
+    rm -rf tmp_mmseqs reads.fasta all.fastq.gz all_hits.m8
     """
 }
 

@@ -273,6 +273,11 @@ def minimap2_mask_intervals(mm2: str, subject_fa: Path, query_fa: Path, reason: 
     return {k: merge_intervals(v) for k, v in per_seq.items()}
 
 
+# UniVec_Core carries ~2,300 sequences; anything near zero is a truncated download.
+# Deliberately loose - this is a structural sanity check, not a version pin.
+MIN_UNIVEC_SEQS = 100
+
+
 def bed_sources(path: Path) -> set[str]:
     """The sources recorded in an existing BED's header.
 
@@ -297,9 +302,24 @@ def bed_sources(path: Path) -> set[str]:
 
 def fetch_univec(dest: Path) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
+    # A TRUNCATED DOWNLOAD IS CACHED FOREVER.
+    #
+    # The skip was "exists and size > 0". shutil.copyfileobj over a dropped HTTPS
+    # connection can end short without raising, and the truncated UniVec would then be
+    # reused by every later run - quietly reducing vector masking, with a manifest
+    # column reading a smaller vector_bp that looks like a cleaner genome. UniVec_Core
+    # is ~1 MB and every record is a FASTA entry, so a cheap structural check catches
+    # the realistic failure.
     if dest.exists() and dest.stat().st_size > 0:
-        log(f"SKIP UniVec already present ({human(dest.stat().st_size)})")
-        return dest
+        n_seqs = sum(1 for _ in read_fasta(dest))
+        if n_seqs >= MIN_UNIVEC_SEQS:
+            log(f"SKIP UniVec already present ({human(dest.stat().st_size)}, "
+                f"{n_seqs} sequences)")
+            return dest
+        warn(f"cached {dest.name} holds only {n_seqs} sequence(s), below the "
+             f"{MIN_UNIVEC_SEQS} expected - treating it as a truncated download and "
+             f"re-fetching rather than masking against a partial vector set")
+        dest.unlink(missing_ok=True)
     log(f"downloading UniVec_Core from {UNIVEC_URL}")
     tmp = dest.with_suffix(dest.suffix + ".part")
     with urllib.request.urlopen(UNIVEC_URL, timeout=120) as r, tmp.open("wb") as out:
@@ -664,8 +684,12 @@ def main() -> int:
         tmp_bed.rename(bed_path)
 
         if args.hard_mask:
+            # .part + rename, like every other writer in this file. Written straight to
+            # the final path, an interrupt left a truncated .masked.fna.gz that looks
+            # like a valid gzip stream to anything that only checks existence.
             hm = mask_dir / f"{stem}.masked.fna.gz"
-            with gzip.open(hm, "wt") as out:
+            hm_tmp = hm.with_name(hm.name + ".part")
+            with gzip.open(hm_tmp, "wt") as out:
                 for cname, seq in seqs.items():
                     if contig_owner.get(cname) != owner:
                         continue
@@ -674,6 +698,7 @@ def main() -> int:
                         for j in range(a, min(b, len(lst))):
                             lst[j] = "N"
                     out.write(f">{cname}\n{''.join(lst)}\n")
+            hm_tmp.rename(hm)
 
         summary.append({
             "taxid": taxid, "name": name, "group": group, "role": r.get("role", ""),

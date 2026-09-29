@@ -14,8 +14,19 @@ tail -f /media/8tb/bioThreatFinder/logs/build_kraken2_<latest>.log
 
 | Job | State when handed off | How to tell it finished |
 |---|---|---|
-| **Kraken2 PlusPF build** | downloading libraries (~640 MB in; bacteria is the long pole) | log ends with the Bracken section and a SUMMARY; `hash.k2d` exists |
-| **Marker DB full pass** | recovering the manifest (see below) | `markers.manifest.tsv` has **163** rows |
+| **Kraken2 PlusPF build** | downloading the bacteria library (archaea 2.2 GB done, bacteria ~4.9 GB and growing) | log ends with the Bracken section and a SUMMARY; `hash.k2d` exists |
+| **Marker DB full pass** | **DONE** — 163 rows, `bmand_18S` is `built` | — |
+
+**Do not start a second build against a live one.** I did, and the two
+`kraken2-build --download-library bacteria` processes collided on the same staging
+directory (`rm: cannot remove 'all/': Directory not empty`). Two concurrent FTP
+transfers can interleave partial files into `library.fna`, and a corrupt reference in an
+index does not error — it misclassifies. All three DB builders now take an `flock` on the
+database directory and name the holder on refusal. Check for a live build first:
+
+```bash
+pgrep -af 'build_(kraken2|metabuli|krakenuniq)_db.sh'
+```
 
 If either died, both are resumable and skip completed work:
 
@@ -54,22 +65,46 @@ instead.
 |---|---|
 | `taxdump/2026-09-29/` | **pinned**, md5-verified, `PROVENANCE.txt` inside. 3,016,439 nodes |
 | `packs/human/refs/` | 89/89 targets, 359 genomes, 89 competitive bundles + 178 indexes, 43 GB. All bundles verified free of duplicated sequence |
-| `packs/human/refs/masked/` | complete — 20.0 Mbp masked (93.9 kb vector, 2.7 kb host, 79.7 kb cross-kingdom, rest low-complexity). No genome tripped `OVER_MASKED` |
+| `packs/human/refs/masked/` | complete — 20.0 Mbp masked. **Two rows need re-masking: see below.** Per-source byte totals in D5 were double-counted and are upper bounds, not a partition |
 | `host/human/` | T2T-CHM13v2.0 + sr and map-ont indexes, 17 GB |
-| `packs/human/markers/` | sequences intact (nt=143, aa=124, hmm=25); **manifest being rebuilt** |
+| `packs/human/markers/` | 163 manifest rows; 18 referenced by rules can only be UNKNOWN (5 failed, 4 curation_required, 9 motif_todo) — see the vaccine/veto note below |
 | `kraken2/pluspf/` | building |
 | `krakenuniq/`, `metabuli/` | not built. KrakenUniq is opt-in by design; Metabuli still pending a decision |
 
-## The one thing that was broken at handoff
+## Outstanding DATA fix: two reference genomes were never masked
 
-A `--only-marker` run **overwrote** `markers.manifest.tsv` with just the 19 rows it
-processed, destroying the record of the 131 already built. That matters more than it
-sounds: `marker_evidence.py` treats the manifest as *authoritative* for tested-vs-untested,
-so every missing row silently becomes UNKNOWN — which would have taken the whole marker
-tier offline while the sequence files sat intact on disk.
+*F. tularensis* subsp. *novicida* (264) and *Shigella* (620) each share one NCBI assembly
+with another watchlist taxon, so their FASTAs carry identical contig names. The masking
+pass attributed those contigs to the first genome, skipped the second, and wrote
+`genome_bp=0 masked_bp=0 flag=` rows with intervals-free BEDs — byte-identical in meaning
+to "examined and found clean". Both shipped BEDs are still in that state.
 
-Fixed (subset runs now merge, and refuse to continue if the existing manifest cannot be
-read) and a full pass is running to rebuild it. **On resume, confirm 163 rows.**
+The code is fixed (identical sequence is masked once and both BEDs written from that
+result, flagged `SHARED_SEQUENCE`; a name collision with *differing* sequence is now
+fatal). **The artifacts have not been regenerated**, because the host pass needs a
+minimap2 index of the 3.1 Gbp human genome and the Kraken2 build is using the machine.
+Run after Kraken2 finishes:
+
+```bash
+export PATH=/home/bioinfo/miniconda3/envs/btf-refs/bin:$PATH
+python3 scripts/mask_pack_refs.py --pack human --btf-db /media/8tb \
+        --only-taxid 264 --only-taxid 620 --threads 24
+```
+
+Then confirm both rows have non-zero `genome_bp` in `masked/mask_manifest.tsv`.
+
+## A behaviour change to be aware of: unevaluable vaccine and veto checks now cap the tier
+
+Cross-checking all 58 rule sets against the built manifest: 8 of 9 `vaccine_if` rules and
+6 `veto_if` rules reference markers that can only ever be UNKNOWN. Under Kleene logic
+UNKNOWN in those two rule types means *no downgrade* — the unsafe direction — so a Sabin
+vaccine strain satisfied Enterovirus C's `confirm_requires` and reached
+`confirmed_in_silico`: a vaccine strain reported as confirmed poliovirus.
+
+An unevaluable vaccine or veto check now holds the finding at `supported`. **This reduces
+confirmations**, deliberately: "supported, vaccine status untestable" costs a follow-up,
+"confirmed wild-type poliovirus" costs an outbreak response. Building the 9 `motif_todo`
+and 4 `curation_required` markers is what restores those confirmations.
 
 ## Environment facts worth not rediscovering
 
@@ -98,18 +133,22 @@ benchmark rather than assuming they are drop-in.
 
 ## Next steps, in order
 
-1. Confirm the marker manifest has 163 rows, and check `bmand_18S` specifically — it is a
-   `required` marker, so its failure makes *Balamuthia mandrillaris* unconfirmable, and
-   sequencing is often the only route to detecting it.
+1. **Run the pipeline end to end.** There is now one usable input: an ART-generated
+   Illumina positive control at
+   `/media/8tb/bioThreatFinder/simulated/plumbing/` — 2M reads, 5000 rpm *Y. pestis*,
+   94.6% host, truth row in `manifest.tsv`. Its ONT partner was cut off by a 1700 s
+   timeout and needs regenerating. Nothing in this project has ever processed real data
+   end to end, and that run will find more than any further static review: well over
+   thirty silent-failure bugs have been found so far, all sharing the shape "produces an
+   empty or degraded result indistinguishable from a clean negative".
 2. Wait out the Kraken2 build, then verify `--report-minimizer-data` actually produces
    the distinct-minimizer and duplicity columns on a real sample.
-3. Generate one small benchmark batch (`scripts/simulate_benchmark.py`) and run the
-   pipeline **end to end**. That first real run will find more problems than any further
-   design work — seven silent-failure bugs have been found so far and all of them shared
-   the shape "produces an empty or degraded result indistinguishable from a clean
-   negative".
-4. Then set thresholds from measurement instead of from the literature defaults
-   currently in `pack.yaml`.
+3. Re-mask taxids 264 and 620 (above).
+4. Then set thresholds from measurement. Three are explicitly PROVISIONAL and flagged in
+   the code: the ONT read-identity floors (D10), `--ont-identity-slack` in the marker
+   tier, and the read/breadth gate incoherence (D11) where **75 of 89** taxa have a
+   decorative `min_unique_reads` — up to 243x for *Schistosoma mansoni*. Run
+   `scripts/check_threshold_coherence.py` for the table.
 
 ## Still unresolved
 
@@ -122,4 +161,12 @@ benchmark rather than assuming they are drop-in.
 - *F. tularensis* vs *F. novicida* cannot currently be discriminated: both resolved to the
   same assembly and the duplicate was dropped. Needs a curated distinct assembly.
 - `curation_required` markers (4) and `motif_todo` markers (9) need manual work; they
-  cannot be automated.
+  cannot be automated. These are now load-bearing: they are most of the 18 markers that
+  make 8 vaccine rules and 6 veto rules inoperative (above).
+- `-profile test` has no sample data (`tests/data/samplesheet_test.csv` is a header
+  only). An empty samplesheet is now a hard error rather than a green run that analysed
+  nothing, but the profile still needs a real fixture and built databases to be useful.
+- `screen_summary.tsv` is published but reaches neither `SCORE_EVIDENCE` nor
+  `MAKE_REPORT`. For a taxon that *was* raised the classifier columns do travel into
+  `findings.tsv`; but if an `errorStrategy 'ignore'` arm were the only one that would
+  have raised a taxon, it is lost with no trace in the report.
