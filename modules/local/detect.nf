@@ -71,6 +71,11 @@ process BRACKEN {
     label 'process_low'
     conda "bioconda::bracken=2.9"
 
+    // Bracken fails outright when a report has no reads at the requested level.
+    // That is a legitimate outcome for a clean negative control, so it must not
+    // kill the run.
+    errorStrategy 'ignore'
+
     input:
     tuple val(meta), path(report)
     path db
@@ -78,11 +83,6 @@ process BRACKEN {
     output:
     tuple val(meta), path("${meta.id}.bracken.report.txt"), emit: report
     path "versions.yml"                                   , emit: versions
-
-    // Bracken fails outright when a report has no reads at the requested level.
-    // That is a legitimate outcome for a clean negative control, so it must not
-    // kill the run.
-    errorStrategy 'ignore'
 
     script:
     """
@@ -110,6 +110,8 @@ process SYLPH_PROFILE {
     label 'process_high'
     conda "bioconda::sylph=0.6.1"
 
+    errorStrategy 'ignore'
+
     input:
     tuple val(meta), path(reads)
     path db
@@ -117,8 +119,6 @@ process SYLPH_PROFILE {
     output:
     tuple val(meta), path("${meta.id}.sylph.tsv"), emit: profile
     path "versions.yml"                          , emit: versions
-
-    errorStrategy 'ignore'
 
     script:
     def input_args = meta.single_end ? "-r ${reads}" : "-1 ${reads[0]} -2 ${reads[1]}"
@@ -134,6 +134,124 @@ process SYLPH_PROFILE {
     """
 }
 
+/*
+ * ---------------------------------------------------------------------------
+ * Stage 1, primary arm: KrakenUniq
+ *
+ * The reason this replaces Kraken2 as primary: Kraken2 counts READS. It cannot
+ * distinguish 500 reads spread across a genome from 500 reads piled on a single
+ * conserved k-mer, and the second case is what a near neighbour or a low-complexity
+ * repeat produces. KrakenUniq additionally reports the DISTINCT k-mer cardinality
+ * per taxon (HyperLogLog), plus a duplication ratio and an estimated genome
+ * coverage. That turns a read count into evidence about breadth at stage 1,
+ * before any alignment compute is spent.
+ * ---------------------------------------------------------------------------
+ */
+process KRAKENUNIQ {
+    tag   "${meta.id}"
+    label 'process_krakenuniq'
+    conda "bioconda::krakenuniq=1.0.4"
+
+    input:
+    tuple val(meta), path(reads)
+    path db
+
+    output:
+    tuple val(meta), path("${meta.id}.krakenuniq.report.txt"), emit: report
+    tuple val(meta), path("${meta.id}.krakenuniq.output.txt.gz"), emit: classified_out
+    path "versions.yml"                                       , emit: versions
+
+    script:
+    def paired = meta.single_end ? '' : '--paired'
+    // VERIFY: --preload-size syntax against the installed krakenuniq version.
+    // Loading the hash into RAM once is dramatically faster per sample than
+    // memory-mapping it repeatedly, which matters across a benchmark batch.
+    def preload = params.krakenuniq_preload ? "--preload-size ${task.memory.toGiga() - 16}G" : ''
+    """
+    krakenuniq \
+        --db ${db} \
+        --threads ${task.cpus} \
+        ${paired} \
+        ${preload} \
+        --report-file ${meta.id}.krakenuniq.report.txt \
+        --output ${meta.id}.krakenuniq.output.txt \
+        ${reads} \
+        2> ${meta.id}.krakenuniq.log
+
+    # The per-read output is large and only needed for read extraction; keep it
+    # compressed rather than discarding it, so an analyst can pull the reads
+    # behind a finding later.
+    gzip -f ${meta.id}.krakenuniq.output.txt
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        krakenuniq: \$(krakenuniq --version 2>&1 | head -1 | sed 's/^.*version //')
+    END_VERSIONS
+    """
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * Stage 1, divergence arm: Metabuli
+ *
+ * Joint DNA + amino-acid k-mer classification. Nucleotide k-mers miss a divergent
+ * genome entirely - a novel orthopoxvirus or arenavirus at 75% nucleotide identity
+ * to anything in the database is essentially invisible to Kraken2/KrakenUniq, but
+ * conserved in protein space. Until this arm existed, only the marker tier could
+ * see through divergence, and only for curated markers.
+ * ---------------------------------------------------------------------------
+ */
+process METABULI {
+    tag   "${meta.id}"
+    label 'process_metabuli'
+    conda "bioconda::metabuli=1.0.6"
+
+    // A Metabuli failure must not sink the run: KrakenUniq remains primary and the
+    // screen parser records which classifiers actually produced output, so a
+    // missing arm is visible rather than silently reducing sensitivity.
+    errorStrategy 'ignore'
+
+    input:
+    tuple val(meta), path(reads)
+    path db
+
+    output:
+    tuple val(meta), path("${meta.id}.metabuli.report.tsv"), emit: report
+    path "versions.yml"                                    , emit: versions
+
+    script:
+    // VERIFY: --seq-mode values and the positional argument order against the
+    // installed Metabuli version. 1 = single-end, 2 = paired-end, 3 = long read.
+    def seq_mode = meta.single_end ? (meta.platform == 'ont' ? '3' : '1') : '2'
+    def input_args = meta.single_end ? "${reads}" : "${reads[0]} ${reads[1]}"
+    """
+    mkdir -p mb_out
+    metabuli classify \
+        --seq-mode ${seq_mode} \
+        --threads ${task.cpus} \
+        ${input_args} \
+        ${db} \
+        mb_out \
+        ${meta.id} \
+        2> ${meta.id}.metabuli.log
+
+    # VERIFY: output filename convention (<jobid>_report.tsv).
+    if [ -s mb_out/${meta.id}_report.tsv ]; then
+        cp mb_out/${meta.id}_report.tsv ${meta.id}.metabuli.report.tsv
+    else
+        # Produce an empty report rather than failing the task, so the join
+        # downstream still has a file and the parser records metabuli as absent.
+        : > ${meta.id}.metabuli.report.tsv
+        echo "WARNING: metabuli produced no report" >&2
+    fi
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        metabuli: \$(metabuli 2>&1 | grep -i version | head -1 | sed 's/^.*ersion[: ]*//')
+    END_VERSIONS
+    """
+}
+
 process PARSE_SCREEN {
     tag   "${meta.id}"
     label 'process_low'
@@ -141,7 +259,7 @@ process PARSE_SCREEN {
     publishDir "${params.outdir}/screen", mode: params.publish_dir_mode
 
     input:
-    tuple val(meta), path(k2_report), path(k2_out), path(bracken), path(sylph)
+    tuple val(meta), path(ku_report), path(k2_report), path(bracken), path(metabuli), path(sylph)
     path watchlist
     path descendants
 
@@ -150,13 +268,20 @@ process PARSE_SCREEN {
     path "${meta.id}.screen.log"                      , emit: log
 
     script:
-    def bracken_arg = bracken.name != 'NO_FILE' ? "--bracken-report ${bracken}" : ''
-    def sylph_arg   = sylph.name   != 'NO_FILE' ? "--sylph-profile ${sylph}"   : ''
+    def ku_arg      = ku_report.name != 'NO_FILE' ? "--krakenuniq-report ${ku_report}" : ''
+    def k2_arg      = k2_report.name != 'NO_FILE' ? "--kraken2-report ${k2_report}"    : ''
+    def bracken_arg = bracken.name   != 'NO_FILE' ? "--bracken-report ${bracken}"      : ''
+    def mb_arg      = metabuli.name  != 'NO_FILE' ? "--metabuli-report ${metabuli}"     : ''
+    def sylph_arg   = sylph.name     != 'NO_FILE' ? "--sylph-profile ${sylph}"          : ''
     """
     parse_screen.py \\
-        --kraken2-report ${k2_report} \\
+        ${ku_arg} \\
+        ${k2_arg} \\
         ${bracken_arg} \\
+        ${mb_arg} \\
         ${sylph_arg} \\
+        --min-distinct-kmers ${params.min_distinct_kmers} \\
+        --max-kmer-dup ${params.max_kmer_dup} \\
         --watchlist ${watchlist} \\
         --descendants ${descendants} \\
         --sample ${meta.id} \\
@@ -394,15 +519,15 @@ process MARKER_SEARCH_HMM {
     label 'process_medium'
     conda "bioconda::hmmer=3.4 bioconda::seqkit=2.8.2"
 
+    // An empty hit set is a legitimate outcome, not a failure.
+    errorStrategy 'ignore'
+
     input:
     tuple val(meta), path(hit_reads)
     path markers_dir
 
     output:
     tuple val(meta), path("${meta.id}.markers.hmm.domtbl"), emit: hits
-
-    // An empty hit set is a legitimate outcome, not a failure.
-    errorStrategy 'ignore'
 
     script:
     """

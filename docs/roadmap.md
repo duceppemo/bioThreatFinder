@@ -1,7 +1,11 @@
 # Roadmap
 
 ## Blocking a real run
-1. **Upgrade Nextflow** — 21.10.4 installed, >=23.10 required.
+1. ~~Upgrade Nextflow~~ DONE - Nextflow self-updated to 26.04.6, which satisfies
+   the manifest requirement. Note this forced a strict-syntax migration:
+   `check_max()` config functions -> `resourceLimits`, no top-level `def` in
+   config, no top-level `workflow.onComplete`, and process directives must precede
+   `input:`. All migrated.
 2. **Create the tool env**
    `mamba create -n biothreatfinder -c bioconda -c conda-forge kraken2 bracken minimap2 samtools seqkit fastp chopper sylph ncbi-datasets-cli`
    `datasets`, `kraken2-build`, `bracken-build` and `seqkit` are all absent from this box.
@@ -40,10 +44,17 @@ Replace fixed cutoffs with per-taxon background distributions from a panel of
 negative and unrelated metagenomes. Report a calibrated statistic alongside the
 interpretable gate breakdown.
 
-### 3. Accuracy upgrades to stages 1 and 2
-  * Stage 1: KrakenUniq (unique k-mer counts via HyperLogLog) or Metabuli
-    (joint DNA + amino acid) instead of Kraken2 alone - cuts species-level false
-    positives at the source
+### DONE - Stage-1 classifier upgrade (v0.3.0)
+KrakenUniq is now the primary arm (distinct k-mer cardinality), Metabuli adds the
+DNA+amino-acid arm for divergent agents, Kraken2/Bracken retained for abundance,
+sylph for ANI. Any-classifier OR; concordance and k-mer quality recorded and
+surfaced in the report. Project DBs moved to NVMe at /media/8tb/bioThreatFinder.
+Remaining stage-1 work:
+  * Centrifuger as an ONT-specific arm (low memory, FM-index) - evaluate whether
+    it adds anything over KrakenUniq on long reads
+  * Feed distinct-k-mer evidence into the empirical null rather than only flagging
+
+### 3. Accuracy upgrades to stage 2
   * Stage 2: multi-reference / pangenome bundles per taxon instead of one
     reference, with skani for ANI-based assignment
   * Assembly tier: metaSPAdes / Flye on candidate reads, then confirm on contigs

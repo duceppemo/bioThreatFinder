@@ -358,11 +358,37 @@ def main() -> int:
         scr = screen.get((row.get("sample", ""), taxid), {})
         sylph_support = scr.get("sylph_abundance", "")
         concordant = bool(sylph_support and as_float(sylph_support) > 0)
+        n_clf = int(as_float(scr.get("n_classifiers"), 0))
+        clf_list = scr.get("classifiers", "")
+        distinct_kmers = scr.get("krakenuniq_distinct_kmers", "")
+        screen_flags = scr.get("screen_flags", "")
+
         if tier in ("supported", "confirmed_in_silico"):
-            reasons.append(
-                "orthogonal sylph support present" if concordant
-                else "no orthogonal sylph support (expected for viruses and eukaryotes)"
-            )
+            # Stage-1 concordance is recorded, never required. Four classifiers are
+            # run precisely because they fail in different directions; demanding
+            # agreement would throw away the sensitivity that buys. But a taxon seen
+            # by three independent methods is far stronger evidence than one seen by
+            # a single k-mer counter, and the analyst should see which they have.
+            if clf_list:
+                reasons.append(
+                    f"stage-1 concordance: {n_clf} classifier(s) [{clf_list}]")
+            if not concordant:
+                reasons.append(
+                    "no sylph/ANI support (expected for viruses and eukaryotes, "
+                    "which GTDB does not cover)")
+
+            # Distinct-k-mer evidence. This is the stage-1 analogue of window
+            # occupancy: reads piled on a few conserved k-mers look identical to
+            # reads spread across a genome if you only count reads.
+            if screen_flags and "krakenuniq_not_run" not in screen_flags:
+                reasons.append(
+                    f"CAVEAT: weak distinct-k-mer evidence at stage 1 ({screen_flags}) "
+                    "- alignment evidence carried this finding, so treat the k-mer "
+                    "disagreement as a reason to look closely")
+            elif "krakenuniq_not_run" in screen_flags:
+                reasons.append(
+                    "CAVEAT: KrakenUniq not run, so no distinct-k-mer evidence was "
+                    "available to corroborate or contradict the read counts")
 
         findings.append({
             "sample": row.get("sample", ""),
@@ -382,6 +408,10 @@ def main() -> int:
             "neighbour_ratio": row.get("neighbour_ratio", ""),
             "best_neighbour_taxid": row.get("best_neighbour_taxid", ""),
             "screen_reads": scr.get("assigned_reads", ""),
+            "n_classifiers": n_clf or "",
+            "classifiers": clf_list,
+            "distinct_kmers": distinct_kmers,
+            "screen_flags": screen_flags,
             "sylph_abundance": sylph_support,
             "orthogonal_concordance": "yes" if concordant else "no",
             "reference_bp": row.get("reference_bp", ""),
@@ -407,6 +437,8 @@ def main() -> int:
                 "window_occupancy": "", "mean_depth": "", "depth_cv": "",
                 "mean_identity": "", "neighbour_ratio": "", "best_neighbour_taxid": "",
                 "screen_reads": screen.get((sample, taxid), {}).get("assigned_reads", ""),
+                "n_classifiers": "", "classifiers": "", "distinct_kmers": "",
+                "screen_flags": "",
                 "sylph_abundance": "", "orthogonal_concordance": "",
                 "reference_bp": "", "taxon_notes": meta.get("notes", ""),
                 "marker_verdict": "",

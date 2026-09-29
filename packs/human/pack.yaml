@@ -19,9 +19,9 @@ host:
   label: Homo sapiens
   taxid: 9606
   # Built by scripts/fetch_host_genome.sh human
-  fasta: "${db_root}/bioThreatFinder/host/human/chm13v2.0.fa.gz"
-  minimap2_index_sr: "${db_root}/bioThreatFinder/host/human/chm13v2.0.sr.mmi"
-  minimap2_index_lr: "${db_root}/bioThreatFinder/host/human/chm13v2.0.map-ont.mmi"
+  fasta: "${btf_db}/host/human/chm13v2.0.fa.gz"
+  minimap2_index_sr: "${btf_db}/host/human/chm13v2.0.sr.mmi"
+  minimap2_index_lr: "${btf_db}/host/human/chm13v2.0.map-ont.mmi"
   # Human reads are the bulk of most clinical specimens; keep them out of the
   # published output by default. Set to true only for validation runs.
   retain_host_reads: false
@@ -31,12 +31,20 @@ host:
 # ---------------------------------------------------------------------------
 screen:
   # Shared across packs - one general-purpose index answers "what is in here".
-  kraken2_db: "${db_root}/bioThreatFinder/kraken2/pluspf"
+  # KrakenUniq is the primary arm: distinct-k-mer cardinality is what separates
+  # reads spread across a genome from reads piled on one conserved k-mer.
+  krakenuniq_db: "${btf_db}/krakenuniq/standard"
+  # Amino-acid-aware arm, for divergent and novel agents that nucleotide k-mers
+  # miss entirely.
+  metabuli_db: "${btf_db}/metabuli/refseq"
+  kraken2_db: "${btf_db}/kraken2/pluspf"
   # Orthogonal, ANI-based, very low false-positive rate for bacteria/archaea.
   sylph_db: "${db_root}/sylph/gtdb-r220-c200-dbv1.syldb"
   # Eukaryotic pathogens (parasites, fungi) are poorly served by GTDB; rely on
   # Kraken2 PlusPF plus stage-2 alignment for these.
   eukaryote_strategy: kraken2_then_align
+  # Any classifier raises a candidate; consensus is recorded, not required.
+  combining_rule: any_classifier_or
 
 # ---------------------------------------------------------------------------
 # Stage 2: targeted confirmation
@@ -44,14 +52,14 @@ screen:
 confirm:
   # Curated reference genomes for watchlist taxa + their near neighbours.
   # Built by scripts/build_pack_refs.py --pack human
-  refs_dir: "${db_root}/bioThreatFinder/packs/human/refs"
-  refs_manifest: "${db_root}/bioThreatFinder/packs/human/refs/manifest.tsv"
+  refs_dir: "${btf_db}/packs/human/refs"
+  refs_manifest: "${btf_db}/packs/human/refs/manifest.tsv"
   # Competitive mapping: reads are mapped against the target AND its near
   # neighbours simultaneously, then assigned to best hit. Without this, a
   # common environmental relative reads out as its high-consequence cousin.
   competitive_mapping: true
   # Marker tier (stage 2b). Built by scripts/build_marker_db.py --pack human.
-  markers_dir: "${db_root}/bioThreatFinder/packs/human/markers"
+  markers_dir: "${btf_db}/packs/human/markers"
 
 # ---------------------------------------------------------------------------
 # Default confirmation thresholds (per-taxon overrides live in watchlist.tsv)

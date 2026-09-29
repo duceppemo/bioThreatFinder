@@ -19,6 +19,7 @@ include { FASTP; CHOPPER; SEQKIT_STATS      } from './modules/local/preprocess'
 include { MINIMAP2_HOST_DEPLETE             } from './modules/local/preprocess'
 include { RESOLVE_WATCHLIST                 } from './modules/local/detect'
 include { KRAKEN2; BRACKEN; SYLPH_PROFILE   } from './modules/local/detect'
+include { KRAKENUNIQ; METABULI              } from './modules/local/detect'
 include { PARSE_SCREEN                      } from './modules/local/detect'
 include { MINIMAP2_COMPETITIVE              } from './modules/local/detect'
 include { COVERAGE_STATS                    } from './modules/local/detect'
@@ -48,8 +49,23 @@ def helpMessage() {
 
     Key options:
       --outdir           Output directory                      [${params.outdir}]
-      --db_root          Shared database root                   [${params.db_root}]
-      --skip_host_depletion / --skip_sylph
+      --db_root          Shared read-only DBs (taxdump, sylph, nt)  [${params.db_root}]
+      --btf_db           Project-owned DBs on fast NVMe             [${params.btf_db}]
+
+    Stage-1 classifier arms (any-classifier OR; consensus recorded, not required):
+      --skip_krakenuniq  Disable the PRIMARY arm. KrakenUniq is what provides
+                         distinct-k-mer counts; without it, reads piled on a few
+                         conserved k-mers cannot be told from reads spread across
+                         a genome at stage 1.
+      --skip_metabuli    Disable the DNA+amino-acid arm, which is what sees
+                         divergent and novel agents that nucleotide k-mers miss.
+      --skip_kraken2     Disable Kraken2/Bracken (abundance + continuity arm).
+      --skip_sylph       Disable ANI/containment.
+      --min_distinct_kmers / --max_kmer_dup   stage-1 k-mer quality flags
+      --skip_host_depletion
+      --skip_markers     Disable marker gating. Taxa whose calls depend on
+                         plasmid/toxin loci will then be promoted on alignment
+                         evidence alone, which is NOT defensible for several.
       --min_unique_reads Stage-2 minimum on-target reads        [${params.min_unique_reads}]
       --min_breadth      Stage-2 minimum reference breadth      [${params.min_breadth}]
 
@@ -79,9 +95,24 @@ def loadPack(String packName) {
     def yml = packDir.resolve('pack.yaml')
     if (!yml.exists()) exit 1, "Pack '${packName}' has no pack.yaml (${yml})"
     def parsed = new org.yaml.snakeyaml.Yaml().load(yml.text)
-    def resolved = resolvePlaceholders(parsed, [db_root: params.db_root, projectDir: projectDir])
+    def resolved = resolvePlaceholders(
+        parsed,
+        [db_root: params.db_root, btf_db: params.btf_db, projectDir: projectDir])
     resolved.dir = packDir
     return resolved
+}
+
+/* Pads an optional per-sample channel out to cover every sample.
+ *
+ * `base` carries (meta, placeholder) for all samples; `produced` carries
+ * (meta, file) only for samples where the arm actually ran. A remainder join keeps
+ * the missing ones and substitutes the placeholder, so a skipped or failed
+ * classifier degrades that one arm rather than dropping the sample from the screen
+ * entirely - which would look like a clean negative. */
+def fillMissing(base, produced) {
+    return base
+        .join(produced, remainder: true)
+        .map { meta, placeholder, actual -> tuple(meta, actual ?: placeholder) }
 }
 
 def parseSamplesheet(path) {
@@ -127,7 +158,34 @@ workflow {
     if (!params.input) { helpMessage(); exit 1, "ERROR: --input is required" }
 
     def pack = loadPack(params.pack)
-    log.info "bioThreatFinder v${workflow.manifest.version}  pack=${pack.name}  outdir=${params.outdir}"
+
+    def arms = []
+    if (!params.skip_krakenuniq) arms << 'krakenuniq'
+    if (!params.skip_metabuli)   arms << 'metabuli'
+    if (!params.skip_kraken2)    arms << 'kraken2/bracken'
+    if (!params.skip_sylph)      arms << 'sylph'
+    if (arms.isEmpty()) {
+        exit 1, "ERROR: every stage-1 classifier is disabled. Nothing would be screened."
+    }
+    if (params.skip_krakenuniq) {
+        log.warn "KrakenUniq is disabled. Distinct-k-mer evidence will be unavailable, " +
+                 "so reads piled on a few conserved k-mers cannot be told apart from " +
+                 "reads spread across a genome at stage 1."
+    }
+
+    log.info """
+    bioThreatFinder v${workflow.manifest.version}
+      pack            : ${pack.name}
+      stage-1 arms    : ${arms.join(', ')}  (any-classifier OR; consensus recorded, not required)
+      marker gating   : ${params.skip_markers ? 'DISABLED' : 'enabled'}
+      outdir          : ${params.outdir}
+      report          : ${params.outdir}/report/biothreatfinder_report.html
+      findings TSV    : ${params.outdir}/score_evidence/findings.tsv
+
+    Findings are in-silico screening evidence only. Every one requires orthogonal
+    laboratory confirmation and interpretation by a qualified laboratorian before
+    any clinical or public-health action.
+    """.stripIndent()
 
     ch_reads = parseSamplesheet(params.input)
 
@@ -172,36 +230,55 @@ workflow {
 
     SEQKIT_STATS(ch_clean)
 
-    // -- Stage 1: broad screen --------------------------------------------
-    KRAKEN2(ch_clean, file(pack.screen.kraken2_db, checkIfExists: true))
+    // -- Stage 1: broad screen (multi-classifier) --------------------------
+    // Four independent arms, because they fail in different directions:
+    //   krakenuniq  distinct-k-mer cardinality  -> specificity at stage 1
+    //   metabuli    DNA + amino acid            -> divergent / novel agents
+    //   kraken2     + Bracken                   -> abundance, continuity
+    //   sylph       ANI / containment           -> orthogonal, low FP
+    // Any arm raises a candidate; consensus is recorded, not required. Requiring
+    // consensus would discard the sensitivity that running four arms buys.
+    def no_file = file("${projectDir}/assets/NO_FILE")
 
-    // Bracken re-estimates abundance from Kraken2's k-mer assignments. It is
-    // built on a fixed read length, so it applies to short reads only; ONT read
-    // lengths violate its model and it is skipped there.
-    ch_for_bracken = KRAKEN2.out.report.filter { meta, _r -> meta.platform == 'illumina' }
-    BRACKEN(ch_for_bracken, file(pack.screen.kraken2_db))
+    // Every arm is padded out to all samples by fillMissing(), so a skipped or
+    // failed classifier never silently drops a sample from the join below.
+    ch_arm_base = ch_clean.map { meta, _r -> tuple(meta, no_file) }
 
-    if (params.skip_sylph) {
-        ch_sylph = Channel.empty()
+    if (params.skip_krakenuniq) {
+        ch_ku = ch_clean.map { meta, _r -> tuple(meta, no_file) }
     } else {
-        // Orthogonal evidence: sylph is containment/ANI based, so it disagrees
-        // with Kraken2 in exactly the cases that matter - a taxon called from
-        // scattered conserved k-mers gets no sylph support.
-        SYLPH_PROFILE(ch_clean, file(pack.screen.sylph_db, checkIfExists: true))
-        ch_sylph = SYLPH_PROFILE.out.profile
+        KRAKENUNIQ(ch_clean, file(pack.screen.krakenuniq_db, checkIfExists: true))
+        ch_ku = fillMissing(ch_arm_base, KRAKENUNIQ.out.report)
     }
 
-    // Join the screens per sample. Sylph and Bracken are both optional, so pad
-    // with a placeholder rather than dropping the sample from the join.
-    ch_screen = KRAKEN2.out.report
-        .join(KRAKEN2.out.classified_out)
-        .join(BRACKEN.out.report, remainder: true)
-        .join(ch_sylph, remainder: true)
-        .map { meta, report, kout, bracken, sylph ->
-            tuple(meta, report, kout,
-                  bracken ?: file("${projectDir}/assets/NO_FILE"),
-                  sylph   ?: file("${projectDir}/assets/NO_FILE"))
-        }
+    if (params.skip_metabuli) {
+        ch_mb = ch_clean.map { meta, _r -> tuple(meta, no_file) }
+    } else {
+        METABULI(ch_clean, file(pack.screen.metabuli_db, checkIfExists: true))
+        ch_mb = fillMissing(ch_arm_base, METABULI.out.report)
+    }
+
+    if (params.skip_kraken2) {
+        ch_k2      = ch_clean.map { meta, _r -> tuple(meta, no_file) }
+        ch_bracken = ch_clean.map { meta, _r -> tuple(meta, no_file) }
+    } else {
+        KRAKEN2(ch_clean, file(pack.screen.kraken2_db, checkIfExists: true))
+        ch_k2 = fillMissing(ch_arm_base, KRAKEN2.out.report)
+        // Bracken is built on a fixed read length, so it applies to short reads
+        // only; ONT read lengths violate its model.
+        BRACKEN(KRAKEN2.out.report.filter { meta, _r -> meta.platform == 'illumina' },
+                file(pack.screen.kraken2_db))
+        ch_bracken = fillMissing(ch_arm_base, BRACKEN.out.report)
+    }
+
+    if (params.skip_sylph) {
+        ch_sylph = ch_clean.map { meta, _r -> tuple(meta, no_file) }
+    } else {
+        SYLPH_PROFILE(ch_clean, file(pack.screen.sylph_db, checkIfExists: true))
+        ch_sylph = fillMissing(ch_arm_base, SYLPH_PROFILE.out.profile)
+    }
+
+    ch_screen = ch_ku.join(ch_k2).join(ch_bracken).join(ch_mb).join(ch_sylph)
 
     PARSE_SCREEN(ch_screen, ch_watchlist.first(), ch_descendants.first())
 
@@ -248,7 +325,6 @@ workflow {
     // -- Stage 2b: marker tier --------------------------------------------
     // Run per sample, not per candidate: the marker DB is small, so one pass
     // serves every taxon's rule more cheaply than a fan-out.
-    def no_file = file("${projectDir}/assets/NO_FILE")
     if (params.skip_markers) {
         ch_marker_states = Channel.empty()
     } else {
@@ -296,13 +372,9 @@ workflow {
     )
 }
 
-workflow.onComplete {
-    log.info """
-    ${workflow.success ? 'Completed' : 'FAILED'}  duration=${workflow.duration}
-    Report: ${params.outdir}/report/biothreatfinder_report.html
-    Findings TSV: ${params.outdir}/score_evidence/findings.tsv
-
-    Reminder: findings are in-silico screening evidence only and require
-    orthogonal laboratory confirmation before any clinical or public-health action.
-    """.stripIndent()
-}
+// NOTE: the top-level `workflow.onComplete` handler this file used to carry is not
+// permitted by the Nextflow 24+ strict script syntax, which allows only
+// declarations at script level. The run notice now prints from inside the entry
+// workflow instead (see `runNotice`), and the interpretation caveats live where
+// they actually matter - on every finding in the HTML report and the findings TSV,
+// not in terminal scrollback that nobody keeps.
