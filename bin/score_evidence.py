@@ -307,7 +307,23 @@ def main() -> int:
                 tier = "screened_only"
                 reasons.append(
                     f"minimum marker evidence not met ({spec.get('support_requires')})")
-            elif tier == "confirmed_in_silico" or verdict["confirm"] is not None:
+            # An untested veto or vaccine check must not block a confirmation that
+            # its own required markers support - but it must be DISCLOSED. A
+            # confirmed finding whose BCG or vaccinia check could not run is
+            # materially different from one where the check ran and passed, and
+            # the analyst is the one who needs to know which they are looking at.
+            if verdict["veto"] == mr.UNKNOWN:
+                reasons.append(
+                    f"CAVEAT: veto check could not be evaluated ({spec.get('veto_if')}) "
+                    "- untested marker(s); an argument against this call may exist "
+                    "but was not tested")
+            if verdict["vaccine"] == mr.UNKNOWN:
+                reasons.append(
+                    f"CAVEAT: vaccine/attenuated-strain check could not be evaluated "
+                    f"({spec.get('vaccine_if')}) - a vaccine strain CANNOT be excluded "
+                    "for this finding")
+
+            if tier == "confirmed_in_silico" or verdict["confirm"] is not None:
                 if verdict["confirm"] == mr.TRUE:
                     reasons.append(f"marker rule satisfied: {spec.get('confirm_requires')}")
                 elif verdict["confirm"] == mr.FALSE:

@@ -1,0 +1,525 @@
+# bioThreatFinder benchmark scenarios - human health pack
+#
+# PURPOSE
+# Every threshold in packs/*/pack.yaml is currently a reasoned guess. These
+# scenarios replace guesses with measurements: per-taxon sensitivity, limit of
+# detection, specificity against the near neighbours that actually cause false
+# positives, and the positive predictive value of each evidence tier.
+#
+# DESIGN PRINCIPLE
+# A benchmark that only spikes targets into a clean background measures almost
+# nothing. Any tool looks good at 100 RPM of pure B. anthracis. The scenarios
+# that matter are the ones designed to BREAK the tool:
+#
+#   * the near neighbour alone, with the target genuinely absent
+#   * the target's chromosome WITHOUT its virulence plasmids
+#   * the vaccine strain instead of wild type
+#   * realistic host fraction, so sensitivity is measured where it is hard
+#   * index hopping from a high-titre neighbouring sample
+#   * a divergent family member standing in for a novel agent
+#
+# A specificity failure here is worth more attention than a sensitivity failure,
+# because a false "confirmed" on a high-consequence organism triggers a real
+# public-health response.
+#
+# HONEST LIMITS OF SIMULATION
+# Simulated reads flatter every tool. Error profiles are idealised, there is no
+# real reagent contamination, no index-hopping chemistry, no degraded clinical
+# material, and no genuine novel agent. These scenarios establish RELATIVE
+# performance and catch regressions. They do NOT establish clinical performance -
+# that needs mock communities, proficiency panels and characterised real
+# specimens. See docs/benchmarking.md.
+
+schema_version: 1
+
+defaults:
+    replicates: 3
+    platforms: [illumina, ont]
+    host: human
+    # 95% human is typical of respiratory and tissue specimens. Measuring
+    # sensitivity in a clean background would overstate it substantially.
+    host_fraction: 0.95
+    total_reads: 20000000
+    read_length: 150
+    ont_mean_length: 5000
+
+scenarios:
+
+    # -----------------------------------------------------------------------
+    # SENSITIVITY / LIMIT OF DETECTION
+    # One representative per group, since genome size and composition drive the
+    # detection curve more than taxon identity does.
+    # -----------------------------------------------------------------------
+
+    - id: lod_bacteria_ypestis
+      description: >
+        Y. pestis dilution series with plasmids intact. 4.6 Mb genome, so breadth
+        accumulates at a moderate rate - the reference case for bacteria.
+      kind: lod_series
+      spikes:
+          - taxon: Yersinia pestis
+            source: target
+            levels_rpm: [0.1, 0.5, 1, 5, 10, 50, 200]
+      truth:
+          present: [Yersinia pestis]
+      expect:
+          - taxon: Yersinia pestis
+            min_tier_at_rpm: {10: supported, 50: confirmed_in_silico}
+
+    - id: lod_virus_sars2
+      description: >
+        Small RNA virus, 30 kb. Breadth saturates fast, so detection should reach
+        further down than for a bacterium at equal RPM. Tests the other end of
+        the genome-size range.
+      kind: lod_series
+      spikes:
+          - taxon: Severe acute respiratory syndrome coronavirus 2
+            source: target
+            levels_rpm: [0.1, 0.5, 1, 5, 10, 50]
+      truth:
+          present: [Severe acute respiratory syndrome coronavirus 2]
+      expect:
+          - taxon: Severe acute respiratory syndrome coronavirus 2
+            min_tier_at_rpm: {5: supported, 10: confirmed_in_silico}
+
+    - id: lod_parasite_pfalciparum
+      description: >
+        23 Mb AT-rich genome. Breadth accumulates slowly, which is why the
+        watchlist sets min_breadth to 0.05 for this taxon. This scenario is the
+        check on whether that override is right or merely convenient.
+      kind: lod_series
+      spikes:
+          - taxon: Plasmodium falciparum
+            source: target
+            levels_rpm: [1, 5, 10, 50, 200, 1000]
+      truth:
+          present: [Plasmodium falciparum]
+      expect:
+          - taxon: Plasmodium falciparum
+            min_tier_at_rpm: {50: supported}
+
+    - id: lod_fungus_cauris
+      description: >
+        C. auris dilution series. Eukaryotic, repeat-rich, and poorly served by
+        GTDB-based profiling, so this leans on Kraken2 plus alignment.
+      kind: lod_series
+      spikes:
+          - taxon: Candida auris
+            source: target
+            levels_rpm: [1, 5, 10, 50, 200]
+      truth:
+          present: [Candida auris]
+      expect:
+          - taxon: Candida auris
+            min_tier_at_rpm: {50: supported}
+
+    - id: lod_lowbiomass_ypestis
+      description: >
+        The same Y. pestis series at 99.9% host. This is the realistic hard case
+        for clinical metagenomics and the number that should be quoted as the
+        practical limit of detection, not the 95% figure.
+      kind: lod_series
+      host_fraction: 0.999
+      total_reads: 40000000
+      spikes:
+          - taxon: Yersinia pestis
+            source: target
+            levels_rpm: [1, 5, 10, 50, 200, 1000]
+      truth:
+          present: [Yersinia pestis]
+
+    # -----------------------------------------------------------------------
+    # SPECIFICITY - the near neighbours that actually cause false positives.
+    # In every scenario below the target is genuinely ABSENT. Any call above
+    # max_tier is a specificity failure.
+    # -----------------------------------------------------------------------
+
+    - id: spec_bcereus_not_anthracis
+      description: >
+        B. cereus at high titre, no B. anthracis. The chromosome is near-identical
+        across the group, so naive breadth-based calling reports anthrax here.
+        This is the single most important specificity test in the pack.
+      kind: specificity
+      spikes:
+          - taxon: Bacillus cereus
+            source: neighbour
+            levels_rpm: [500]
+      truth:
+          present: [Bacillus cereus]
+          absent: [Bacillus anthracis]
+      expect:
+          - taxon: Bacillus anthracis
+            max_tier: attributed_to_neighbour
+
+    - id: spec_bthailandensis_not_pseudomallei
+      description: >
+        B. thailandensis is common environmental soil flora and the dominant
+        false-positive route to melioidosis.
+      kind: specificity
+      spikes:
+          - taxon: Burkholderia thailandensis
+            source: neighbour
+            levels_rpm: [500]
+      truth:
+          present: [Burkholderia thailandensis]
+          absent: [Burkholderia pseudomallei, Burkholderia mallei]
+      expect:
+          - taxon: Burkholderia pseudomallei
+            max_tier: attributed_to_neighbour
+
+    - id: spec_edispar_not_histolytica
+      description: >
+        E. dispar is morphologically identical to E. histolytica, non-pathogenic,
+        and the most important false positive in the genus. Microscopy cannot
+        separate them, so this is exactly where sequencing should add value - or
+        fail visibly.
+      kind: specificity
+      spikes:
+          - taxon: Entamoeba dispar
+            source: neighbour
+            levels_rpm: [500]
+      truth:
+          present: [Entamoeba dispar]
+          absent: [Entamoeba histolytica]
+      expect:
+          - taxon: Entamoeba histolytica
+            max_tier: attributed_to_neighbour
+
+    - id: spec_reston_not_zaire
+      description: >
+        Reston ebolavirus is not pathogenic to humans. Species-level resolution
+        within Ebolavirus is therefore essential rather than a nicety, and this
+        scenario measures whether GP resolution delivers it.
+      kind: specificity
+      spikes:
+          - taxon: Reston ebolavirus
+            source: neighbour
+            levels_rpm: [200]
+      truth:
+          present: [Reston ebolavirus]
+          absent: [Zaire ebolavirus, Sudan ebolavirus]
+      expect:
+          - taxon: Zaire ebolavirus
+            max_tier: attributed_to_neighbour
+
+    - id: spec_bholmesii_not_pertussis
+      description: >
+        B. holmesii shares IS481 with B. pertussis, which is the classic
+        false-positive route in pertussis diagnostics. Tests that the rule engine
+        correctly refuses to confirm on a multi-copy shared element.
+      kind: specificity
+      spikes:
+          - taxon: Bordetella holmesii
+            source: neighbour
+            levels_rpm: [500]
+      truth:
+          present: [Bordetella holmesii]
+          absent: [Bordetella pertussis]
+      expect:
+          - taxon: Bordetella pertussis
+            max_tier: marker_veto
+
+    - id: spec_ypseudotuberculosis_not_pestis
+      description: >
+        Over 97% chromosomal ANI to Y. pestis, separated only by plasmid content.
+      kind: specificity
+      spikes:
+          - taxon: Yersinia pseudotuberculosis
+            source: neighbour
+            levels_rpm: [500]
+      truth:
+          present: [Yersinia pseudotuberculosis]
+          absent: [Yersinia pestis]
+      expect:
+          - taxon: Yersinia pestis
+            max_tier: marker_veto
+
+    - id: spec_mixed_neighbours
+      description: >
+        Five confusers at once with no watchlist target present. Closer to a real
+        environmental or gut background than any single-confuser scenario, and it
+        tests whether false positives compound.
+      kind: specificity
+      spikes:
+          - taxon: Bacillus cereus
+            source: neighbour
+            levels_rpm: [200]
+          - taxon: Burkholderia thailandensis
+            source: neighbour
+            levels_rpm: [200]
+          - taxon: Yersinia pseudotuberculosis
+            source: neighbour
+            levels_rpm: [200]
+          - taxon: Listeria innocua
+            source: neighbour
+            levels_rpm: [200]
+          - taxon: Francisella novicida
+            source: neighbour
+            levels_rpm: [200]
+      truth:
+          present: [Bacillus cereus, Burkholderia thailandensis, Yersinia pseudotuberculosis, Listeria innocua, Francisella novicida]
+          absent: [Bacillus anthracis, Burkholderia pseudomallei, Yersinia pestis, Listeria monocytogenes, Francisella tularensis]
+
+    # -----------------------------------------------------------------------
+    # MARKER GATE - the scenarios that justify the whole marker tier.
+    # exclude_loci simulates a strain lacking the loci that make it dangerous.
+    # -----------------------------------------------------------------------
+
+    - id: marker_anthracis_no_plasmids
+      description: >
+        B. anthracis chromosome with pXO1 and pXO2 REMOVED - the situation a cured
+        or plasmid-free isolate presents, and what a B. cereus-group organism
+        carrying anthracis-like chromosome looks like. Alignment evidence will be
+        overwhelming. The correct answer is NOT confirmed, because without plasmid
+        markers the call is not defensible.
+      kind: marker_ablation
+      spikes:
+          - taxon: Bacillus anthracis
+            source: target
+            exclude_loci: [pXO1, pXO2]
+            levels_rpm: [500]
+      truth:
+          present: [Bacillus anthracis]
+      expect:
+          - taxon: Bacillus anthracis
+            max_tier: supported
+            min_tier: supported
+
+    - id: marker_pestis_no_plasmids
+      description: >
+        Y. pestis chromosome without pPCP1 and pMT1. Chromosomally indistinguishable
+        from Y. pseudotuberculosis, so must not confirm.
+      kind: marker_ablation
+      spikes:
+          - taxon: Yersinia pestis
+            source: target
+            exclude_loci: [pPCP1, pMT1, pCD1]
+            levels_rpm: [500]
+      truth:
+          present: [Yersinia pestis]
+      expect:
+          - taxon: Yersinia pestis
+            max_tier: supported
+
+    - id: marker_cholerae_nontoxigenic
+      description: >
+        Non-toxigenic environmental V. cholerae - species present, CTX phage
+        absent. Widespread in surface water. Species detection is correct;
+        reporting cholera would not be.
+      kind: marker_ablation
+      spikes:
+          - taxon: Vibrio cholerae
+            source: target
+            exclude_loci: [CTXphi, ctxA, ctxB]
+            levels_rpm: [500]
+      truth:
+          present: [Vibrio cholerae]
+      expect:
+          - taxon: Vibrio cholerae
+            max_tier: supported
+
+    # -----------------------------------------------------------------------
+    # VACCINE AND ATTENUATED STRAINS
+    # Expected outcome is the vaccine_strain tier - a stand-down, not a disease
+    # report and not a silent suppression.
+    # -----------------------------------------------------------------------
+
+    - id: vaccine_bcg
+      description: >
+        BCG (M. bovis-derived, RD1 deleted) in a specimen from a vaccinated or
+        recently instilled patient. Must read as vaccine strain, not tuberculosis.
+      kind: vaccine
+      spikes:
+          - taxon: Mycobacterium bovis BCG
+            source: vaccine
+            levels_rpm: [200]
+      truth:
+          present: [Mycobacterium bovis BCG]
+          vaccine: [Mycobacterium tuberculosis]
+      expect:
+          - taxon: Mycobacterium tuberculosis
+            max_tier: vaccine_strain
+
+    - id: vaccine_vaccinia
+      description: >
+        Vaccinia virus - smallpox vaccine and ubiquitous laboratory strain, and
+        the dominant false positive for variola. The highest-stakes specificity
+        test in the pack.
+      kind: vaccine
+      spikes:
+          - taxon: Vaccinia virus
+            source: vaccine
+            levels_rpm: [200]
+      truth:
+          present: [Vaccinia virus]
+          absent: [Variola virus]
+          vaccine: [Variola virus]
+      expect:
+          - taxon: Variola virus
+            max_tier: vaccine_strain
+
+    - id: vaccine_sabin_polio
+      description: >
+        Sabin oral poliovirus vaccine strain. Separating vaccine, vaccine-derived
+        and wild-type poliovirus changes the entire public-health response.
+      kind: vaccine
+      spikes:
+          - taxon: Human poliovirus 1
+            source: vaccine
+            levels_rpm: [200]
+      truth:
+          present: [Human poliovirus 1]
+          vaccine: [Enterovirus C]
+      expect:
+          - taxon: Enterovirus C
+            max_tier: vaccine_strain
+
+    - id: vaccine_brucella_rb51
+      description: >
+        Brucella RB51 cattle vaccine strain, a realistic finding in veterinary and
+        abattoir-adjacent specimens.
+      kind: vaccine
+      spikes:
+          - taxon: Brucella abortus
+            source: vaccine
+            levels_rpm: [200]
+      truth:
+          present: [Brucella abortus]
+          vaccine: [Brucella abortus]
+      expect:
+          - taxon: Brucella abortus
+            max_tier: vaccine_strain
+
+    # -----------------------------------------------------------------------
+    # DIVERGENT AGENT PROXY
+    # A genuinely novel agent cannot be simulated - if it were in a database it
+    # would not be novel. A related family member the pack does NOT target is the
+    # closest honest stand-in, and tests whether the protein and HMM tiers see
+    # something the nucleotide tier misses.
+    # -----------------------------------------------------------------------
+
+    - id: divergent_bundibugyo_filovirus
+      description: >
+        Bundibugyo ebolavirus as a proxy for a divergent filovirus. Expect at
+        least a flagged lead via the HMM tier, not silence. A tool that reports
+        nothing here would also report nothing for a new filovirus.
+      kind: specificity
+      spikes:
+          - taxon: Bundibugyo ebolavirus
+            source: neighbour
+            levels_rpm: [200]
+      truth:
+          present: [Bundibugyo ebolavirus]
+          absent: [Zaire ebolavirus, Sudan ebolavirus]
+      expect:
+          - taxon: Zaire ebolavirus
+            min_tier: screened_only
+            max_tier: supported
+
+    - id: divergent_clostridium_bont
+      description: >
+        C. butyricum carrying BoNT/E - toxin present, species is not
+        C. botulinum. Correct behaviour is to report the toxin and name the right
+        organism, which the veto rule should produce.
+      kind: specificity
+      spikes:
+          - taxon: Clostridium butyricum
+            source: neighbour
+            levels_rpm: [300]
+      truth:
+          present: [Clostridium butyricum]
+          absent: [Clostridium botulinum]
+      expect:
+          - taxon: Clostridium botulinum
+            max_tier: marker_veto
+
+    # -----------------------------------------------------------------------
+    # CONTAMINATION AND CONTROLS
+    # -----------------------------------------------------------------------
+
+    - id: negative_host_only
+      description: >
+        Host plus commensal background, no watchlist organism at all. Every
+        watchlist call here is a false positive. This scenario sets the
+        run-level false-positive rate, which is the number that determines
+        whether the tool is usable operationally.
+      kind: negative
+      spikes: []
+      truth:
+          present: []
+          absent: [Bacillus anthracis, Yersinia pestis, Francisella tularensis, Burkholderia pseudomallei, Variola virus, Zaire ebolavirus, Mycobacterium tuberculosis, Entamoeba histolytica]
+      controls:
+          include_ntc: true
+
+    - id: contamination_index_hop
+      description: >
+        High-titre Y. pestis sample sequenced alongside a negative. A 0.1% index
+        hop puts real Y. pestis reads in the negative - routine in multiplexed
+        low-biomass work, and a false positive that control subtraction must
+        catch. Tests the suppressed_control path.
+      kind: contamination
+      spikes:
+          - taxon: Yersinia pestis
+            source: target
+            levels_rpm: [5000]
+      truth:
+          present: [Yersinia pestis]
+      controls:
+          include_ntc: true
+          index_hop_fraction: 0.001
+      expect:
+          - taxon: Yersinia pestis
+            sample_role: control
+            max_tier: suppressed_control
+
+    - id: contamination_no_control
+      description: >
+        Same as above but with NO negative control in the batch. Every finding
+        must carry the run-level warning. Verifies the pipeline degrades loudly
+        rather than silently when a control is missing.
+      kind: contamination
+      spikes:
+          - taxon: Yersinia pestis
+            source: target
+            levels_rpm: [50]
+      truth:
+          present: [Yersinia pestis]
+      controls:
+          include_ntc: false
+
+    # -----------------------------------------------------------------------
+    # CO-INFECTION
+    # -----------------------------------------------------------------------
+
+    - id: coinfection_three_targets
+      description: >
+        Three unrelated watchlist targets at different abundances plus two
+        confusers. Tests that one strong signal does not mask a weaker one, and
+        that abundance estimation does not cross-talk between taxa.
+      kind: lod_series
+      spikes:
+          - taxon: Yersinia pestis
+            source: target
+            levels_rpm: [200]
+          - taxon: Mycobacterium tuberculosis
+            source: target
+            levels_rpm: [20]
+          - taxon: Plasmodium falciparum
+            source: target
+            levels_rpm: [500]
+          - taxon: Bacillus cereus
+            source: neighbour
+            levels_rpm: [500]
+          - taxon: Entamoeba dispar
+            source: neighbour
+            levels_rpm: [200]
+      truth:
+          present: [Yersinia pestis, Mycobacterium tuberculosis, Plasmodium falciparum, Bacillus cereus, Entamoeba dispar]
+          absent: [Bacillus anthracis, Entamoeba histolytica]
+      expect:
+          - taxon: Yersinia pestis
+            min_tier: supported
+          - taxon: Bacillus anthracis
+            max_tier: attributed_to_neighbour
+          - taxon: Entamoeba histolytica
+            max_tier: attributed_to_neighbour
