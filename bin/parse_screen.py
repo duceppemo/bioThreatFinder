@@ -367,6 +367,23 @@ def main() -> int:
             "notes": entry.get("notes", ""),
         })
 
+    # Data-side detection of the same taxonomy-namespace mismatch the pipeline
+    # refuses up front. If Metabuli produced plenty of rows but matched no watchlist
+    # taxon at all while another arm did, the most likely cause by far is that its
+    # index is keyed in a different namespace (GTDB taxids are not NCBI taxids). Say
+    # so explicitly - the alternative is an arm that looks like it ran and found
+    # nothing, which is indistinguishable from a clean negative.
+    if mb and not any(r["metabuli_reads"] > 0 for r in rows):
+        other = any(r["krakenuniq_reads"] > 0 or r["kraken2_reads"] > 0 for r in rows)
+        if other:
+            sys.stderr.write(
+                f"[screen] WARNING: the metabuli report held {len(mb)} taxon rows but "
+                "matched NO watchlist taxid, while another arm did match. The usual "
+                "cause is a taxonomy-namespace mismatch - a GTDB-based Metabuli index "
+                "uses GTDB taxids, which do not join an NCBI-keyed watchlist. This arm "
+                "is contributing nothing. Verify with "
+                "scripts/build_metabuli_db.sh --mode refseq, or pass --skip_metabuli.\n")
+
     rows.sort(key=lambda r: (-r["n_classifiers"], -r["assigned_reads"]))
 
     cols = list(rows[0]) if rows else [

@@ -163,16 +163,35 @@ process KRAKENUNIQ {
 
     script:
     def paired = meta.single_end ? '' : '--paired'
-    // VERIFY: --preload-size syntax against the installed krakenuniq version.
-    // Loading the hash into RAM once is dramatically faster per sample than
-    // memory-mapping it repeatedly, which matters across a benchmark batch.
-    def preload = params.krakenuniq_preload ? "--preload-size ${task.memory.toGiga() - 16}G" : ''
+    // Loading the index once is far faster per sample than memory-mapping it
+    // repeatedly, which matters across a benchmark batch. The flag name differs
+    // between KrakenUniq versions, so it is a configurable string rather than a
+    // guess baked in here - see params.krakenuniq_preload_args.
+    def preload = params.krakenuniq_preload_args ?: ''
+    def hll_override = params.krakenuniq_hll_precision ?: ''
     """
+    # HyperLogLog precision is a CLASSIFY-time parameter, not a build parameter:
+    # the sketches are built while reading each sample. build_krakenuniq_db.sh
+    # records the intended value beside the index, so query and build cannot
+    # drift. An explicit --krakenuniq_hll_precision overrides it.
+    HLL_ARGS=""
+    if [ -n "${hll_override}" ]; then
+        HLL_ARGS="--hll-precision ${hll_override}"
+    elif [ -f "${db}/btf_classify_defaults.env" ]; then
+        # shellcheck disable=SC1091
+        . "${db}/btf_classify_defaults.env"
+        if [ -n "\${hll_precision_for_classify:-}" ]; then
+            HLL_ARGS="--hll-precision \${hll_precision_for_classify}"
+        fi
+    fi
+    echo "krakenuniq HLL args: \${HLL_ARGS:-<tool default>}" >&2
+
     krakenuniq \
         --db ${db} \
         --threads ${task.cpus} \
         ${paired} \
         ${preload} \
+        \${HLL_ARGS} \
         --report-file ${meta.id}.krakenuniq.report.txt \
         --output ${meta.id}.krakenuniq.output.txt \
         ${reads} \
