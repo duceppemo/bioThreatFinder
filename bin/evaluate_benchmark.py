@@ -406,28 +406,159 @@ def _detail(bad):
     return "; ".join(f"{o['sample']}={o['tier'] or 'no finding'}" for o in bad[:5])
 
 
+def variant_stats(obs) -> dict:
+    """Headline accuracy for one pipeline configuration."""
+    assessable = [o for o in obs if o["outcome"] != NOT_ASSESSED and o["role"] != "control"]
+    tp = sum(1 for o in assessable if o["truth"] == "present" and o["outcome"] == POSITIVE)
+    fn = sum(1 for o in assessable if o["truth"] == "present" and o["outcome"] != POSITIVE)
+    fp = sum(1 for o in assessable if o["truth"] == "absent" and o["outcome"] == POSITIVE)
+    fc = sum(1 for o in assessable if o["truth"] == "absent" and o["tier"] in CONFIRMED_TIERS)
+    tc = sum(1 for o in assessable if o["truth"] == "present" and o["tier"] in CONFIRMED_TIERS)
+    return {"true_positive": tp, "false_negative": fn, "false_positive": fp,
+            "false_confirmed": fc, "true_confirmed": tc,
+            "sensitivity": f"{tp / (tp + fn):.3f}" if (tp + fn) else "",
+            "confirm_ppv": f"{tc / (tc + fc):.3f}" if (tc + fc) else ""}
+
+
 def ablation(obs_with, obs_without):
-    """What does marker gating actually buy?"""
-    def stats(obs):
-        assessable = [o for o in obs if o["outcome"] != NOT_ASSESSED
-                      and o["role"] != "control"]
-        tp = sum(1 for o in assessable if o["truth"] == "present" and o["outcome"] == POSITIVE)
-        fn = sum(1 for o in assessable if o["truth"] == "present" and o["outcome"] != POSITIVE)
-        fp = sum(1 for o in assessable if o["truth"] == "absent" and o["outcome"] == POSITIVE)
-        fc = sum(1 for o in assessable if o["truth"] == "absent"
-                 and o["tier"] in CONFIRMED_TIERS)
-        tc = sum(1 for o in assessable if o["truth"] == "present"
-                 and o["tier"] in CONFIRMED_TIERS)
-        return {"true_positive": tp, "false_negative": fn, "false_positive": fp,
-                "false_confirmed": fc, "true_confirmed": tc,
-                "sensitivity": f"{tp / (tp + fn):.3f}" if (tp + fn) else "",
-                "confirm_ppv": f"{tc / (tc + fc):.3f}" if (tc + fc) else ""}
-    a, b = stats(obs_with), stats(obs_without)
+    """What does marker gating actually buy? (A two-variant special case.)"""
+    a, b = variant_stats(obs_with), variant_stats(obs_without)
+    return [{"metric": k, "with_marker_gating": a[k], "without_marker_gating": b[k]}
+            for k in a]
+
+
+# ---------------------------------------------------------------------------
+# Tool bake-off: compare pipeline configurations on IDENTICAL data
+# ---------------------------------------------------------------------------
+
+def _dur_min(v: str) -> float:
+    """Nextflow durations look like '2h 31m 4s', '4.2s', '1.5m'."""
+    if not v or v in ("-", "0"):
+        return 0.0
+    total = 0.0
+    for tok in str(v).split():
+        tok = tok.strip()
+        try:
+            if tok.endswith("ms"):
+                total += float(tok[:-2]) / 60000.0
+            elif tok.endswith("h"):
+                total += float(tok[:-1]) * 60.0
+            elif tok.endswith("m"):
+                total += float(tok[:-1])
+            elif tok.endswith("s"):
+                total += float(tok[:-1]) / 60.0
+            else:
+                total += float(tok) / 60.0
+        except ValueError:
+            continue
+    return total
+
+
+def _mem_gib(v: str) -> float:
+    if not v or v in ("-", "0"):
+        return 0.0
+    s = str(v).strip().replace(" ", "")
+    mult = {"KIB": 1 / 1048576, "MIB": 1 / 1024, "GIB": 1.0, "TIB": 1024.0,
+            "KB": 1 / 1048576, "MB": 1 / 1024, "GB": 1.0, "TB": 1024.0}
+    for suf, m in mult.items():
+        if s.upper().endswith(suf):
+            try:
+                return float(s[:-len(suf)]) * m
+            except ValueError:
+                return 0.0
+    try:
+        return float(s) / 1073741824.0
+    except ValueError:
+        return 0.0
+
+
+def parse_trace(path: Path) -> dict:
+    """Aggregate resource cost from a Nextflow trace file.
+
+    Accuracy alone cannot decide between tools. A classifier that is one point
+    better for 1400 GiB of index and twelve hours of build time is a bad trade, and
+    a comparison that hides the cost side invites exactly that mistake. Nextflow
+    already writes a trace per run, so the cost is free to collect.
+    """
+    if not path or not path.exists():
+        return {}
+    rows = read_tsv(path)
+    if not rows:
+        return {}
+
+    dur_to_min = _dur_min
+    mem_to_gib = _mem_gib
+    per_proc = defaultdict(lambda: {"tasks": 0, "cpu_min": 0.0, "peak_gib": 0.0})
+    total_cpu_min = 0.0
+    peak_gib = 0.0
+    for r in rows:
+        name = (r.get("process") or r.get("name") or "").split(":")[-1].split(" ")[0]
+        mins = dur_to_min(r.get("realtime") or r.get("duration") or "")
+        gib = mem_to_gib(r.get("peak_rss") or r.get("rss") or "")
+        p = per_proc[name]
+        p["tasks"] += 1
+        p["cpu_min"] += mins
+        p["peak_gib"] = max(p["peak_gib"], gib)
+        total_cpu_min += mins
+        peak_gib = max(peak_gib, gib)
+    return {"per_process": dict(per_proc), "total_cpu_min": total_cpu_min,
+            "peak_gib": peak_gib, "n_tasks": len(rows)}
+
+
+def bakeoff_table(variants: dict, traces: dict) -> list[dict]:
+    """One row per configuration: accuracy AND cost, on identical input data."""
     rows = []
-    for k in a:
-        rows.append({"metric": k, "with_marker_gating": a[k],
-                     "without_marker_gating": b[k]})
+    for name, obs in variants.items():
+        st = variant_stats(obs)
+        tr = traces.get(name) or {}
+        rows.append({
+            "variant": name,
+            "sensitivity": st["sensitivity"],
+            "confirm_ppv": st["confirm_ppv"],
+            "true_positive": st["true_positive"],
+            "false_negative": st["false_negative"],
+            "false_positive": st["false_positive"],
+            "false_confirmed": st["false_confirmed"],
+            "cpu_minutes": f"{tr.get('total_cpu_min', 0):.1f}" if tr else "",
+            "peak_rss_gib": f"{tr.get('peak_gib', 0):.1f}" if tr else "",
+            "n_tasks": tr.get("n_tasks", "") if tr else "",
+        })
+    # Fewest false confirmations first, then sensitivity: on a biothreat watchlist a
+    # false confirmation costs more than a missed borderline lead.
+    rows.sort(key=lambda r: (r["false_confirmed"], -as_float(r["sensitivity"], 0.0)))
     return rows
+
+
+def bakeoff_per_taxon(variants: dict) -> list[dict]:
+    """Per-taxon detection and LOD, one column per variant.
+
+    This is where a tool choice actually shows itself: an aggregate sensitivity
+    figure hides that classifier A finds the divergent filovirus and classifier B
+    finds the extra Plasmodium, which is a real trade rather than a ranking.
+    """
+    names = list(variants)
+    per: dict[tuple, dict] = {}
+    for name, obs in variants.items():
+        sens = sensitivity_table(obs)
+        lod = {(r["taxon"], r["platform"]): r for r in lod_table(sens)}
+        for r in sens:
+            key = (r["taxon"], r["platform"], r["level_rpm"])
+            e = per.setdefault(key, {"taxon": r["taxon"], "platform": r["platform"],
+                                     "level_rpm": r["level_rpm"]})
+            e[f"detect__{name}"] = r["detection_rate"]
+            e[f"confirm__{name}"] = r["confirm_rate"]
+        for (taxon, plat), r in lod.items():
+            for e in per.values():
+                if e["taxon"] == taxon and e["platform"] == plat:
+                    e[f"lod__{name}"] = r["lod_all_rpm"]
+    cols = ["taxon", "platform", "level_rpm"]
+    for n in names:
+        cols += [f"detect__{n}", f"confirm__{n}", f"lod__{n}"]
+    out = []
+    for e in sorted(per.values(), key=lambda x: (x["taxon"], x["platform"],
+                                                 as_float(x["level_rpm"], 0))):
+        out.append({c: e.get(c, "") for c in cols})
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -519,6 +650,33 @@ def write_summary(path: Path, tables: dict, exp_results: list[dict], abl):
                      f"{r['n_reported_as_disease']} |")
         L.append("")
 
+    bo = tables.get("bakeoff", [])
+    if bo:
+        L.append("## Tool bake-off")
+        L.append("")
+        L.append("All variants run over the SAME simulated data, so only the "
+                 "configuration differs. Ordered by fewest false confirmations, then "
+                 "sensitivity: on a biothreat watchlist a false confirmation costs "
+                 "more than a missed borderline lead.")
+        L.append("")
+        L.append("Read the cost columns as part of the decision, not a footnote. A "
+                 "configuration that gains a point of sensitivity for several hundred "
+                 "GiB of index and hours of build time has to justify that.")
+        L.append("")
+        L.append("| variant | sens | confirm PPV | TP | FN | FP | **false confirms** | CPU-min | peak RSS GiB |")
+        L.append("|---|---|---|---|---|---|---|---|---|")
+        for r in bo:
+            L.append(f"| {r['variant']} | {r['sensitivity']} | {r['confirm_ppv']} | "
+                     f"{r['true_positive']} | {r['false_negative']} | "
+                     f"{r['false_positive']} | **{r['false_confirmed']}** | "
+                     f"{r['cpu_minutes']} | {r['peak_rss_gib']} |")
+        L.append("")
+        L.append("Per-taxon detection and LOD per variant: `bakeoff_per_taxon.tsv`. "
+                 "Check it before ranking - an aggregate figure hides that one "
+                 "configuration finds the divergent filovirus while another finds the "
+                 "extra Plasmodium, which is a trade rather than a ranking.")
+        L.append("")
+
     if abl:
         L.append("## Marker-gating ablation")
         L.append("")
@@ -557,6 +715,16 @@ def main() -> int:
                     help="findings.tsv from one or more pipeline runs")
     ap.add_argument("--ablation-findings", nargs="*", type=Path, default=[],
                     help="findings.tsv from the same data scored WITHOUT marker gating")
+    ap.add_argument("--variant", action="append", default=[], metavar="NAME=FINDINGS[,FINDINGS]",
+                    help="a pipeline configuration to compare, e.g. "
+                         "--variant kraken2_only=runA/findings.tsv "
+                         "--variant plus_krakenuniq=runB/findings.tsv . Repeatable. All "
+                         "variants MUST be runs over the SAME simulated data, or the "
+                         "comparison is meaningless.")
+    ap.add_argument("--variant-trace", action="append", default=[], metavar="NAME=TRACEFILE",
+                    help="Nextflow trace file for a variant, so the comparison reports "
+                         "cost alongside accuracy. A tool that is one point better for "
+                         "1400 GiB and 12 h is a bad trade.")
     ap.add_argument("--watchlist", type=Path,
                     help="packs/<pack>/watchlist.resolved.tsv - spiked organisms not on "
                          "the watchlist are excluded from sensitivity/LOD, since the "
@@ -602,6 +770,24 @@ def main() -> int:
             f"[bench] WARNING: manifest references {len(unknown)} scenario id(s) not in "
             f"the scenario file: {', '.join(sorted(unknown))}\n")
 
+    # ---- tool bake-off -------------------------------------------------
+    def split_named(items, label):
+        out = {}
+        for item in items:
+            if "=" not in item:
+                sys.exit(f"ERROR: --{label} expects NAME=PATH, got {item!r}")
+            name, paths = item.split("=", 1)
+            name = name.strip()
+            if not name:
+                sys.exit(f"ERROR: --{label} has an empty name in {item!r}")
+            if name in out:
+                sys.exit(f"ERROR: duplicate --{label} name {name!r}")
+            out[name] = [Path(p) for p in paths.split(",") if p.strip()]
+        return out
+
+    variant_paths = split_named(args.variant, "variant")
+    trace_paths = split_named(args.variant_trace, "variant-trace")
+
     obs = evaluate(scenarios, manifest, findings, targeted)
     tables = {
         "sensitivity": sensitivity_table(obs),
@@ -611,6 +797,25 @@ def main() -> int:
     }
     tables["lod"] = lod_table(tables["sensitivity"])
     exp_results = check_expectations(scenarios, obs)
+
+    variants = {}
+    traces = {}
+    if variant_paths:
+        for name, paths in variant_paths.items():
+            missing = [str(p) for p in paths if not p.exists()]
+            if missing:
+                sys.exit(f"ERROR: variant {name!r} findings not found: {', '.join(missing)}")
+            variants[name] = evaluate(scenarios, manifest, load_findings(paths), targeted)
+        for name, paths in trace_paths.items():
+            if name not in variants:
+                sys.stderr.write(
+                    f"[bench] WARNING: --variant-trace {name!r} has no matching "
+                    "--variant; its cost figures will be ignored\n")
+                continue
+            traces[name] = parse_trace(paths[0])
+        sys.stderr.write(
+            f"[bench] bake-off across {len(variants)} variant(s): "
+            f"{', '.join(variants)}\n")
 
     abl = None
     if args.ablation_findings:
@@ -625,6 +830,12 @@ def main() -> int:
     write_tsv(args.out_dir / "expectations.tsv", exp_results)
     if abl:
         write_tsv(args.out_dir / "ablation.tsv", abl)
+    if variants:
+        bo = bakeoff_table(variants, traces)
+        write_tsv(args.out_dir / "bakeoff.tsv", bo)
+        write_tsv(args.out_dir / "bakeoff_per_taxon.tsv", bakeoff_per_taxon(variants))
+        tables["bakeoff"] = bo
+
     tables["_obs"] = obs
     write_summary(args.out_dir / "summary.md", tables, exp_results, abl)
     tables.pop("_obs", None)
@@ -803,6 +1014,31 @@ def self_test() -> int:
           "untargeted taxon must NOT appear in the sensitivity/LOD tables")
     check(any(r["taxon"] == "Yersinia pestis" for r in sens_t),
           "targeted taxon still appears in the sensitivity table")
+
+    # Bake-off: two configurations over identical data, one with an extra false
+    # confirmation, plus cost figures.
+    v_good = evaluate(scenarios, manifest, findings)
+    v_bad = evaluate(scenarios, manifest, {
+        **findings,
+        ("s2", "Bacillus anthracis"): {"sample": "s2", "taxon": "Bacillus anthracis",
+                                       "tier": "confirmed_in_silico"},
+    })
+    bo = {r["variant"]: r for r in bakeoff_table({"good": v_good, "bad": v_bad}, {})}
+    check(bo["good"]["false_confirmed"] == 1 and bo["bad"]["false_confirmed"] == 2,
+          f"bake-off counts false confirms per variant, got {bo}")
+    order = [r["variant"] for r in bakeoff_table({"bad": v_bad, "good": v_good}, {})]
+    check(order[0] == "good",
+          f"bake-off must rank fewest false confirmations first, got {order}")
+    pt = bakeoff_per_taxon({"good": v_good, "bad": v_bad})
+    check(any("detect__good" in r and "detect__bad" in r for r in pt),
+          "per-taxon bake-off emits a column per variant")
+
+    # Duration and memory parsing, which decide the cost half of the comparison.
+    check(abs(_dur_min("2h 30m") - 150.0) < 1e-6, f"2h 30m -> 150 min, got {_dur_min('2h 30m')}")
+    check(abs(_dur_min("90s") - 1.5) < 1e-6, f"90s -> 1.5 min, got {_dur_min('90s')}")
+    check(abs(_mem_gib("2 GB") - 2.0) < 1e-6, f"2 GB -> 2.0, got {_mem_gib('2 GB')}")
+    check(abs(_mem_gib("512 MB") - 0.5) < 1e-6, f"512 MB -> 0.5, got {_mem_gib('512 MB')}")
+    check(_mem_gib("-") == 0.0 and _dur_min("-") == 0.0, "missing trace values are 0")
 
     if fails:
         sys.stderr.write(f"evaluate_benchmark self-test FAILED ({len(fails)}):\n")

@@ -155,6 +155,60 @@ Background taxa are deliberately absent from per-scenario `truth` blocks, so the
 report as `unlisted` and stay out of the PPV denominator. `negative_host_only`
 lists them explicitly, so that one scenario's false-positive rate is exact.
 
+## Tool bake-off: comparing tools instead of arguing about them
+
+Tool choice in this field is usually argued from papers. Papers benchmark on their
+authors' data, with their authors' thresholds, usually for a community-profiling
+question rather than an "is organism X present" question. The only answer that binds
+for *this* pipeline, *this* watchlist and *this* specimen type is a measurement on
+identical input.
+
+`scripts/run_bakeoff.sh` runs the pipeline once per configuration over the **same**
+simulated batch and compares them. The variant matrix is deliberately built from
+**minimal pairs** — a variant that changes two things at once cannot attribute the
+difference to either, which is the commonest way a tool comparison fails to answer
+the question it was run for.
+
+| Variant | Isolates |
+|---|---|
+| `kraken2_minimizer` | Baseline: Kraken2 `--report-minimizer-data` + Bracken + sylph |
+| `plus_krakenuniq` | **Does HyperLogLog cardinality beat Kraken2 minimizer counts?** |
+| `plus_metabuli` | Value of the DNA+amino-acid arm (watch the `divergent_*` scenarios) |
+| `all_arms` | Upper bound on sensitivity *and* on cost |
+| `no_sylph` | Is ANI/containment contributing anything the k-mer arms don't? |
+| `no_markers` | What marker gating buys |
+
+```bash
+scripts/run_bakeoff.sh --batch v1 --list      # show the matrix
+scripts/run_bakeoff.sh --batch v1 --dry-run   # show the commands
+scripts/run_bakeoff.sh --batch v1
+```
+
+It is resume-friendly: a completed variant is skipped, and one failing variant is
+recorded and omitted rather than abandoning the other five.
+
+### Cost is half the comparison
+
+The bake-off table reports CPU-minutes and peak RSS alongside accuracy, harvested
+from each run's Nextflow trace. This is not decoration. KrakenUniq costs roughly
+1400 GiB transient disk, a 250–450 GiB resident index, a **Jellyfish 1.x** build
+dependency (this box has 2.3.1, which will fail) and 12+ hours to build — while
+Kraken2's `--report-minimizer-data` already yields distinct minimizer counts and a
+duplicity ratio from an index we build anyway. A configuration that gains a point of
+sensitivity for that has to justify it, and a comparison that hides the cost side
+invites exactly the wrong decision.
+
+Results are ordered by **fewest false confirmations first**, then sensitivity: on a
+biothreat watchlist a false confirmation triggers a real-world response, so it costs
+more than a missed borderline lead.
+
+### Read the per-taxon table before ranking anything
+
+`bakeoff_per_taxon.tsv` gives detection rate, confirm rate and LOD per taxon *per
+variant*. An aggregate sensitivity figure hides the case where one configuration
+finds the divergent filovirus and another finds the extra *Plasmodium*. That is a
+trade to decide deliberately, not a ranking to read off.
+
 ## Once results exist
 
 Feed them back:
