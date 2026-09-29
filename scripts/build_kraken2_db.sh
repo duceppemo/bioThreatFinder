@@ -342,6 +342,41 @@ prepare_taxonomy() {
 # One kraken2-build call per library, each with its own stamp file, so an
 # interrupted run resumes at the library that failed instead of re-downloading
 # the ~200 GB bacteria set.
+# MINIMUM VERSION GUARD.
+#
+# The stage-1 design rests on Kraken2's --report-minimizer-data columns (distinct
+# minimizer count and duplicity), which is what lets Kraken2 substitute for a separate
+# KrakenUniq index. That flag arrived in 2.1.0. Building with anything older produces an
+# index that works but cannot supply the evidence the pipeline scores on - a silent
+# capability loss, not an error.
+#
+# This is not hypothetical: an unconstrained `mamba install kraken2` into an environment
+# that also held mmseqs2, hmmer and mafft resolved to 2.0.8-beta (2019), which has no
+# such flag. Installing kraken2 in its OWN environment is what avoids that.
+require_kraken2_version() {
+    local v
+    v="$("$KRAKEN2_BUILD" --version 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
+    if [[ -z "$v" ]]; then
+        warn "could not determine the kraken2 version; proceeding, but verify that"
+        warn "  --report-minimizer-data is supported or stage 1 loses its k-mer evidence."
+        return
+    fi
+    local maj min
+    maj="${v%%.*}"; min="$(printf '%s' "$v" | cut -d. -f2)"
+    log "kraken2 version: ${v}"
+    if (( maj < 2 )) || { (( maj == 2 )) && (( min < 1 )); }; then
+        die "kraken2 ${v} is too old. --report-minimizer-data (added in 2.1.0) is what
+  supplies the distinct-minimizer and duplicity columns this pipeline scores stage 1
+  on; an index built here would work but silently carry no k-mer evidence.
+  Install kraken2 in its OWN environment so the solver is not constrained:
+    mamba create -n btf-kraken2 -c conda-forge -c bioconda kraken2=2.17.2 bracken"
+    fi
+    if ! kraken2 --help 2>&1 | grep -q 'report-minimizer-data'; then
+        die "this kraken2 (${v}) does not advertise --report-minimizer-data. Stage 1
+  would lose the distinct-k-mer evidence it scores on. Install a newer kraken2."
+    fi
+}
+
 # kraken2's --use-ftp path shells out to `wget`, and a broken wget produces the same
 # "Error downloading assembly summary file" as a network failure - which sent this
 # build chasing NCBI and firewalls for a while. The conda-forge wget in this env is
@@ -398,6 +433,7 @@ choose_transport() {
 
 download_libraries() {
     local lib
+    require_kraken2_version
     choose_transport
     [[ -n "$DL_OPTS" ]] && ensure_working_wget
     for lib in $LIBRARIES; do
