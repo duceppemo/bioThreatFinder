@@ -299,7 +299,18 @@ def main() -> int:
         nn_taxids, nn_missing = [], []
         for nn in nn_names:
             try:
-                nn_taxid, _ = resolve_one(nn, names_idx, rank_of, "species")
+                # expected_rank was hardcoded "species", so a neighbour that is
+                # legitimately a subspecies, strain or genus got no rank tie-break and an
+                # ambiguous name landed in nn_missing - silently weakening competitive
+                # mapping for exactly the target/neighbour pairs that matter. The live
+                # watchlist already carries "Francisella tularensis subsp. novicida" (a
+                # subspecies) and "Shigella" (a genus) as neighbours; they survive only
+                # because those names happen to be unambiguous. Try species first, then
+                # fall back to accepting any rank rather than discarding the neighbour.
+                try:
+                    nn_taxid, _ = resolve_one(nn, names_idx, rank_of, "species")
+                except ValueError:
+                    nn_taxid, _ = resolve_one(nn, names_idx, rank_of, "")
                 nn_taxids.append(str(merged.get(nn_taxid, nn_taxid)))
             except ValueError:
                 nn_missing.append(nn)
@@ -348,7 +359,20 @@ def main() -> int:
         else:
             seen[r["taxid"]] = r["name"]
 
-    cols = [c for c in resolved[0] if not c.startswith("_")] if resolved else []
+    # A HEADERLESS 2-BYTE FILE IS NOT AN OUTPUT.
+    #
+    # With --allow-unresolved and nothing resolvable, `cols` fell back to [] and
+    # csv.DictWriter with empty fieldnames wrote only a line terminator - then exited 0.
+    # scripts/run_bakeoff.sh gates on `[[ -s "$WATCHLIST" ]]`, and a 2-byte file is
+    # non-empty, so it passed the check and the bake-off ran against an empty watchlist.
+    if not resolved:
+        sys.stderr.write(
+            "[resolve] ERROR: nothing resolved, so no watchlist would be written.\n"
+            "[resolve] Refusing to emit an empty file: it is non-empty to `test -s`, so "
+            "downstream steps would accept it and screen for no organisms at all - a "
+            "clean negative for the entire watchlist.\n")
+        return 2
+    cols = [c for c in resolved[0] if not c.startswith("_")]
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=cols, delimiter="\t", extrasaction="ignore")

@@ -39,7 +39,11 @@ SCRIPTS = REPO / "scripts"
 PACK = REPO / "packs" / "human"
 
 COV_COLS = [
-    "sample", "role", "taxid", "taxon", "group", "reference_bp", "reference_contigs",
+    # "platform" is here because score_evidence.py selects the read-identity floor by
+    # platform as well as group. It was missing, and cov_row() silently dropped unknown
+    # keys, so a fixture passing platform= exercised nothing.
+    "sample", "role", "taxid", "taxon", "group", "platform",
+    "reference_bp", "reference_contigs",
     "unique_reads", "reads_per_million", "aligned_bases", "breadth", "mean_depth",
     "depth_cv", "window_bp", "windows_expected", "windows_occupied", "window_occupancy",
     "mean_identity", "best_neighbour_taxid", "best_neighbour_reads", "neighbour_ratio",
@@ -64,6 +68,12 @@ def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
 
 def cov_row(**kw) -> str:
     d = {c: "" for c in COV_COLS}
+    # Reject unknown keys rather than dropping them. The join only walks COV_COLS, so a
+    # misspelled or missing column name used to vanish without trace - a fixture would
+    # then assert a behaviour it had not actually set up, and pass.
+    unknown = sorted(set(kw) - set(COV_COLS))
+    if unknown:
+        raise KeyError(f"cov_row() got column(s) not in COV_COLS: {unknown}")
     d.update(kw)
     return "\t".join(str(d[c]) for c in COV_COLS)
 
@@ -189,6 +199,37 @@ def test_tiering(tmp: Path) -> None:
         got = f.get(sample, {}).get("tier", "<missing>")
         record(f"tier:{sample}", got == want, f"got {got}, want {want}")
 
+    # ---- the identity floor must be platform-aware ----
+    #
+    # score_evidence.py had no platform term, so the pack's 0.98 Illumina floor was
+    # applied to ONT reads, whose mean identity is ~0.95-0.98. Every bacterial and
+    # fungal ONT finding failed on sequencing error alone and capped at `supported`,
+    # with a reason string indistinguishable from genuinely weak evidence. Same
+    # evidence, both platforms, at an identity ONT really delivers.
+    cov_p = tmp / "platform.tsv"
+    def pestis(sample: str, platform: str) -> str:
+        return cov_row(
+            sample=sample, role="sample", taxid="632", taxon="Yersinia pestis",
+            group="bacteria", platform=platform, reference_bp=4653728,
+            unique_reads=4000, reads_per_million=2000.0, breadth=0.4000,
+            mean_depth=5.0, depth_cv=1.00, window_bp=1000, windows_expected=4654,
+            windows_occupied=3723, window_occupancy=0.8000,
+            mean_identity=0.9520, neighbour_ratio="20.0",
+            screen_assigned_reads=4400, mapped_fraction_of_assigned="0.9090",
+            total_reads_screened=5000000, mapq_min=10)
+    write_cov(cov_p, [pestis("ONT", "ont"), pestis("ILMN", "illumina")])
+    fp = score(tmp, cov_p)
+    record("tier:ONT bacteria can reach confirmed at ONT-realistic identity",
+           fp.get("ONT", {}).get("tier") == "confirmed_in_silico",
+           f"tier={fp.get('ONT', {}).get('tier')} "
+           f"reasons={fp.get('ONT', {}).get('reasons', '')[:120]}")
+    record("tier:Illumina still holds the strict floor at the same identity",
+           fp.get("ILMN", {}).get("tier") == "supported",
+           f"tier={fp.get('ILMN', {}).get('tier')}")
+    record("tier:the reason names which platform rule was applied",
+           "ont/default" in fp.get("ONT", {}).get("reasons", ""),
+           fp.get("ONT", {}).get("reasons", "")[:160])
+
     # A database gap must NOT be reported as a negative.
     gap = [r for r in f.values() if r["tier"] == "no_reference"]
     record("tier:no_reference surfaces as a database gap", len(gap) == 1,
@@ -265,6 +306,39 @@ def test_marker_gating(tmp: Path) -> None:
     record("marker:unevaluated veto is disclosed",
            "CAVEAT" in f2.get("NOVETO", {}).get("reasons", ""),
            f2.get("NOVETO", {}).get("tier", ""))
+    # AND it must cap the tier, not merely mention it in prose. B. anthracis's veto
+    # marker (bcereus_chr_ces) is untested here, so the near-neighbour argument against
+    # the call was never made - confirming anyway treats an ungathered check as passed.
+    record("marker:an unevaluable veto HOLDS the finding at supported",
+           f2.get("NOVETO", {}).get("tier") == "supported",
+           f"tier={f2.get('NOVETO', {}).get('tier')}")
+
+    # The vaccine case, which is the one with a public-health consequence. 18 markers
+    # referenced by rules can only ever be UNKNOWN, so 8 of 9 vaccine_if rules can never
+    # fire; a Sabin vaccine strain satisfied Enterovirus C's confirm_requires while its
+    # polio_sabin check was untestable, and was reported as confirmed poliovirus.
+    cov3 = tmp / "gating3.tsv"
+    write_cov(cov3, [cov_row(
+        sample="SABIN", role="sample", taxid="138950", taxon="Enterovirus C",
+        group="virus", reference_bp=7440, unique_reads=900, reads_per_million=180.0,
+        breadth=0.9500, mean_depth=12.0, depth_cv=0.60, window_bp=1000,
+        windows_expected=8, windows_occupied=8, window_occupancy=1.0000,
+        mean_identity=0.9900, best_neighbour_taxid="12080",
+        best_neighbour_reads=5, neighbour_ratio="180.0",
+        screen_assigned_reads=1000, mapped_fraction_of_assigned="0.9000",
+        total_reads_screened=5000000, mapq_min=10, platform="illumina")]) 
+    mk3 = tmp / "markers3.tsv"
+    # polio_VP1 present (built), polio_sabin absent from the FILE = untested.
+    mk3.write_text("sample\tmarker_id\tstate\nSABIN\tpolio_VP1\tPRESENT\n")
+    f3 = score(tmp, cov3, markers=mk3)
+    sabin_tier = f3.get("SABIN", {}).get("tier", "<missing>")
+    sabin_why = f3.get("SABIN", {}).get("reasons", "")
+    record("marker:an untestable vaccine check HOLDS the finding at supported",
+           sabin_tier != "confirmed_in_silico",
+           f"tier={sabin_tier} - confirming here reports a vaccine strain as "
+           f"wild-type disease")
+    record("marker:and says a vaccine strain could not be excluded",
+           "vaccine strain CANNOT be excluded" in sabin_why, sabin_why[:160])
 
 
 # ---------------------------------------------------------------------------

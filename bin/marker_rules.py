@@ -321,6 +321,31 @@ def evaluate(taxon: str, spec: dict, state: dict[str, int]) -> dict:
         else:
             out["reasons"].append(f"{key} = {STATE_NAME[val]}")
 
+    # report_always: markers surfaced regardless of whether any rule fires.
+    #
+    # This key was accepted by the parser, documented in marker_rules.yaml's header as
+    # "markers always surfaced (resistance, subtyping)", and populated for real taxa -
+    # V. cholerae's vchol_wbeO1/vchol_wbfZ/vchol_tcpA serogroup and pilus typing, and
+    # A. fumigatus's cyp51A resistance alleles, which the README calls "the finding" for
+    # that organism. evaluate() never read it and nothing downstream surfaced it, so
+    # those markers were curated, built, scored into marker_states.tsv and then dropped
+    # before the report: a documented capability that silently produced nothing.
+    always = spec.get("report_always") or []
+    if isinstance(always, str):
+        always = [x.strip() for x in always.replace(",", " ").split() if x.strip()]
+    # PRESENT/ABSENT rather than TRUE/FALSE: these are marker states being surfaced to
+    # an analyst, not the truth values of a rule.
+    marker_state_name = {TRUE: "PRESENT", FALSE: "ABSENT", UNKNOWN: "UNKNOWN"}
+    reported = []
+    for mid in always:
+        reported.append({"marker_id": mid,
+                         "state": marker_state_name[state.get(mid, UNKNOWN)]})
+    out["report_always"] = reported
+    if reported:
+        out["reasons"].append(
+            "always-reported: "
+            + ", ".join(f"{r['marker_id']}={r['state']}" for r in reported))
+
     out["untested"] = sorted(set(out["untested"]))
     return out
 
