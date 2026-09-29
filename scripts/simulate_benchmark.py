@@ -69,6 +69,7 @@ import os
 import random
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import time
@@ -810,6 +811,42 @@ class GenomeIndex:
         return [name for _, name in scored[:limit]]
 
 
+def uncompressed_bases(path: Path) -> int:
+    """Approximate base count of a FASTA, cheaply, without decompressing it.
+
+    Needed because ART expresses depth as FOLD COVERAGE, so a wrong reference size
+    silently produces a wrong number of reads. Getting it wrong is expensive: treating
+    the 3.1 Gbp human genome as 1 bp produced -f 567600000 and would have run ART until
+    the disk filled; treating it as its GZIPPED size (932 MB) overstates coverage 3.3x
+    and quietly breaks the declared host fraction.
+
+    For a .gz, gzip's trailing ISIZE field gives the uncompressed byte count in O(1).
+    It is stored mod 2^32, so it is only trustworthy below 4 GiB - checked here, with a
+    fall back to streaming the file when it is not. Byte count overstates the base count
+    by roughly 1% for headers and newlines, which is immaterial for a coverage figure.
+    """
+    if str(path).endswith(".gz"):
+        try:
+            with path.open("rb") as fh:
+                fh.seek(-4, os.SEEK_END)
+                isize = struct.unpack("<I", fh.read(4))[0]
+            # ISIZE wraps at 4 GiB. Accept it only when the compressed size makes a
+            # sub-4-GiB original plausible (gzip rarely beats ~4x on FASTA).
+            if isize > 0 and path.stat().st_size * 12 > isize:
+                return isize
+        except (OSError, struct.error):
+            pass
+        n = 0
+        with gzip.open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 24), b""):
+                n += len(chunk)
+        return n
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
 def resolve_host_genome(db_root: Path, host: str) -> Optional[Path]:
     """Host genome as written by scripts/fetch_host_genome.sh.
 
@@ -1068,12 +1105,29 @@ class ArtSimulator(Simulator):
     paired = True
 
     def commands(self, genome, reads, seed, prefix, threads, opts):
-        genome_bases = max(1, int(opts.get("genome_bases") or 1))
+        genome_bases = int(opts.get("genome_bases") or 0)
+        if genome_bases <= 0:
+            # Was `max(1, ...)`, which silently substituted 1 bp for "unknown" and
+            # turned 1.89M host reads into -f 567600000 - 567 million-fold coverage of
+            # the human genome. ART would have run until the disk filled. A missing
+            # genome size is not a value to default; it is a bug to report.
+            raise SystemExit(
+                f"ERROR: ART needs the reference size to convert {reads} reads into fold "
+                f"coverage, and genome_bases was not supplied for {genome}.\n"
+                f"       Refusing to guess: defaulting it produces an absurd -f and ART "
+                f"will run until the disk fills.")
         read_length = opts["read_length"]
         # art_illumina -c is reads PER REFERENCE SEQUENCE, which for a multi-contig
         # or plasmid-bearing assembly would over-generate wildly. Fold coverage is
         # the only knob that maps cleanly onto "N pairs from this whole genome".
         fold = (reads * 2.0 * read_length) / genome_bases
+        if fold > 10000.0:
+            raise SystemExit(
+                f"ERROR: computed fold coverage {fold:,.0f}x for {genome} "
+                f"({reads} reads over {genome_bases:,} bases) is implausible.\n"
+                f"       Refusing to run: ART would generate until the disk fills. This "
+                f"almost always means the reference size is wrong, not that the depth "
+                f"was requested.")
         fold = max(fold, 1e-6)
         # VERIFY: -ss profile name (HS25 = HiSeq 2500) and the -m/-s fragment
         # parameters against `art_illumina --help`; -na suppresses the SAM output.
@@ -1150,12 +1204,36 @@ class NanosimSimulator(Simulator):
         return (f"{prefix}*_reads.fastq", None)
 
 
-def resolve_simulators(platforms: Sequence[str]) -> Dict[str, Optional[Simulator]]:
-    """Pick the best available simulator per platform, and say how to install it."""
+def resolve_simulators(platforms: Sequence[str], illumina_choice: str = "auto",
+                       ont_choice: str = "auto") -> Dict[str, Optional[Simulator]]:
+    """Pick the simulator per platform, and say how to install it.
+
+    THROUGHPUT, measured on this pack rather than assumed: InSilicoSeq runs at roughly
+    350k read-pairs/min on a single sample and parallelises poorly, which for the full
+    359-sample matrix is ~124 h sequential. ART is C rather than Python and is
+    dramatically faster, at the cost of expressing depth as FOLD COVERAGE rather than a
+    read count - so requested counts are approximate. That is tolerable here because the
+    manifest records the MEASURED count (`spiked_reads`), which is the denominator a
+    sensitivity number should use anyway.
+
+    'auto' keeps InSilicoSeq's more realistic error model when it is present; pass 'art'
+    when wall time is the binding constraint.
+    """
     out: Dict[str, Optional[Simulator]] = {}
     if "illumina" in platforms:
         iss, art = which("iss"), which("art_illumina")
-        if iss:
+        if illumina_choice == "iss" and not iss:
+            raise SystemExit("ERROR: --illumina-simulator iss requested but `iss` is not "
+                             "on PATH.\n       mamba install -n <env> -c bioconda insilicoseq")
+        if illumina_choice == "art" and not art:
+            raise SystemExit("ERROR: --illumina-simulator art requested but `art_illumina` "
+                             "is not on PATH.\n       mamba install -n <env> -c bioconda art")
+        if illumina_choice == "art":
+            out["illumina"] = ArtSimulator(art)
+            LOG.info("illumina simulator: ART (%s) - chosen explicitly. Depth is "
+                     "expressed as fold coverage, so requested read counts are "
+                     "approximate; the manifest records the measured count.", art)
+        elif iss and illumina_choice in ("auto", "iss"):
             out["illumina"] = IssSimulator(iss)
             LOG.info("illumina simulator: InSilicoSeq (%s)", iss)
         elif art:
@@ -1173,7 +1251,16 @@ def resolve_simulators(platforms: Sequence[str]) -> Dict[str, Optional[Simulator
     if "ont" in platforms:
         badread = which("badread")
         nanosim = which("simulator.py") or which("nanosim")
-        if badread:
+        if ont_choice == "nanosim" and not nanosim:
+            raise SystemExit("ERROR: --ont-simulator nanosim requested but it is not on "
+                             "PATH.\n       mamba install -n <env> -c bioconda nanosim")
+        if ont_choice == "badread" and not badread:
+            raise SystemExit("ERROR: --ont-simulator badread requested but it is not on "
+                             "PATH.\n       mamba install -n <env> -c bioconda badread")
+        if ont_choice == "nanosim":
+            out["ont"] = NanosimSimulator(nanosim, os.environ.get("NANOSIM_MODEL_PREFIX"))
+            LOG.info("ont simulator: NanoSim (%s) - chosen explicitly", nanosim)
+        elif badread and ont_choice in ("auto", "badread"):
             out["ont"] = BadreadSimulator(badread)
             LOG.info("ont simulator: Badread (%s)", badread)
         elif nanosim:
@@ -1504,10 +1591,15 @@ def _compose(sc: Scenario, level: Optional[float],
             # than the requested one - the manifest must describe the FASTQ.
             notes.append(f"host_filled={remainder - host_frac:.6g}")
         host_frac = remainder
+        # genome_bases is required by the ART path to compute fold coverage. At this
+        # point host_fasta is still the gzipped reference, so its file size is NOT the
+        # base count - see uncompressed_bases().
+        host_bases = uncompressed_bases(host_fasta)
         components.insert(0, Component(
             kind="host", label=sc.host, genome_src=host_fasta,
             reads=int(round(total_reads * host_frac)),
-            seed=derive_seed(master_seed, sample, "host", sc.host)))
+            seed=derive_seed(master_seed, sample, "host", sc.host),
+            genome_bases=host_bases))
     else:
         host_frac = 0.0
         if remainder > 1e-9:
@@ -1987,6 +2079,15 @@ notes:
     p.add_argument("--seed", type=int, default=1,
                    help="master seed; per-sample seeds are derived from it "
                         "(default: %(default)s)")
+    p.add_argument("--illumina-simulator", choices=("auto", "iss", "art"), default="auto",
+                   help="auto prefers InSilicoSeq for its error model; 'art' is far "
+                        "faster (C, not Python) but expresses depth as fold coverage so "
+                        "read counts are approximate - the manifest records the measured "
+                        "count either way (default: %(default)s)")
+    p.add_argument("--ont-simulator", choices=("auto", "badread", "nanosim"),
+                   default="auto",
+                   help="auto prefers Badread, which needs no training data "
+                        "(default: %(default)s)")
     p.add_argument("--threads", type=int, default=8,
                    help="threads passed to the simulators (default: %(default)s)")
     p.add_argument("--dry-run", action="store_true",
@@ -2089,7 +2190,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     LOG.info("plan: manifest -> %s", manifest_path)
     LOG.info("plan: samplesheet -> %s", samplesheet_path)
 
-    sims = resolve_simulators(sorted({p.platform for p in plans}))
+    sims = resolve_simulators(sorted({p.platform for p in plans}),
+                              illumina_choice=args.illumina_simulator,
+                              ont_choice=args.ont_simulator)
     missing = [plat for plat, sim in sims.items() if sim is None]
     if missing and not args.dry_run:
         raise SystemExit(

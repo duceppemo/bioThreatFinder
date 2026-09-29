@@ -43,7 +43,18 @@ screen:
   # See docs/decisions.md D2 for why, and prefer a prebuilt index over a build.
   krakenuniq_db: "${btf_db}/krakenuniq/standard"
   # Orthogonal, ANI-based, very low false-positive rate for bacteria/archaea.
-  sylph_db: "${db_root}/sylph/gtdb-r220-c200-dbv1.syldb"
+  #
+  # Built from THIS PACK'S OWN REFS, not the GTDB distribution
+  # (scripts/build_sylph_db.sh). sylph reports genome FILENAMES rather than taxids, and
+  # parse_screen maps a hit back to a watchlist taxon by reading the taxid out of that
+  # filename. The pack's refs are named <taxid>_<name>.fna.gz so this works; GTDB names
+  # its files by GTDB accession, so every lookup missed and the arm silently contributed
+  # nothing while the report still said "no sylph/ANI support".
+  #
+  # The GTDB sketch at ${db_root}/sylph/gtdb-r220-c200-dbv1.syldb remains useful for
+  # asking "what else is in here", but that is Kraken2's job in this pipeline and it
+  # would need a GTDB->NCBI mapping to answer the watchlist question.
+  sylph_db: "${btf_db}/sylph/human_pack_refs.syldb"
   # Eukaryotic pathogens (parasites, fungi) are poorly served by GTDB; rely on
   # Kraken2 PlusPF plus stage-2 alignment for these.
   eukaryote_strategy: kraken2_then_align
