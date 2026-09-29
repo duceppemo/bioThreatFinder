@@ -22,7 +22,7 @@ across human, animal and plant health.
 | [`docs/STATUS.md`](docs/STATUS.md) | Session handoff: what is running, environment traps, unresolved questions. |
 
 ```bash
-python3 tests/test_pipeline.py     # 50 fixture-driven checks, ~10 s, no databases
+python3 tests/test_pipeline.py     # 76 fixture-driven checks, ~10 s, no databases
 ```
 
 ## Why two stages
@@ -542,7 +542,7 @@ Design targets, set deliberately rather than by what happened to be installed:
 
 ## Benchmarking
 
-30 scenarios, 28 machine-checkable expectations, weighted deliberately towards
+31 scenarios, 28 machine-checkable expectations, weighted deliberately towards
 failure modes rather than easy positives — near neighbours with the target
 genuinely absent, target chromosomes stripped of their virulence plasmids,
 vaccine strains, index hopping, a 99.9%-host low-biomass case, and a plumbing positive
@@ -562,7 +562,7 @@ homology-based detection cannot see a wholly novel agent.
 
 Scaffold complete, databases largely built, **nothing measured**.
 
-`tests/test_pipeline.py` holds 50 fixture-driven checks covering every decision path in
+`tests/test_pipeline.py` holds 76 fixture-driven checks covering every decision path in
 the tiering, marker-gating, confirmation-gate, coverage-metric and screen-parsing logic.
 It caught a real bug on its first run: a broken `elif` chain meant a BCG vaccine strain
 was being reported as `supported` — a possible TB detection — instead of `vaccine_strain`.

@@ -210,6 +210,71 @@ resolved to the same taxids, which is precisely why it was invisible.
 
 ---
 
+## D10 — Read-identity floors are per platform, not only per group
+
+**Decision:** `min_read_identity` resolves platform+group → platform → group → default,
+and the findings row names which rule was applied. Illumina keeps 0.98 for
+bacteria/fungi; ONT starts at 0.90 (virus 0.80, parasite 0.88). The marker tier gets the
+same treatment via `--platform` / `--ont-identity-slack`.
+
+**Why:** `[MEASURED]` `bin/score_evidence.py` contained no platform term at all. A 0.98
+read-identity floor is a statement about **sequencing error** as much as about
+phylogenetic distance. Illumina substitution error is ~0.1–1%, so 0.98 leaves room to
+discriminate species. ONT does not reach it: R10.4.1 simplex means ~97–98% with current
+basecallers, and `badread`'s default — what our own ONT benchmark simulates — is a 95%
+mean, verified from `badread simulate --help`. So **every bacterial and fungal ONT finding
+failed the identity gate on sequencing error alone**, at every spike level, and capped at
+`supported` with a reason string indistinguishable from genuinely weak evidence. The
+`plumbing_positive_control`, whose stated purpose is to fail loudly on misconfiguration,
+would have failed permanently on its ONT arm for this reason.
+
+**What this costs:** on ONT, read identity can no longer discriminate near neighbours.
+That burden moves to competitive mapping (`attributed_to_neighbour`) and the marker tier,
+and the identity gate degrades to a genus-level sanity check. That is a genuinely weaker
+guarantee on that platform, and it is stated in `pack.yaml` rather than hidden in a number.
+
+**Status: PROVISIONAL.** The ONT numbers are reasoned from platform error rates, not
+measured on this pipeline. They are the first thing to set once the benchmark runs.
+
+**Would reverse it:** measurement showing ONT near-neighbour confusion at 0.90 that
+competitive mapping and markers do not catch. Then the floor rises and ONT confirmation
+depends more heavily on the marker tier.
+
+**How it hid:** two regression tests asserted the floor was **strict**
+(`>= 0.98`) rather than **reachable**. They now assert reachability per platform, and a
+fixture-level test scores the same evidence on both platforms.
+
+---
+
+## D11 — The two stage-2 gates are mutually incoherent, and that is recorded rather than patched
+
+**Finding:** `[MEASURED]` `min_unique_reads` and `min_breadth` are ANDed, and breadth is
+bounded by read count — with reads of length *L* on a genome of size *G*, *N* reads can
+reach at best *N·L/G* breadth. So whenever `min_breadth · G / L > min_unique_reads` the
+read floor **cannot** bind: the stated limit of detection understates the real one by
+exactly that ratio.
+
+Measured on the shipped human pack at 150 bp, using genome sizes from the built refs
+manifest: **75 of 89 taxa** have a decorative read floor. Worst cases —
+*Schistosoma mansoni* 243×, *Angiostrongylus cantonensis* 196×,
+*Echinococcus multilocularis* 91×. *Balamuthia mandrillaris*, whose own watchlist note
+says "low read counts are expected and still meaningful", needs ~3,159 reads to clear its
+own breadth floor against the 50 the file declares. In the other direction breadth never
+binds for *R. prowazekii* or Influenza A, so neither column does the job it claims.
+
+**Decision: report, do not recalibrate.** Recomputing one gate from the other requires
+choosing a spread factor, and choosing it from reasoning rather than measurement would
+replace one arbitrary set of numbers with another — the exact thing this project is trying
+not to do, and these thresholds are already slated to come from the benchmark.
+`scripts/check_threshold_coherence.py` prints the per-taxon table and
+`tests/test_pipeline.py` **pins the counts at 75 of 89**, so a pack edit shows up as
+coherence improving or regressing instead of silently staying broken.
+
+**Would resolve it:** the first real benchmark run. Per-taxon detection rates against
+declared rpm give the actual LoD, and both gates get set from that.
+
+---
+
 ## D9 — Rejected for now
 
 | Option | Why not yet |
@@ -224,13 +289,33 @@ resolved to the same taxids, which is precisely why it was invisible.
 
 ## Standing principle, learned the hard way
 
-**Nine** distinct bugs in this project have shared one shape: *a mismatch that produces an
-empty or degraded result indistinguishable from a clean negative.* Rotted taxid · GTDB
-namespace · refs base path · crossgroup subset · duplicated bundle sequence · stale
-taxonomy · kraken2 2.0.8 lacking the minimizer flag · marker manifest truncation · refs
-manifest truncation.
+**Well over thirty** distinct bugs in this project have shared one shape: *a mismatch that
+produces an empty or degraded result indistinguishable from a clean negative.* Rotted
+taxid · GTDB namespace · refs base path · crossgroup subset · duplicated bundle sequence ·
+stale taxonomy · kraken2 2.0.8 lacking the minimizer flag · marker manifest truncation ·
+refs manifest truncation · sylph filename keys · ART fold coverage · a silent Kraken2
+death · the ONT identity floor (D10) · two genomes never masked but recorded as clean ·
+minimap2's ignored exit code · a GTDB index stamped `NCBI` because the stamp read a flag ·
+`--with-maps` overwriting the taxonomy it had just pinned · seven threshold params
+declared and wired to nothing · a header-only samplesheet exiting 0 · an index-hop that
+moved 0.02 target reads · a benchmark axis declared in YAML and read by no code · a
+bake-off variant identical to its own baseline · a vaccine check that could never fire.
 
 So the first question for any new component is **"could this silently produce nothing?"**
 — and the answer must be a guard that fails loudly, plus a check against the written
-artifact rather than an assertion in code. Two of the nine were found only by re-reading
-what was written; one fix was itself vacuous and passed its own logic.
+artifact rather than an assertion in code.
+
+Three sharper lessons, each paid for:
+
+1. **A guard that asserts how a script was invoked is not a guard.** The GTDB namespace
+   stamp, the Bracken read-length model, the KrakenUniq HLL precision and the host-genome
+   path check all passed their own logic while failing their stated purpose. Check the
+   artifact.
+2. **A threshold must be reachable, not merely strict.** Tests that assert a floor is
+   high lock in a floor that nothing can meet (D10, D11).
+3. **Stamps make a resume safe sequentially and say nothing about concurrency.** Two
+   builders sharing a database directory can interleave partial downloads, and a corrupt
+   reference in an index does not error — it misclassifies. This was learned by doing it.
+
+Several fixes were themselves vacuous on the first attempt and were caught only by
+re-reading the written artifact.

@@ -237,9 +237,15 @@ process METABULI {
     label 'process_metabuli'
     conda "bioconda::metabuli=1.2.0"
 
-    // A Metabuli failure must not sink the run: KrakenUniq remains primary and the
-    // screen parser records which classifiers actually produced output, so a
-    // missing arm is visible rather than silently reducing sensitivity.
+    // A Metabuli failure must not sink the run: Kraken2 is the primary arm (D2) and
+    // the screen parser records which classifiers actually produced output.
+    //
+    // CAVEAT on that last clause: screen_summary.tsv is the record, and it reaches
+    // neither SCORE_EVIDENCE nor MAKE_REPORT - it is only published. For a taxon that
+    // WAS raised, n_classifiers/classifiers do travel into findings.tsv, so a missing
+    // arm is visible there. But if this arm were the ONLY one that would have raised a
+    // taxon, its ignored failure loses that taxon with no trace in the report at all.
+    // The summary is published beside the results as the compensating record.
     errorStrategy 'ignore'
 
     input:

@@ -334,11 +334,13 @@ workflow {
     SEQKIT_STATS(ch_clean)
 
     // -- Stage 1: broad screen (multi-classifier) --------------------------
-    // Four independent arms, because they fail in different directions:
-    //   krakenuniq  distinct-k-mer cardinality  -> specificity at stage 1
-    //   metabuli    DNA + amino acid            -> divergent / novel agents
-    //   kraken2     + Bracken                   -> abundance, continuity
-    //   sylph       ANI / containment           -> orthogonal, low FP
+    // Independent arms, because they fail in different directions. Kraken2 is
+    // PRIMARY (decisions.md D2); KrakenUniq is opt-in and OFF by default:
+    //   kraken2     minimizer counts + duplicity -> specificity at stage 1, primary
+    //   metabuli    DNA + amino acid             -> divergent / novel agents
+    //   bracken     abundance re-estimation      -> abundance, continuity
+    //   sylph       ANI / containment            -> orthogonal, low FP
+    //   krakenuniq  HyperLogLog cardinality      -> OPT-IN second opinion
     // Any arm raises a candidate; consensus is recorded, not required. Requiring
     // consensus would discard the sensitivity that running four arms buys.
     def no_file = file("${projectDir}/assets/NO_FILE")
@@ -499,6 +501,6 @@ workflow {
 // NOTE: the top-level `workflow.onComplete` handler this file used to carry is not
 // permitted by the Nextflow 24+ strict script syntax, which allows only
 // declarations at script level. The run notice now prints from inside the entry
-// workflow instead (see `runNotice`), and the interpretation caveats live where
+// workflow instead (the run-summary block in the entry workflow), and the caveats live where
 // they actually matter - on every finding in the HTML report and the findings TSV,
 // not in terminal scrollback that nobody keeps.
