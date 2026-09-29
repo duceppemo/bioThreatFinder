@@ -843,10 +843,113 @@ def nt_queries(row: dict) -> List[str]:
         # deposited under a sister species (BoNT/E in C. butyricum, Stx in
         # Shigella) still belongs in the family, so relax the organism to genus.
         genus = genus_of(taxon)
-        if genus:
+        lin = _LINEAGE.get(taxon.lower())
+        clades = [genus] if genus else []
+        if lin:
+            clades += [c for c in (lin[1], lin[2]) if c]   # family, order
+        for clade in dedup_str(clades):
             for name in names:
-                out.append(f'{name}[All Fields] AND "{genus}"[Organism]')
+                out.append(f'{name}[All Fields] AND "{clade}"[Organism]')
+    if looks_like_rrna_or_organelle(row):
+        # rRNA and organelle loci are not indexed under [Gene Name]; they appear in
+        # titles as e.g. "18S ribosomal RNA gene". Without these the queries come back
+        # empty, which on the first build silently removed a `required` marker and made
+        # Balamuthia mandrillaris unconfirmable.
+        for name in (names or [gene]):
+            out.append(f'{name}[Title] AND {org}')
+        out.append(f'ribosomal RNA[Title] AND {org}')
+        out.append(f'small subunit ribosomal RNA[Title] AND {org}')
+        out.append(f'mitochondrion[Title] AND {org}')
+        out.append(f'complete genome[Title] AND {org}')
     return dedup_str(out)
+
+
+# taxon name (lowercased) -> (genus, family, order), from rankedlineage.dmp.
+# Populated once in main(); empty if the file is absent.
+_LINEAGE: dict = {}
+
+
+def load_rankedlineage(taxdump: Path) -> dict:
+    """Parse rankedlineage.dmp into name -> (genus, family, order).
+
+    WHY THIS IS NEEDED
+
+    The HMM tier is the remote-homology tier - the one that catches a divergent or
+    novel allele, and the reason the marker catalogue lists `hmm` for the filovirus
+    and BoNT families at all. A profile needs at least three sequences to mean
+    anything, and the first full build produced only 1-2 for ebola_NP, ebolaS_NP,
+    marburg_NP and cbut_bont, because queries relaxed no further than the GENUS. A
+    single orthoebolavirus species has almost no distinct RefSeq NP proteins.
+
+    Relaxing to the FAMILY (Filoviridae) is what makes a profile buildable, and family
+    is precisely the level at which remote homology should be modelled anyway - a
+    novel filovirus is a new member of the family, not of the species.
+
+    rankedlineage.dmp carries the name in column 2, so no join against names.dmp is
+    required.
+    """
+    path = taxdump / "rankedlineage.dmp"
+    out: dict = {}
+    if not path.exists():
+        LOG.warning("no rankedlineage.dmp under %s - gene_family queries cannot relax "
+                    "to family level, so HMM profiles for divergent families may not "
+                    "reach the 3-sequence minimum", taxdump)
+        return out
+
+    # taxid -> (genus, family, order), plus the scientific name as a key.
+    by_taxid: dict = {}
+    with path.open(encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            f = [x.strip() for x in line.split("|")]
+            if len(f) < 7 or not f[0].isdigit():
+                continue
+            lin = (f[3], f[4], f[5])          # genus, family, order
+            by_taxid[int(f[0])] = lin
+            if f[1]:
+                out[f[1].lower()] = lin
+
+    # ALSO key on synonyms and equivalent names.
+    #
+    # rankedlineage.dmp carries only the current SCIENTIFIC name, and ICTV has renamed
+    # most of the virus families this catalogue targets - "Marburg marburgvirus" is now
+    # a synonym, so a scientific-name-only lookup found no lineage for it and silently
+    # produced zero family-level queries. That is the same failure the watchlist avoids
+    # by resolving names through every accepted name class, and the fix is the same.
+    names_dmp = taxdump / "names.dmp"
+    n_syn = 0
+    if names_dmp.exists():
+        with names_dmp.open(encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                f = [x.strip() for x in line.split("|")]
+                if len(f) < 4 or not f[0].isdigit():
+                    continue
+                key = f[1].lower()
+                if key in out:
+                    continue
+                lin = by_taxid.get(int(f[0]))
+                if lin:
+                    out[key] = lin
+                    n_syn += 1
+    else:
+        LOG.warning("no names.dmp under %s - synonym lookups unavailable, so renamed "
+                    "taxa will get no family-level relaxation", taxdump)
+
+    LOG.info("loaded lineage for %d taxon names (%d via synonyms)", len(out), n_syn)
+    return out
+
+
+# Markers whose gene term is an rRNA or organelle designation rather than a gene
+# symbol. [Gene Name] does not index these - rRNA loci are annotated as e.g.
+# "18S ribosomal RNA" - which is why bmand_18S, nfow_18S and pjiro_mtLSU queries
+# came back empty on the first build. bmand_18S is a `required` marker, so its
+# absence made Balamuthia mandrillaris impossible to confirm at all.
+RRNA_TERMS = ("18s", "16s", "23s", "28s", "5.8s", "ssu", "lsu", "rrna", "its",
+              "mtlsu", "mito", "mitochondrial", "rdna")
+
+
+def looks_like_rrna_or_organelle(row: dict) -> bool:
+    blob = f"{row.get('gene','')} {row.get('aliases','')} {row.get('locus','')}".lower()
+    return any(t in blob for t in RRNA_TERMS)
 
 
 def aa_queries(row: dict) -> List[str]:
@@ -861,11 +964,19 @@ def aa_queries(row: dict) -> List[str]:
         out.append(f'{name}[Gene Name] AND {org}')
         out.append(f'{name}[All Fields] AND {org}')
     if strategy == "gene_family" and names:
+        # Relax outward: genus, then FAMILY, then order. Family is the level at which
+        # remote homology should be modelled for a profile - a novel filovirus is a new
+        # member of Filoviridae, not of Zaire ebolavirus - and it is what gets a profile
+        # past the 3-sequence minimum.
         genus = genus_of(taxon)
-        if genus:
+        lin = _LINEAGE.get(taxon.lower())
+        clades = [genus] if genus else []
+        if lin:
+            clades += [c for c in (lin[1], lin[2]) if c]   # family, order
+        for clade in dedup_str(clades):
             for name in names:
-                out.append(f'{name}[Protein Name] AND "{genus}"[Organism]')
-                out.append(f'{name}[All Fields] AND "{genus}"[Organism]')
+                out.append(f'{name}[Protein Name] AND "{clade}"[Organism]')
+                out.append(f'{name}[All Fields] AND "{clade}"[Organism]')
     if strategy == "named_region":
         for name in names or [gene]:
             out.append(f'{name}[All Fields] AND {org}')
@@ -1622,11 +1733,23 @@ def self_test() -> int:
         check("marker_id containing '|' is rejected", False)
     except ValueError:
         check("marker_id containing '|' is rejected", True)
-    try:
-        make_marker_header("ok_id", "A|B", "y")
-        check("accession containing '|' is rejected", False)
-    except ValueError:
-        check("accession containing '|' is rejected", True)
+    # An accession containing '|' is SANITISED, not rejected. Rejecting it was the
+    # original behaviour and it was wrong: NCBI protein fetches routinely return
+    # SwissProt-style names like sp|Q306W5.1|POLS_EEEV1, so raising turned an ordinary
+    # identifier format into a hard retrieval failure for every affected marker.
+    check("sp|ACC|ENTRY yields the real accession",
+          sanitise_accession("sp|Q306W5.1|POLS_EEEV1") == "Q306W5.1")
+    check("tr|ACC|ENTRY yields the real accession",
+          sanitise_accession("tr|A0A1B0|SOMETHING") == "A0A1B0")
+    check("a plain accession is untouched",
+          sanitise_accession("NC_003131.1") == "NC_003131.1")
+    check("other pipes are replaced, not dropped",
+          sanitise_accession("weird|thing|here") == "weird_thing_here")
+    _h = make_marker_header("ok_id", "sp|A1|B2", "desc | with pipe")
+    _p = parse_marker_header(_h)
+    check("header round-trips a sanitised accession and a piped description",
+          _p is not None and _p[0] == "ok_id" and _p[1] == "A1"
+          and _p[2] == "desc | with pipe", str(_p))
 
     print("-- FASTA write/read round-trip through a real file --")
     with tempfile.TemporaryDirectory(prefix="btf_selftest.") as td:
@@ -1854,6 +1977,12 @@ notes:
                    help="directory containing pack definitions (default: %(default)s)")
     p.add_argument("--db-root", type=Path, default=DEFAULT_DB_ROOT,
                    help="shared database root (default: %(default)s)")
+    p.add_argument("--taxdump", type=Path,
+                   default=Path("/media/8tb/bioThreatFinder/taxdump/2026-09-29"),
+                   help="pinned NCBI taxonomy snapshot, used for rankedlineage.dmp so "
+                        "gene_family queries can relax to family level. Should be the "
+                        "same snapshot the watchlist was resolved against "
+                        "(default: %(default)s)")
     p.add_argument("--threads", type=int, default=8,
                    help="threads for minimap2/hmmbuild/aligners (default: %(default)s)")
     p.add_argument("--email", default=os.environ.get("NCBI_EMAIL", ""),
@@ -1961,6 +2090,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         LOG.warning("no --email given. NCBI's usage policy asks for a contact address "
                     "and they will throttle or block anonymous bulk use; set --email "
                     "or $NCBI_EMAIL.")
+
+    global _LINEAGE
+    _LINEAGE = load_rankedlineage(args.taxdump)
 
     rows = read_marker_catalogue(catalogue_path)
     LOG.info("catalogue: %d marker row(s)", len(rows))
