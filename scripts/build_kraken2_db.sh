@@ -351,6 +351,27 @@ prepare_taxonomy() {
             if (( SKIP_MAPS == 0 )); then
                 log "--with-maps: fetching accession2taxid maps only (~25 GB)"
                 run "$KRAKEN2_BUILD" --db "$DB_DIR" --download-taxonomy --threads "$THREADS"
+                # --download-taxonomy FETCHES AND UNPACKS NCBI'S CURRENT TAXDUMP INTO
+                # THIS SAME DIRECTORY, replacing the pinned nodes.dmp/names.dmp copied
+                # above - and then the step was stamped complete, so re-running skipped
+                # it. The result was a ~100 GB index built against current taxonomy
+                # while the watchlist is pinned to a dated snapshot: the two disagree,
+                # lookups miss for every drifted taxon, and nothing says so. Restore
+                # the pinned files and VERIFY, rather than assuming the copy held.
+                log "restoring pinned taxonomy over kraken2-build's downloaded copy"
+                run cp -f "${TAXDUMP_SRC}/nodes.dmp" "${taxdir}/nodes.dmp"
+                run cp -f "${TAXDUMP_SRC}/names.dmp" "${taxdir}/names.dmp"
+                if (( DRY_RUN == 0 )); then
+                    for f in nodes.dmp names.dmp; do
+                        a="$(md5sum < "${TAXDUMP_SRC}/${f}" | cut -d" " -f1)"
+                        b="$(md5sum < "${taxdir}/${f}" | cut -d" " -f1)"
+                        [[ "$a" == "$b" ]] || die "after --with-maps, ${taxdir}/${f} does
+  not match the pinned ${TAXDUMP_SRC}/${f} (${b} vs ${a}). The index would be built
+  against a different taxonomy than the watchlist resolves against, which produces
+  silent lookup misses rather than an error. Refusing to stamp this step."
+                    done
+                    log "pinned taxonomy verified against ${TAXDUMP_SRC}"
+                fi
             fi
             set_stamp taxonomy
             return 0
@@ -554,6 +575,35 @@ fi
 
 check_free_space
 run mkdir -p "$DB_DIR" "$STAMP_DIR"
+
+# ---------------------------------------------------------------------------
+# ONE BUILD PER DATABASE DIRECTORY, ENFORCED.
+#
+# This was learned the hard way during the PlusPF build. A resume was started while
+# the original build was still running, both invoked `kraken2-build
+# --download-library bacteria` against the same directory, and the second one's
+# internal cleanup failed with `rm: cannot remove 'all/': Directory not empty`. Two
+# concurrent FTP transfers into one staging directory can interleave partial files
+# into library.fna, and a truncated or duplicated reference in a classification index
+# is invisible: it does not error, it just misclassifies or silently fails to match.
+#
+# The stamps make resuming safe SEQUENTIALLY; they say nothing about concurrency.
+# flock closes that gap. It is released automatically when this shell exits, however
+# it exits, so a killed build does not leave the directory permanently locked.
+# ---------------------------------------------------------------------------
+if (( DRY_RUN == 0 )); then
+    exec {BTF_LOCK_FD}> "${DB_DIR}/.btf_build.lock"
+    if ! flock -n "$BTF_LOCK_FD"; then
+        holder="$(cat "${DB_DIR}/.btf_build.owner" 2>/dev/null || echo unknown)"
+        die "another build already holds the lock on ${DB_DIR} (${holder}).
+  Two kraken2-build processes sharing one database directory can interleave partial
+  downloads into library.fna, and a corrupt reference in the index does not announce
+  itself - it misclassifies. Wait for that build, or stop it before resuming.
+  Completed steps are stamped, so resuming afterwards restarts nothing."
+    fi
+    printf 'pid=%s started=%s host=%s\n' "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        "$(hostname)" > "${DB_DIR}/.btf_build.owner"
+fi
 
 prepare_taxonomy
 download_libraries

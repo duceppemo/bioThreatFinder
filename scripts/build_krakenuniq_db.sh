@@ -128,7 +128,10 @@ FORCE=0
 CLEAN=0
 
 # Existing, current, unpacked NCBI taxdump on the shared READ-ONLY volume.
-TAXDUMP_SRC="/media/36tb/db/taxdump"
+# Pinned dated snapshot, NOT the shared /media/36tb/db/taxdump that D8 measured
+# at 201 days stale and decided to stop using.
+TAXDUMP_SRC="/media/8tb/bioThreatFinder/taxdump/2026-09-29"
+MAX_TAXDUMP_AGE_DAYS=90
 
 CONDA_BIN="/home/bioinfo/miniconda3/bin"
 
@@ -243,6 +246,7 @@ run()  {
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --btf-db)        BTF_DB="${2:?--btf-db needs a value}"; shift 2 ;;
+        --max-taxdump-age-days) MAX_TAXDUMP_AGE_DAYS="${2:?}"; shift 2 ;;
         --taxdump)       TAXDUMP_SRC="${2:?--taxdump needs a value}"; shift 2 ;;
         --threads)       THREADS="${2:?--threads needs a value}"; shift 2 ;;
         --libraries)     LIBRARIES="${2:?--libraries needs a value}"; shift 2 ;;
@@ -485,6 +489,27 @@ set_stamp()  { (( DRY_RUN == 1 )) || { mkdir -p "$STAMP_DIR"; date -u +%Y-%m-%dT
 # krakenuniq master (0.7.x). If a future version rejects an external taxonomy,
 # the fix is `krakenuniq-download --db <db> taxonomy`, which writes into
 # <db>/taxonomy - still never into the shared volume.
+# The taxonomy a screen is built against decides whether its taxids join the
+# watchlist. decisions.md D8 measured the shared /media/36tb/db/taxdump at 201 days
+# stale (+288,764 taxids of drift) and decided to stop using it; this script defaulted
+# to it anyway and had no age check, so a build could bake a 201-day-old taxonomy into
+# an index while the watchlist resolved against the pinned snapshot. Taxa added or
+# merged in between then silently fail to join - partial, invisible false negatives.
+require_fresh_taxdump() {
+    local src="$1" max="${2:-90}" age
+    [[ -s "${src}/nodes.dmp" ]] || return 0
+    age=$(( ( $(date -u +%s) - $(stat -c %Y "${src}/nodes.dmp") ) / 86400 ))
+    log "taxdump ${src} is ${age} day(s) old"
+    if (( age > max )); then
+        die "taxdump ${src} is ${age} days old (limit ${max}).
+  Reference sequences are current, so an old taxonomy drops or misassigns every
+  organism added since the snapshot, and the index then disagrees with the
+  watchlist - silently, as zero matches rather than an error.
+  Refresh from https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/new_taxdump/ and pass
+  --taxdump, or pass --max-taxdump-age-days to accept the risk deliberately."
+    fi
+}
+
 prepare_taxonomy() {
     if have_stamp taxonomy && (( FORCE == 0 )); then
         skip "taxonomy already prepared (${TAX_DIR})"
@@ -500,6 +525,7 @@ prepare_taxonomy() {
        (which writes into ${DB_DIR}/taxonomy and never touches the shared volume)."
     done
 
+    require_fresh_taxdump "$TAXDUMP_SRC" "$MAX_TAXDUMP_AGE_DAYS"
     log "copying taxonomy from ${TAXDUMP_SRC} (copy, never symlink - see comment)"
     run mkdir -p "$TAX_DIR"
     run cp -f "${TAXDUMP_SRC}/nodes.dmp" "${TAX_DIR}/nodes.dmp"
@@ -761,6 +787,23 @@ fi
 check_jellyfish
 check_free_space
 run mkdir -p "$DB_DIR" "$STAMP_DIR"
+
+# ONE BUILD PER DATABASE DIRECTORY (see build_kraken2_db.sh for the incident that
+# prompted this). Stamps make resuming safe SEQUENTIALLY and say nothing about
+# concurrency; two builders sharing a directory can interleave partial downloads into
+# a reference file, and a corrupt reference in an index does not error - it
+# misclassifies. The lock releases on exit however the shell exits.
+if (( DRY_RUN == 0 )); then
+    exec {BTF_LOCK_FD}> "${DB_DIR}/.btf_build.lock"
+    if ! flock -n "$BTF_LOCK_FD"; then
+        holder="$(cat "${DB_DIR}/.btf_build.owner" 2>/dev/null || echo unknown)"
+        die "another build already holds the lock on ${DB_DIR} (${holder}).
+  Wait for it, or stop it before resuming. Completed steps are stamped, so resuming
+  afterwards restarts nothing."
+    fi
+    printf 'pid=%s started=%s host=%s\n' "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        "$(hostname)" > "${DB_DIR}/.btf_build.owner"
+fi
 
 prepare_taxonomy
 download_libraries

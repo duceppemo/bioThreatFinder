@@ -64,7 +64,10 @@ trap '_btf_on_err $LINENO' ERR
 # Defaults
 # ---------------------------------------------------------------------------
 BTF_DB="/media/8tb/bioThreatFinder"
-TAXDUMP_SRC="/media/36tb/db/taxdump"
+# Pinned dated snapshot, NOT the shared /media/36tb/db/taxdump that D8 measured
+# at 201 days stale and decided to stop using.
+TAXDUMP_SRC="/media/8tb/bioThreatFinder/taxdump/2026-09-29"
+MAX_TAXDUMP_AGE_DAYS=90
 THREADS=32
 
 # gtdb  = GTDB species representatives. Best bacterial/archaeal resolution and
@@ -242,6 +245,7 @@ run()  {
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --btf-db)          BTF_DB="${2:?--btf-db needs a value}"; shift 2 ;;
+        --max-taxdump-age-days) MAX_TAXDUMP_AGE_DAYS="${2:?}"; shift 2 ;;
         --taxdump)         TAXDUMP_SRC="${2:?--taxdump needs a value}"; shift 2 ;;
         --threads)         THREADS="${2:?--threads needs a value}"; shift 2 ;;
         --mode)            MODE="${2:?--mode needs a value}"; shift 2 ;;
@@ -511,6 +515,27 @@ set_stamp()  { (( DRY_RUN == 1 )) || { mkdir -p "$STAMP_DIR"; date -u +%Y-%m-%dT
 # GTDB->NCBI translation step before its output can be joined to a watchlist.
 # That translation does not exist in this pipeline yet, which is why --mode refseq
 # is the default.
+# The taxonomy a screen is built against decides whether its taxids join the
+# watchlist. decisions.md D8 measured the shared /media/36tb/db/taxdump at 201 days
+# stale (+288,764 taxids of drift) and decided to stop using it; this script defaulted
+# to it anyway and had no age check, so a build could bake a 201-day-old taxonomy into
+# an index while the watchlist resolved against the pinned snapshot. Taxa added or
+# merged in between then silently fail to join - partial, invisible false negatives.
+require_fresh_taxdump() {
+    local src="$1" max="${2:-90}" age
+    [[ -s "${src}/nodes.dmp" ]] || return 0
+    age=$(( ( $(date -u +%s) - $(stat -c %Y "${src}/nodes.dmp") ) / 86400 ))
+    log "taxdump ${src} is ${age} day(s) old"
+    if (( age > max )); then
+        die "taxdump ${src} is ${age} days old (limit ${max}).
+  Reference sequences are current, so an old taxonomy drops or misassigns every
+  organism added since the snapshot, and the index then disagrees with the
+  watchlist - silently, as zero matches rather than an error.
+  Refresh from https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/new_taxdump/ and pass
+  --taxdump, or pass --max-taxdump-age-days to accept the risk deliberately."
+    fi
+}
+
 prepare_taxonomy() {
     if have_stamp taxonomy && (( FORCE == 0 )); then
         skip "taxonomy already prepared (${TAX_DIR})"
@@ -521,6 +546,7 @@ prepare_taxonomy() {
         [[ -s "${TAXDUMP_SRC}/${f}" ]] \
             || die "required taxonomy file missing or empty: ${TAXDUMP_SRC}/${f}"
     done
+    require_fresh_taxdump "$TAXDUMP_SRC" "$MAX_TAXDUMP_AGE_DAYS"
     log "copying taxonomy from ${TAXDUMP_SRC} (copy, never symlink - see comment)"
     run mkdir -p "$TAX_DIR"
     run cp -f "${TAXDUMP_SRC}/nodes.dmp" "${TAX_DIR}/nodes.dmp"
@@ -664,6 +690,51 @@ build_local() {
     set_stamp "build"
 }
 
+detect_taxonomy_namespace() {
+    # ASK THE ARTIFACT, NOT THE FLAG.
+    #
+    # This used to be `[[ "$MODE" == gtdb ]] && echo GTDB || echo NCBI`: an assertion
+    # about how the script was invoked, not a check on what was written. The prebuilt
+    # route accepts `--prebuilt gtdb232` INDEPENDENTLY of --mode, and DB_DIR is
+    # ${BTF_DB}/metabuli/${MODE} - so `build_metabuli_db.sh --prebuilt gtdb232`
+    # unpacked a GTDB index into .../metabuli/refseq, exactly the path pack.yaml points
+    # at, and stamped it taxonomy_namespace=NCBI. main.nf's assertNcbiTaxonomy() then
+    # read that line, saw NCBI and let the run proceed; every Metabuli taxid failed to
+    # join the watchlist and the entire watchlist came back a clean negative. That is
+    # the very failure the guard exists to catch, defeated by trusting a flag.
+    #
+    # GTDB taxonomy carries rank-prefixed names (d__Bacteria, s__Escherichia coli),
+    # which NCBI never does, so the names file itself is the evidence.
+    local d="${1:-}" f names="" requested_gtdb=0
+    case "${MODE,,}|${PREBUILT,,}" in *gtdb*) requested_gtdb=1 ;; esac
+    for f in "${d}/taxonomy/names.dmp" "${d}/names.dmp" "${d}/taxonomy/nodes.dmp"; do
+        [[ -s "$f" ]] && { names="$f"; break; }
+    done
+    if [[ -n "$names" ]]; then
+        if head -c 2000000 "$names" 2>/dev/null \
+                | grep -qE '(^|[|[:space:]])[dpcofgs]__'; then
+            echo "GTDB (NOT NCBI - needs translation before joining watchlist.resolved.tsv)"
+            return 0
+        fi
+        # Absence of rank prefixes in a real names file is positive evidence of NCBI,
+        # and it OUTRANKS what was requested. If the two disagree, say so loudly: one
+        # of them is wrong and a reader needs to find out which before trusting a run.
+        if (( requested_gtdb )); then
+            echo "NCBI (CONTRADICTION: a GTDB collection was requested but ${names} carries no rank-prefixed names. Verify the index before use.)"
+        else
+            echo "NCBI (verified against ${names})"
+        fi
+        return 0
+    fi
+    # No artifact evidence either way: fall back to what was requested, and say the
+    # answer is unverified rather than implying it was checked.
+    if (( requested_gtdb )); then
+        echo "GTDB (NOT NCBI - needs translation before joining watchlist.resolved.tsv)"
+    else
+        echo "NCBI (UNVERIFIED - no taxonomy names file found under ${d} to confirm)"
+    fi
+}
+
 write_manifest() {
     local out="${DB_DIR}/BTF_BUILD_MANIFEST.txt"
     if (( DRY_RUN == 1 )); then
@@ -688,7 +759,7 @@ write_manifest() {
         fi
         # The taxonomy a screen was built against decides whether its taxids can be
         # joined to the watchlist at all. Record it where a reader will trip over it.
-        printf 'taxonomy_namespace=%s\n' "$( [[ "$MODE" == "gtdb" ]] && echo "GTDB (NOT NCBI - needs translation before joining watchlist.resolved.tsv)" || echo "NCBI" )"
+        printf 'taxonomy_namespace=%s\n' "$(detect_taxonomy_namespace "$DB_DIR")"
         printf 'host=%s\n' "$(hostname)"
     } > "$out"
     log "wrote build manifest ${out}"
@@ -729,6 +800,23 @@ fi
 
 check_free_space
 run mkdir -p "$DB_DIR" "$STAMP_DIR"
+
+# ONE BUILD PER DATABASE DIRECTORY (see build_kraken2_db.sh for the incident that
+# prompted this). Stamps make resuming safe SEQUENTIALLY and say nothing about
+# concurrency; two builders sharing a directory can interleave partial downloads into
+# a reference file, and a corrupt reference in an index does not error - it
+# misclassifies. The lock releases on exit however the shell exits.
+if (( DRY_RUN == 0 )); then
+    exec {BTF_LOCK_FD}> "${DB_DIR}/.btf_build.lock"
+    if ! flock -n "$BTF_LOCK_FD"; then
+        holder="$(cat "${DB_DIR}/.btf_build.owner" 2>/dev/null || echo unknown)"
+        die "another build already holds the lock on ${DB_DIR} (${holder}).
+  Wait for it, or stop it before resuming. Completed steps are stamped, so resuming
+  afterwards restarts nothing."
+    fi
+    printf 'pid=%s started=%s host=%s\n' "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        "$(hostname)" > "${DB_DIR}/.btf_build.owner"
+fi
 
 if [[ "$ROUTE" == "prebuilt" ]]; then
     fetch_prebuilt

@@ -57,7 +57,10 @@ def helpMessage() {
                          --report-minimizer-data supplies distinct-minimizer counts
                          and a duplicity ratio, which is what separates reads spread
                          across a genome from reads piled on a conserved locus.
-      --krakenuniq       OPT-IN second opinion (default off). Kraken2's minimizer
+      --skip_krakenuniq false
+                         OPT-IN second opinion (default off - note that OMITTING this
+                         flag leaves the arm OFF; `--krakenuniq` is not a parameter and
+                         Nextflow accepts unknown params silently). Kraken2's minimizer
                          columns are literally KrakenUniq's HyperLogLog code at the
                          same default precision, counting minimizers rather than
                          k-mers, and the only published comparison finds comparable
@@ -73,8 +76,13 @@ def helpMessage() {
       --skip_markers     Disable marker gating. Taxa whose calls depend on
                          plasmid/toxin loci will then be promoted on alignment
                          evidence alone, which is NOT defensible for several.
-      --min_unique_reads Stage-2 minimum on-target reads        [${params.min_unique_reads}]
-      --min_breadth      Stage-2 minimum reference breadth      [${params.min_breadth}]
+      Stage-2 threshold OVERRIDES. packs/<pack>/pack.yaml is the source of truth;
+      these only override it, and null means "use the pack value". An unknown key is
+      rejected rather than ignored.
+      --min_unique_reads    on-target reads      [${params.min_unique_reads ?: 'pack.yaml'}]
+      --min_breadth         reference breadth    [${params.min_breadth ?: 'pack.yaml'}]
+      --max_depth_cv        depth CV ceiling     [${params.max_depth_cv ?: 'pack.yaml'}]
+      --min_read_identity   identity floor       [${params.min_read_identity ?: 'pack.yaml (per platform AND group)'}]
 
     Profiles: conda, mamba, docker, singularity, workstation, test
     """.stripIndent()
@@ -150,7 +158,34 @@ def assertNcbiTaxonomy(dbDir, label) {
         return
     }
     def ns = line.split('=', 2)[1].trim()
-    if (!ns.toUpperCase().startsWith('NCBI')) {
+    def nsUpper = ns.toUpperCase()
+
+    // "NCBI" ALONE IS NOT ENOUGH OF AN ANSWER.
+    //
+    // build_metabuli_db.sh used to derive this line from --mode, so a GTDB prebuilt
+    // unpacked under --mode refseq was stamped NCBI and sailed through here. The
+    // builder now checks the written taxonomy instead, and says when it COULD NOT
+    // verify ("NCBI (UNVERIFIED ...)") or when the artifact and the request disagree
+    // ("NCBI (CONTRADICTION ...)"). Both still start with NCBI, so accepting any
+    // NCBI-prefixed string would re-open the hole one layer up.
+    if (nsUpper.contains('UNVERIFIED') || nsUpper.contains('CONTRADICTION')) {
+        exit 1, """
+        ERROR: the ${label} index at ${dbDir} records an UNCONFIRMED taxonomy namespace:
+
+          ${ns}
+
+        A GTDB-namespaced index joined to an NCBI-keyed watchlist yields ZERO matches -
+        not an error, just an empty result indistinguishable from a clean negative for
+        every organism on the watchlist. An unverified namespace is not evidence that
+        the index is usable, so it is refused rather than assumed.
+
+        Resolve by one of:
+          - rebuild so the taxonomy can be checked: scripts/build_metabuli_db.sh --mode refseq
+          - point --metabuli_db at an index whose manifest verifies as NCBI
+          - drop the arm deliberately:              --skip_metabuli
+        """.stripIndent()
+    }
+    if (!nsUpper.startsWith('NCBI')) {
         exit 1, """
         ERROR: the ${label} index at ${dbDir} is built in the '${ns}' taxonomy namespace.
 
@@ -198,6 +233,21 @@ def parseSamplesheet(path) {
             def meta = [id: id, platform: platform, role: role, single_end: (r2 == null)]
             return tuple(meta, r2 ? [r1, r2] : [r1])
         }
+        // A HEADER-ONLY SAMPLESHEET MUST NOT LOOK LIKE A SUCCESSFUL RUN.
+        //
+        // tests/data/samplesheet_test.csv was one line - the header - so `-profile
+        // test` yielded no samples: every per-sample channel was empty, SCORE_EVIDENCE
+        // ran on .ifEmpty([]) inputs, MAKE_REPORT emitted an empty report and the run
+        // exited 0. The profile documented as existing "so the channel wiring can be
+        // exercised in minutes" exercised none of it, and a green result was
+        // indistinguishable from a working pipeline.
+        .ifEmpty { exit 1, """
+        ERROR: samplesheet ${params.input} contains no data rows.
+
+        Nothing would be analysed and the run would still exit 0, which is
+        indistinguishable from a clean negative for every organism on the watchlist.
+        Add at least one sample row: sample,platform,fastq_1,fastq_2,role
+        """.stripIndent() }
 }
 
 // ---------------------------------------------------------------------------
