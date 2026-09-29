@@ -44,6 +44,22 @@
 #
 set -euo pipefail
 
+# An ERR trap, because `set -e` alone exits SILENTLY.
+#
+# This build died mid-way through the multi-hour bacteria download and left a log whose
+# last line was ordinary progress output - no error, no exit code, nothing to diagnose.
+# `set -e` had done its job and aborted, but said nothing. For a job measured in hours
+# that is the difference between "resume from the failing step" and "discover tomorrow
+# that nothing happened".
+_btf_on_err() {
+    local rc=$? line=${1:-?}
+    printf '[%s] ERROR: aborted at line %s with exit %s: %s\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$line" "$rc" "${BASH_COMMAND:-unknown}" >&2
+    printf '[%s] ERROR: completed steps are stamped, so re-running resumes rather than restarting.\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
+    exit "$rc"
+}
+trap '_btf_on_err $LINENO' ERR
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
