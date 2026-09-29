@@ -383,7 +383,18 @@ workflow {
     }
 
     MINIMAP2_COMPETITIVE(ch_confirm_in.present.map { meta, reads, ref, _row -> tuple(meta, reads, ref) })
-    COVERAGE_STATS(MINIMAP2_COMPETITIVE.out.bam)
+    // Soft-mask intervals, when the pack has been masked. Absent is tolerated and
+    // reported rather than assumed clean - an unmasked reference set is a known
+    // false-positive source, not a neutral default.
+    def masked_dir = file(pack.confirm.masked_dir ?: "${projectDir}/assets/NO_FILE")
+    if (!masked_dir.exists()) {
+        log.warn "No masked reference intervals at ${pack.confirm.masked_dir}. " +
+                 "References are UNMASKED, and vector, host, low-complexity or " +
+                 "cross-contaminated sequence inside a reference will collect reads " +
+                 "and inflate breadth. Run scripts/mask_pack_refs.py --pack ${pack.name}."
+        masked_dir = no_file
+    }
+    COVERAGE_STATS(MINIMAP2_COMPETITIVE.out.bam, masked_dir)
 
     // -- Stage 2b: marker tier --------------------------------------------
     // Run per sample, not per candidate: the marker DB is small, so one pass
