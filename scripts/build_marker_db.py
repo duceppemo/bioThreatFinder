@@ -97,6 +97,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import http.client
 import json
 import logging
 import os
@@ -331,6 +332,25 @@ MARKER_TAG = "marker"
 MARKER_HEADER_FIELDS = 4  # marker | marker_id | accession | description
 
 
+def sanitise_accession(accession: str) -> str:
+    """Make an accession safe for the pipe-delimited header without losing it.
+
+    NCBI protein fetches return SwissProt-style names such as
+    `sp|Q306W5.1|POLS_EEEV1`, whose pipes collide with the header's field delimiter.
+    Raising on them, as this module first did, turned a routine identifier format into
+    a hard retrieval failure for every affected marker.
+
+    For `sp|ACC|ENTRY` and `tr|ACC|ENTRY` the middle field IS the accession, so it is
+    extracted rather than mangled. Anything else has its pipes replaced, which keeps
+    the identifier readable and the contract intact.
+    """
+    acc = (accession or "").strip()
+    m = re.match(r"^(?:sp|tr|pdb|gb|emb|dbj|ref|pir|prf|tpg|tpe|tpd)\|([^|]+)\|", acc)
+    if m:
+        return m.group(1)
+    return acc.replace("|", "_")
+
+
 def make_marker_header(marker_id: str, accession: str, description: str) -> str:
     """Build the load-bearing sequence name (without the leading '>').
 
@@ -339,8 +359,7 @@ def make_marker_header(marker_id: str, accession: str, description: str) -> str:
     """
     if "|" in marker_id:
         raise ValueError(f"marker_id must not contain '|': {marker_id!r}")
-    if "|" in accession:
-        raise ValueError(f"accession must not contain '|': {accession!r}")
+    accession = sanitise_accession(accession)
     # Newlines/CR would split a FASTA record in two; tabs would break any
     # downstream TSV that carries the reference name.
     desc = re.sub(r"[\r\n\t]+", " ", description or "").strip()
@@ -694,8 +713,14 @@ class Entrez:
                     # 400-class: the query is malformed or the id is unknown.
                     # Retrying is pointless and costs the rate-limit budget.
                     raise EntrezError(f"{endpoint}: HTTP {exc.code} (not retryable)")
-            except (urllib.error.URLError, OSError, TimeoutError) as exc:
-                last_err = str(exc)
+            except (urllib.error.URLError, OSError, TimeoutError,
+                    http.client.HTTPException) as exc:
+                # http.client.IncompleteRead lives under HTTPException, not OSError, so
+                # without it here a truncated efetch body escaped the retry loop
+                # entirely and surfaced as "unexpected error". That cost 30+ markers on
+                # the first full run - transient network truncation recorded as a
+                # permanent retrieval failure.
+                last_err = f"{type(exc).__name__}: {exc}"
             # Exponential backoff with jitter: a whole cluster retrying in
             # lockstep is how a transient 503 becomes a sustained one.
             delay = min(60.0, (2 ** attempt)) * (1.0 + random.random() * 0.3)
