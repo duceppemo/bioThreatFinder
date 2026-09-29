@@ -28,7 +28,26 @@
 "Yersinia pestis":
     confirm_requires: ypest_ppcp1_pla and (ypest_pmt1_caf1 or ypest_pmt1_ymt)
     support_requires: any_of(ypest_ppcp1_pla, ypest_pmt1_caf1, ypest_pmt1_ymt, ypest_pcd1_lcrV)
-    veto_if: ypseudo_chr_inv
+    # veto_if: ypseudo_chr_inv   <- REMOVED, and deliberately not replaced yet.
+    #
+    # The marker's own catalogue note says why it cannot work: "Functional inv is intact
+    # in pseudotuberculosis, pseudogene in pestis." Y. pestis RETAINS the inv sequence;
+    # it is inactivated, not deleted. So inv is absent in FUNCTION, not in sequence, and
+    # read presence at >99% identity cannot discriminate the two species - a
+    # marker_class of absence_expected is not true at the nucleotide level.
+    #
+    # Measured on the plumbing positive control, which contains no Y. pseudotuberculosis
+    # whatsoever: ypseudo_chr_inv came back PRESENT with 271 reads at 99.4% identity and
+    # 0.98 breadth, purely from Y. pestis reads, and vetoed a correct select-agent
+    # detection that had passed every alignment gate (breadth 0.79, occupancy 0.96,
+    # identity 0.998, neighbour_ratio 815). A false veto SUPPRESSES a true positive,
+    # which is the worst failure direction this tool has.
+    #
+    # Discrimination now rests on competitive mapping, which is the evidence that
+    # actually separates these two: neighbour_ratio was 815 here. The proper fix is a
+    # marker targeting what genuinely differs - the IS-insertion junction that
+    # inactivates inv, or the intact reading frame - which is curation work, tracked as
+    # such rather than left as a silently broken veto.
     rationale: >
       Chromosomal ANI to Y. pseudotuberculosis exceeds 97 percent, so plasmid
       content is the discriminator. caf1 alone is not required because

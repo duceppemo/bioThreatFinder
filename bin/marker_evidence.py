@@ -158,15 +158,19 @@ def nt_evidence(bam: Path, mapq_min: int) -> dict[str, dict]:
         a min_coverage of 0.80 is structurally unreachable at ANY depth. A marker is
         present if ANY of its representatives is well covered, so the best one decides.
 
-    (2) MAPQ MUST NOT PENALISE AMBIGUITY WITHIN ONE MARKER. Two near-identical alleles of
-        the same gene make every read that covers them MAPQ 0, and `-q 10` then discards
-        exactly the reads that prove the marker is there: pla kept 16 of ~85 expected.
-        The MAPQ floor exists to stop a read from another organism or another marker being
-        counted here - not to punish a marker for carrying more than one allele. So for a
-        multi-sequence marker the floor is dropped and primary alignments are counted,
-        while single-sequence markers keep it, because there MAPQ 0 really does mean the
-        read fits something else equally well. Identity is still required either way, and
-        that is what keeps a mismapped read out.
+    (2) THE MAPQ FLOOR APPLIES TO EVERY MARKER. An earlier version of this dropped the
+        floor for multi-sequence markers, reasoning that MAPQ 0 there means "ambiguous
+        between two alleles of this marker" and that the identity requirement would keep
+        a mismapped read out. That reasoning is WRONG, and the run proved it: identity
+        does not discriminate when the other source is a >99% identical homologue.
+        ypseudo_chr_inv went from 2 reads to 271 at 99.4% identity in a sample containing
+        no Y. pseudotuberculosis at all - those were Y. pestis reads on the homologous
+        inv locus - and the false PRESENT vetoed a correct select-agent detection, the
+        worst failure direction this tool has.
+        The redundancy that motivated the relaxation is now removed at its source:
+        build_marker_db.py de-duplicates near-identical sequences within a marker when it
+        builds the combined index, so reads map uniquely and MAPQ is high without any
+        relaxation here. Fix the cause, not the symptom.
     """
     ref_len: dict[str, int] = {}
     ref_to_marker: dict[str, str] = {}
@@ -210,9 +214,7 @@ def nt_evidence(bam: Path, mapq_min: int) -> dict[str, dict]:
             mapq = int(f[4])
         except ValueError:
             mapq = 0
-        # Single-sequence marker: MAPQ 0 means it fits something else as well, so the
-        # floor applies. Multi-sequence marker: MAPQ 0 is expected and benign.
-        if n_seqs[mid] == 1 and mapq < mapq_min:
+        if mapq < mapq_min:
             continue
         aln = 0
         for num, op in CIGAR_RE.findall(f[5]):
@@ -233,20 +235,17 @@ def nt_evidence(bam: Path, mapq_min: int) -> dict[str, dict]:
 
     # Covered bases per reference. -Q 0 for multi-sequence markers, filtered otherwise;
     # one pass each, and the BAM is small.
-    covered_any: dict[str, int] = defaultdict(int)
-    covered_q: dict[str, int] = defaultdict(int)
-    for qmin, sink in ((0, covered_any), (mapq_min, covered_q)):
-        for line in stream(["samtools", "depth", "-a", "-Q", str(qmin), str(bam)]):
-            f = line.rstrip("\n").split("\t")
-            if len(f) < 3:
-                continue
-            if f[0] in ref_to_marker and int(f[2]) > 0:
-                sink[f[0]] += 1
+    covered: dict[str, int] = defaultdict(int)
+    for line in stream(["samtools", "depth", "-a", "-Q", str(mapq_min), str(bam)]):
+        f = line.rstrip("\n").split("\t")
+        if len(f) < 3:
+            continue
+        if f[0] in ref_to_marker and int(f[2]) > 0:
+            covered[f[0]] += 1
 
     out: dict[str, dict] = {}
     for mid in sorted(n_seqs):
         refs = [r for r, m in ref_to_marker.items() if m == mid]
-        covered = covered_any if n_seqs[mid] > 1 else covered_q
         best, best_frac = None, -1.0
         for r in refs:
             length = ref_len.get(r, 0)

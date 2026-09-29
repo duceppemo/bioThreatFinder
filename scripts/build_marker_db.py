@@ -1676,36 +1676,124 @@ def process_marker(row: dict, ctx: Context, prior: Dict[str, dict]) -> dict:
 # Combined outputs
 # ---------------------------------------------------------------------------
 
-def concat_files(sources: Sequence[Path], dest: Path) -> int:
-    """Concatenate, atomically. Returns the number of sequences written.
+DEDUPE_MIN_IDENTITY = 0.99
 
-    A plain concatenation is correct because the per-marker files were already
-    written under the header convention - one renaming step, one place to get it
-    wrong, and the per-marker file on disk is byte-identical to its slice of the
-    combined file, which is what makes the manifest md5 meaningful.
+
+def _read_fasta_records(path: Path) -> List[Tuple[str, str]]:
+    """(header_without_gt, sequence) pairs, sequence upper-cased and unwrapped."""
+    out: List[Tuple[str, str]] = []
+    name: Optional[str] = None
+    buf: List[str] = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith(">"):
+            if name is not None:
+                out.append((name, "".join(buf)))
+            name, buf = line[1:], []
+        else:
+            buf.append(line.strip().upper())
+    if name is not None:
+        out.append((name, "".join(buf)))
+    return out
+
+
+def dedupe_marker_records(records: Sequence[Tuple[str, str]]
+                          ) -> Tuple[List[Tuple[str, str]], List[Tuple[str, str]]]:
+    """Drop sequences that are redundant with one already kept. -> (kept, dropped).
+
+    WHY REDUNDANCY INSIDE ONE MARKER IS HARMFUL, not merely wasteful. Two near-identical
+    sequences under the same marker make every read that covers them map equally well to
+    both, so minimap2 assigns MAPQ 0 and the `-q 10` filter discards exactly the reads
+    that prove the marker is present. Measured on the plumbing control: ypest_ppcp1_pla
+    holds two 939 bp alleles differing by ONE base (identity 0.9989) and kept 16 of ~85
+    expected reads. It also inflates the breadth denominator when breadth is taken over
+    the summed length.
+    77 of 143 markers were in this state - mers_ORF1a held 8 sequences reducing to 1,
+    one of them an exact duplicate - so the nucleotide tier has been systematically
+    under-calling PRESENT across more than half the catalogue.
+
+    Three redundancy tests, all chosen from measurement rather than assumed:
+      * identical sequence;
+      * one contained in another as a substring - ypest_pmt1_ymt's 1599 bp and 474 bp
+        entries are both inside its 1764 bp entry;
+      * equal length and identity >= DEDUPE_MIN_IDENTITY.
+    The LONGEST is kept, so the representative is the most informative one.
+
+    Genuine diversity is preserved: ypest_pmt1_caf1's three sequences are different genes
+    of the F1 operon (2502/906/777 bp, no containment) and all survive, as do the
+    gene-family markers whose spread is the point.
+    """
+    order = sorted(range(len(records)), key=lambda i: -len(records[i][1]))
+    kept_idx: List[int] = []
+    dropped: List[Tuple[str, str]] = []
+    for i in order:
+        seq = records[i][1]
+        why = None
+        for k in kept_idx:
+            other = records[k][1]
+            if seq == other:
+                why = "identical"
+            elif seq and other and (seq in other or other in seq):
+                why = "substring"
+            elif len(seq) == len(other) and seq:
+                same = sum(1 for a, b in zip(seq, other) if a == b)
+                if same / len(seq) >= DEDUPE_MIN_IDENTITY:
+                    why = f"identity={same / len(seq):.4f}"
+            if why:
+                break
+        if why:
+            dropped.append((records[i][0], why))
+        else:
+            kept_idx.append(i)
+    kept = [records[i] for i in sorted(kept_idx)]
+    return kept, dropped
+
+
+def concat_files(sources: Sequence[Path], dest: Path, wrap: int = 60,
+                 dedupe: bool = True) -> int:
+    """Concatenate per-marker FASTAs into the combined file, atomically.
+
+    One source file is one marker, which is what makes de-duplication possible here:
+    redundancy is only ever collapsed WITHIN a marker, never across markers.
+
+    The per-marker files on disk are deliberately left untouched - they are the archive,
+    their md5s are what the manifest records, and dropping a sequence from them would
+    lose provenance. This combined file is the working index, so it is the right place to
+    keep one representative per redundant group. See dedupe_marker_records() for why the
+    redundancy is harmful rather than merely wasteful.
     """
     n = 0
-    names: dict[str, str] = {}          # reference name -> source file that wrote it
+    names: dict[str, str] = {}
     dupes: list[tuple[str, str, str]] = []
+    total_dropped = 0
     tmp = dest.with_name(dest.name + ".part")
     with tmp.open("w", encoding="utf-8", newline="\n") as out:
         for src in sources:
-            with src.open(encoding="utf-8", errors="replace") as fh:
-                for line in fh:
-                    if line.startswith(">"):
-                        nm = sam_name_of(line[1:].rstrip("\n"))
-                        if nm in names:
-                            dupes.append((nm, names[nm], src.name))
-                        else:
-                            names[nm] = src.name
-                        n += 1
-                    out.write(line if line.endswith("\n") else line + "\n")
+            records = _read_fasta_records(src)
+            if dedupe:
+                records, dropped = dedupe_marker_records(records)
+                if dropped:
+                    total_dropped += len(dropped)
+                    LOG.info("  dedupe %s: %d -> %d sequence(s) [%s]", src.stem,
+                             len(records) + len(dropped), len(records),
+                             ", ".join(f"{h.split('|')[2] if h.count('|') >= 2 else h}"
+                                       f" {w}" for h, w in dropped[:3])
+                             + (", ..." if len(dropped) > 3 else ""))
+            for header, seq in records:
+                nm = sam_name_of(header)
+                if nm in names:
+                    dupes.append((nm, names[nm], src.name))
+                else:
+                    names[nm] = src.name
+                n += 1
+                out.write(">" + header + "\n")
+                for i in range(0, len(seq), wrap):
+                    out.write(seq[i:i + wrap] + "\n")
     # REFUSE TO PUBLISH A FASTA AN ALIGNER CANNOT INDEX.
     #
     # A duplicate reference NAME (the text before the first whitespace) makes
     # `samtools sort` fail with "Duplicate entry ... in sam header", which killed
     # MARKER_ALIGN_NT and with it the whole nucleotide marker tier. Per-marker writes
-    # now disambiguate, but two DIFFERENT markers could still collide, and this is the
+    # disambiguate, but two DIFFERENT markers could still collide, and this is the
     # check against the written artifact rather than trust in the writer.
     if dupes:
         tmp.unlink(missing_ok=True)
@@ -1716,6 +1804,9 @@ def concat_files(sources: Sequence[Path], dest: Path) -> int:
             f"       An aligner's reference name is only the text before the first "
             f"whitespace, so samtools rejects the SAM header and the tier that reads "
             f"this file dies. Refusing to write it.")
+    if total_dropped:
+        LOG.info("de-duplicated %d redundant sequence(s) across the catalogue; the "
+                 "per-marker archive files are unchanged", total_dropped)
     tmp.replace(dest)
     return n
 
@@ -1910,12 +2001,48 @@ def self_test() -> int:
         second = tmpdir / "cbot_bont.faa"
         write_marker_fasta(second, "cbot_bont",
                            [SeqRecord("WP_012704175.1", "BoNT/A|subtype A1", "MPFVNKQFNYKDPV")])
+        # The second pagA record is a SUBSTRING of the first, so it is redundant and the
+        # combined index keeps one representative. The per-marker archive above still
+        # holds both, which the round-trip checks just asserted.
         n = concat_files([out, second], combined)
-        check("concat counts every sequence", n == 3, str(n))
+        check("concat collapses a redundant sequence within a marker", n == 2, str(n))
         ids = [marker_id_of(ln) for ln in combined.read_text(encoding="utf-8").splitlines()
                if ln.startswith(">")]
         check("combined file attributes each sequence to its marker",
-              ids == ["banth_pxo1_pagA", "banth_pxo1_pagA", "cbot_bont"], str(ids))
+              ids == ["banth_pxo1_pagA", "cbot_bont"], str(ids))
+        check("the LONGEST representative is the one kept",
+              "GNLEVIQAEV" in combined.read_text(encoding="utf-8"))
+        # dedupe=False must preserve everything, for callers that want the raw archive.
+        combined_raw = tmpdir / "markers.raw.faa"
+        check("dedupe can be turned off",
+              concat_files([out, second], combined_raw, dedupe=False) == 3)
+
+        print("-- de-duplication rules --")
+        kept, dropped = dedupe_marker_records([
+            ("m|a|A1|x", "ACGTACGTAA"), ("m|a|A2|x", "ACGTACGTAA")])
+        check("identical sequences collapse", len(kept) == 1 and len(dropped) == 1,
+              f"{len(kept)}/{len(dropped)}")
+        kept, dropped = dedupe_marker_records([
+            ("m|a|A1|x", "ACGTACGTAACCGG"), ("m|a|A2|x", "GTACGTAA")])
+        check("a contained sequence collapses",
+              len(kept) == 1 and dropped and dropped[0][1] == "substring",
+              f"{kept}/{dropped}")
+        # 1 mismatch in 1000 = 0.999, above the 0.99 floor -> redundant.
+        a = "A" * 1000
+        b = "A" * 999 + "C"
+        kept, dropped = dedupe_marker_records([("m|a|A1|x", a), ("m|a|A2|x", b)])
+        check("equal-length near-identity collapses (the pla case)",
+              len(kept) == 1 and dropped and dropped[0][1].startswith("identity="),
+              f"{dropped}")
+        # 5% divergence must be KEPT: that is real allelic diversity.
+        c = "A" * 950 + "C" * 50
+        kept, dropped = dedupe_marker_records([("m|a|A1|x", a), ("m|a|A2|x", c)])
+        check("genuinely divergent sequences are kept (the caf1 case)",
+              len(kept) == 2 and not dropped, f"{len(kept)}/{dropped}")
+        # Different lengths, no containment -> different genes, keep both.
+        kept, dropped = dedupe_marker_records([
+            ("m|a|A1|x", "ACGT" * 100), ("m|a|A2|x", "TTGCAA" * 40)])
+        check("different genes of one operon are kept", len(kept) == 2, str(len(kept)))
 
         print("-- manifest contract --")
         row = {"marker_id": "fnov_specific", "taxon": "Francisella novicida",
