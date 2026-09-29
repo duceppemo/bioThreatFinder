@@ -73,6 +73,7 @@ import gzip
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -178,36 +179,33 @@ def total_len(ivs: list[tuple[int, int, str]]) -> int:
 # Source 1: low complexity (stdlib)
 # ---------------------------------------------------------------------------
 
-def low_complexity_intervals(seq: str, window: int = 64, step: int = 32,
-                             k: int = 4, min_distinct: int = 18,
-                             homopolymer: int = 20) -> list[tuple[int, int, str]]:
-    """Homopolymers, short tandem repeats and low-linguistic-complexity windows.
+# One regex handles homopolymers and short tandem repeats: a unit of 1-6 bases
+# followed by at least three more copies of itself. Matches are filtered by total span,
+# so a homopolymer needs 20 bases and a multi-base unit needs 24.
+#
+# This replaces a windowed distinct-k-mer scan written in pure Python which, over the
+# 5.7 Gbp of reference sequence in this pack, would have run for hours - and which also
+# copied every sequence in order to append a sentinel character. Regex runs at C speed
+# and catches the cases that actually drive spurious mapping.
+TANDEM_RE = re.compile(r"([ACGT]{1,6}?)\1{3,}")
 
-    NOT equivalent to dustmasker or sdust - this is a deliberately simple stdlib
-    approximation so the pipeline keeps no extra dependency for this step. It catches
-    the cases that matter for spurious mapping (long single-base runs, di/tri-nucleotide
-    tracts, and windows with few distinct k-mers) and will miss subtler ones.
+
+def low_complexity_intervals(seq: str, min_span: int = 24,
+                             min_homopolymer: int = 20) -> list[tuple[int, int, str]]:
+    """Homopolymer runs and short tandem repeats.
+
+    NOT equivalent to dustmasker or sdust - deliberately a simple stdlib approximation
+    so this step adds no dependency, and documented as such rather than presented as
+    equivalent. It catches long single-base runs and di- to hexa-nucleotide tracts,
+    which are the substrate for spurious mapping, and will miss subtler low-complexity
+    sequence.
     """
-    n = len(seq)
     out: list[tuple[int, int, str]] = []
-
-    # Homopolymer runs.
-    run_start, run_char = 0, ""
-    for i, c in enumerate(seq + "\0"):
-        if c != run_char:
-            if run_char and run_char in "ACGT" and i - run_start >= homopolymer:
-                out.append((run_start, i, "lowcomplexity"))
-            run_start, run_char = i, c
-
-    # Windowed distinct-k-mer count.
-    if n >= window:
-        for start in range(0, n - window + 1, step):
-            w = seq[start:start + window]
-            if w.count("N") > window // 2:
-                continue
-            distinct = len({w[i:i + k] for i in range(len(w) - k + 1)})
-            if distinct < min_distinct:
-                out.append((start, start + window, "lowcomplexity"))
+    for m in TANDEM_RE.finditer(seq):
+        span = m.end() - m.start()
+        threshold = min_homopolymer if len(m.group(1)) == 1 else min_span
+        if span >= threshold:
+            out.append((m.start(), m.end(), "lowcomplexity"))
     return merge_intervals(out)
 
 
