@@ -146,7 +146,29 @@ def expected_breadth_at(depth: float) -> float:
 
 
 def nt_evidence(bam: Path, mapq_min: int) -> dict[str, dict]:
-    lengths: dict[str, int] = defaultdict(int)
+    """Per-marker nucleotide evidence, judged on the BEST single reference sequence.
+
+    TWO THINGS THIS GETS RIGHT THAT THE FIRST VERSION DID NOT, both found by running the
+    plumbing positive control at 6.8x depth and still failing to confirm Y. pestis.
+
+    (1) BREADTH IS PER SEQUENCE, NOT OVER THEIR SUMMED LENGTH. A marker often carries
+        several ALTERNATIVE representations of one locus - ypest_ppcp1_pla holds two
+        939 bp alleles, WP_002218234.1 and WP_002231174.1. Dividing covered bases by the
+        summed 1878 bp caps breadth at 0.5 even when one allele is covered end to end, so
+        a min_coverage of 0.80 is structurally unreachable at ANY depth. A marker is
+        present if ANY of its representatives is well covered, so the best one decides.
+
+    (2) MAPQ MUST NOT PENALISE AMBIGUITY WITHIN ONE MARKER. Two near-identical alleles of
+        the same gene make every read that covers them MAPQ 0, and `-q 10` then discards
+        exactly the reads that prove the marker is there: pla kept 16 of ~85 expected.
+        The MAPQ floor exists to stop a read from another organism or another marker being
+        counted here - not to punish a marker for carrying more than one allele. So for a
+        multi-sequence marker the floor is dropped and primary alignments are counted,
+        while single-sequence markers keep it, because there MAPQ 0 really does mean the
+        read fits something else equally well. Identity is still required either way, and
+        that is what keeps a mismapped read out.
+    """
+    ref_len: dict[str, int] = {}
     ref_to_marker: dict[str, str] = {}
     for line in stream(["samtools", "view", "-H", str(bam)]):
         if not line.startswith("@SQ"):
@@ -161,7 +183,7 @@ def nt_evidence(bam: Path, mapq_min: int) -> dict[str, dict]:
             mid = marker_of(name)
             if mid:
                 ref_to_marker[name] = mid
-                lengths[mid] += ln
+                ref_len[name] = ln
 
     if not ref_to_marker:
         sys.stderr.write(
@@ -170,13 +192,27 @@ def nt_evidence(bam: Path, mapq_min: int) -> dict[str, dict]:
         )
         return {}
 
+    n_seqs: dict[str, int] = defaultdict(int)
+    for mid in ref_to_marker.values():
+        n_seqs[mid] += 1
+
+    # Per REFERENCE, so the best representative can be chosen later.
     agg = defaultdict(lambda: {"reads": 0, "nm": 0, "aln": 0})
-    for line in stream(["samtools", "view", "-F", "0x904", "-q", str(mapq_min), str(bam)]):
+    for line in stream(["samtools", "view", "-F", "0x904", str(bam)]):
         f = line.rstrip("\n").split("\t")
         if len(f) < 11:
             continue
-        mid = ref_to_marker.get(f[2])
+        ref = f[2]
+        mid = ref_to_marker.get(ref)
         if not mid:
+            continue
+        try:
+            mapq = int(f[4])
+        except ValueError:
+            mapq = 0
+        # Single-sequence marker: MAPQ 0 means it fits something else as well, so the
+        # floor applies. Multi-sequence marker: MAPQ 0 is expected and benign.
+        if n_seqs[mid] == 1 and mapq < mapq_min:
             continue
         aln = 0
         for num, op in CIGAR_RE.findall(f[5]):
@@ -190,41 +226,57 @@ def nt_evidence(bam: Path, mapq_min: int) -> dict[str, dict]:
                 except ValueError:
                     nm = 0
                 break
-        rec = agg[mid]
+        rec = agg[ref]
         rec["reads"] += 1
         rec["nm"] += nm
         rec["aln"] += aln
 
-    covered: dict[str, int] = defaultdict(int)
-    for line in stream(["samtools", "depth", "-a", "-Q", str(mapq_min), str(bam)]):
-        f = line.rstrip("\n").split("\t")
-        if len(f) < 3:
-            continue
-        mid = ref_to_marker.get(f[0])
-        if mid and int(f[2]) > 0:
-            covered[mid] += 1
+    # Covered bases per reference. -Q 0 for multi-sequence markers, filtered otherwise;
+    # one pass each, and the BAM is small.
+    covered_any: dict[str, int] = defaultdict(int)
+    covered_q: dict[str, int] = defaultdict(int)
+    for qmin, sink in ((0, covered_any), (mapq_min, covered_q)):
+        for line in stream(["samtools", "depth", "-a", "-Q", str(qmin), str(bam)]):
+            f = line.rstrip("\n").split("\t")
+            if len(f) < 3:
+                continue
+            if f[0] in ref_to_marker and int(f[2]) > 0:
+                sink[f[0]] += 1
 
-    out = {}
-    for mid, length in lengths.items():
-        rec = agg.get(mid, {"reads": 0, "nm": 0, "aln": 0})
-        # Depth ON THIS MARKER, from aligned bases - exact, with no read-length
-        # assumption. It is what makes a depth-aware presence call possible: see
-        # expected_breadth_at().
+    out: dict[str, dict] = {}
+    for mid in sorted(n_seqs):
+        refs = [r for r, m in ref_to_marker.items() if m == mid]
+        covered = covered_any if n_seqs[mid] > 1 else covered_q
+        best, best_frac = None, -1.0
+        for r in refs:
+            length = ref_len.get(r, 0)
+            frac = (covered.get(r, 0) / length) if length else 0.0
+            if frac > best_frac:
+                best, best_frac = r, frac
+        length = ref_len.get(best, 0) if best else 0
+        rec = agg.get(best, {"reads": 0, "nm": 0, "aln": 0}) if best else {
+            "reads": 0, "nm": 0, "aln": 0}
+        # Reads and identity are summed over the whole marker: a read on any allele is
+        # evidence for the marker. Breadth and depth are the BEST single sequence.
+        tot = {"reads": 0, "nm": 0, "aln": 0}
+        for r in refs:
+            a = agg.get(r)
+            if a:
+                for k in tot:
+                    tot[k] += a[k]
         depth = (rec["aln"] / length) if length else 0.0
         out[mid] = {
-            "nt_reads": rec["reads"],
-            "nt_breadth": (covered.get(mid, 0) / length) if length else 0.0,
-            "nt_identity": (1.0 - rec["nm"] / rec["aln"]) if rec["aln"] else 0.0,
+            "nt_reads": tot["reads"],
+            "nt_breadth": max(0.0, best_frac),
+            "nt_identity": (1.0 - tot["nm"] / tot["aln"]) if tot["aln"] else 0.0,
             "nt_length": length,
             "nt_depth": depth,
             "nt_expected_breadth": expected_breadth_at(depth),
+            "nt_n_seqs": n_seqs[mid],
+            "nt_best_ref": (best or ""),
         }
     return out
 
-
-# ---------------------------------------------------------------------------
-# Tier: translated search (MMseqs2 / DIAMOND tabular m8)
-# ---------------------------------------------------------------------------
 
 def aa_evidence(hits: Path, aa_lengths: dict[str, int]) -> dict[str, dict]:
     """m8: query target fident alnlen mismatch gapopen qstart qend tstart tend evalue bits
