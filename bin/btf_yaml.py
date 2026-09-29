@@ -60,13 +60,28 @@ class _Line:
 
 
 def _split_comment(s: str) -> str:
-    """Strip a trailing comment, ignoring '#' inside quotes."""
+    """Strip a trailing comment, ignoring '#' inside quotes.
+
+    AN APOSTROPHE IS NOT AN OPENING QUOTE. The previous version toggled its
+    in-string flag on every `\'`, so one apostrophe in a prose value left the
+    scanner "inside a string" for the rest of the line and the trailing comment was
+    never removed: `notes: Yersinia's plasmid content # see D3` parsed as the value
+    "Yersinia's plasmid content # see D3". These pack files are full of prose
+    notes:/rationale: fields that flow into the report's caveat column, and on a line
+    whose value was numeric the glued result would become a string - a string where a
+    threshold was expected. A quote only opens a scalar where a scalar may start, so
+    that is what is tested here.
+    """
     in_s = in_d = False
+    openers = " \t:,[{-"
     for i, c in enumerate(s):
+        may_open = (i == 0) or (s[i - 1] in openers)
         if c == "'" and not in_d:
-            in_s = not in_s
+            if in_s or may_open:
+                in_s = not in_s
         elif c == '"' and not in_s:
-            in_d = not in_d
+            if in_d or may_open:
+                in_d = not in_d
         elif c == "#" and not in_s and not in_d:
             if i == 0 or s[i - 1] in " \t":
                 return s[:i].rstrip()
@@ -277,6 +292,20 @@ class _Parser:
                 out.append(self.parse_mapping(item_indent, inline=content,
                                               inline_line=line))
                 continue
+
+            # A ONE-ELEMENT MAPPING MUST NOT DEGRADE INTO A STRING.
+            #
+            # KEY_RE does not admit unquoted spaces, so `- Bacillus anthracis: 5`
+            # fell through to the plain-scalar branch and silently became the STRING
+            # "Bacillus anthracis: 5". A consumer doing item.get(...) then finds
+            # nothing, or raises. parse_mapping() already errors on the identical
+            # construct, so the parser disagreed with itself depending on context.
+            # This file's contract is to fail loudly rather than mis-parse quietly.
+            if ": " in content or content.endswith(":"):
+                _err(f"sequence item looks like a mapping with an unquoted key "
+                     f"containing spaces: {content!r}. A plain YAML scalar cannot "
+                     f"contain ': '. Quote the key, e.g. "
+                     f'- "Bacillus anthracis": 5', line)
 
             m = BLOCK_SCALAR_RE.match(content)
             if m:

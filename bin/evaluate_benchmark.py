@@ -78,7 +78,32 @@ NOT_ASSESSED_TIERS = {"no_reference"}
 
 POSITIVE, VACCINE, NEGATIVE, NOT_ASSESSED = "POSITIVE", "VACCINE", "NEGATIVE", "NOT_ASSESSED"
 
+# Both of these ASSERT THE ORGANISM IS THERE. On a taxon the truth says is absent,
+# "vaccine strain of Variola is present" is a false positive exactly as much as
+# "Variola is present" - and counting only POSITIVE let such a call improve the
+# specificity figure the summary says it weights most heavily.
+PRESENCE_ASSERTING = {POSITIVE, VACCINE}
+
 MANIFEST_REQUIRED = ["sample", "scenario_id", "platform", "truth_present", "truth_absent"]
+
+
+def check_tier_name(name, sid: str, taxon: str, check: str) -> dict | None:
+    """A FAIL row when an expectation names a tier that does not exist.
+
+    tier_rank() returns -1 for anything unrecognised, and nothing can rank below -1,
+    so `tier_rank(observed) < tier_rank(floor)` was never true for a MISSPELLED floor:
+    `min_tier: vaccine_strainX` PASSED against an observation at `no_reference`. These
+    expectations gate CI, so a typo silently removed the gate it was written to be.
+    """
+    if name in TIER_ORDER:
+        return None
+    return {
+        "scenario_id": sid, "taxon": taxon, "check": check,
+        "expected": f"a valid tier, got {name!r}", "observed": "not checked",
+        "result": "FAIL",
+        "detail": ("unknown tier name - this expectation could never fail and so "
+                   "checked nothing. Valid tiers: " + ", ".join(TIER_ORDER)),
+    }
 
 
 def tier_rank(tier: str | None) -> int:
@@ -261,7 +286,11 @@ def specificity_table(obs):
     for (sid, taxon, plat), items in sorted(groups.items()):
         assessable = [i for i in items if i["outcome"] != NOT_ASSESSED]
         n = len(assessable)
-        fp = sum(1 for i in assessable if i["outcome"] == POSITIVE)
+        # PRESENCE_ASSERTING, not just POSITIVE: on a taxon the truth says is absent,
+        # a `vaccine_strain` call still asserts the organism is in the specimen.
+        # Counting only POSITIVE meant such a call was neither a false positive nor a
+        # false confirmation, and it silently improved this very figure.
+        fp = sum(1 for i in assessable if i["outcome"] in PRESENCE_ASSERTING)
         fc = sum(1 for i in assessable if i["tier"] in CONFIRMED_TIERS)
         rows.append({
             "scenario_id": sid, "taxon": taxon, "platform": plat,
@@ -309,11 +338,20 @@ def vaccine_table(obs):
         groups[(o["scenario_id"], o["taxon"], o["platform"])].append(o)
     rows = []
     for (sid, taxon, plat), items in sorted(groups.items()):
-        n = len(items)
-        correct = sum(1 for i in items if i["outcome"] == VACCINE)
-        as_disease = sum(1 for i in items if i["outcome"] == POSITIVE)
+        # EXCLUDE NOT_ASSESSED, LIKE EVERY OTHER TABLE.
+        #
+        # This used `n = len(items)` over all vaccine-truth observations, so a vaccine
+        # sample whose reference is missing from the database (tier `no_reference`)
+        # counted in the denominator and never in the numerator: one such sample
+        # reported vaccine_accuracy 0.000 and summary.md declared vaccine
+        # discrimination totally broken when the real cause was a database gap.
+        assessable = [i for i in items if i["outcome"] != NOT_ASSESSED]
+        n = len(assessable)
+        correct = sum(1 for i in assessable if i["outcome"] == VACCINE)
+        as_disease = sum(1 for i in assessable if i["outcome"] == POSITIVE)
         rows.append({
-            "scenario_id": sid, "taxon": taxon, "platform": plat, "n_samples": n,
+            "scenario_id": sid, "taxon": taxon, "platform": plat,
+            "n_samples": len(items), "n_assessable": n,
             "n_tiered_vaccine": correct, "n_reported_as_disease": as_disease,
             "vaccine_accuracy": f"{correct / n:.3f}" if n else "",
         })
@@ -348,25 +386,53 @@ def check_expectations(scenarios, obs):
                 })
                 continue
 
+            # A database gap is not a threshold regression. Every rate table
+            # excludes NOT_ASSESSED; the expectation checker did not, so a missing
+            # reference FAILED a min_tier expectation and returned exit 1.
+            gradeable = [o for o in items if o["outcome"] != NOT_ASSESSED]
+            n_skipped = len(items) - len(gradeable)
+
             if "max_tier" in exp:
                 cap = exp["max_tier"]
-                bad = [o for o in items if tier_rank(o["tier"]) > tier_rank(cap)]
-                results.append({
-                    "scenario_id": sid, "taxon": taxon, "check": "max_tier",
-                    "expected": f"<= {cap}", "observed": _worst(items),
-                    "result": "FAIL" if bad else "PASS",
-                    "detail": _detail(bad),
-                })
+                problem = check_tier_name(cap, sid, taxon, "max_tier")
+                if problem:
+                    results.append(problem)
+                else:
+                    # max_tier is graded over ALL items, including NOT_ASSESSED:
+                    # a no_reference tier cannot exceed a cap, so it cannot produce a
+                    # spurious FAIL here the way it could against a floor.
+                    bad = [o for o in items if tier_rank(o["tier"]) > tier_rank(cap)]
+                    results.append({
+                        "scenario_id": sid, "taxon": taxon, "check": "max_tier",
+                        "expected": f"<= {cap}", "observed": _worst(items),
+                        "result": "FAIL" if bad else "PASS",
+                        "detail": _detail(bad),
+                    })
 
             if "min_tier" in exp:
                 floor = exp["min_tier"]
-                bad = [o for o in items if tier_rank(o["tier"]) < tier_rank(floor)]
-                results.append({
-                    "scenario_id": sid, "taxon": taxon, "check": "min_tier",
-                    "expected": f">= {floor}", "observed": _best(items),
-                    "result": "FAIL" if bad else "PASS",
-                    "detail": _detail(bad),
-                })
+                problem = check_tier_name(floor, sid, taxon, "min_tier")
+                if problem:
+                    results.append(problem)
+                elif not gradeable:
+                    results.append({
+                        "scenario_id": sid, "taxon": taxon, "check": "min_tier",
+                        "expected": f">= {floor}", "observed": "not assessable",
+                        "result": "SKIP",
+                        "detail": (f"{n_skipped} observation(s) at a NOT_ASSESSED tier "
+                                   f"(no reference in the database) - a database gap, "
+                                   f"not a detection failure"),
+                    })
+                else:
+                    bad = [o for o in gradeable
+                           if tier_rank(o["tier"]) < tier_rank(floor)]
+                    results.append({
+                        "scenario_id": sid, "taxon": taxon, "check": "min_tier",
+                        "expected": f">= {floor}", "observed": _best(gradeable),
+                        "result": "FAIL" if bad else "PASS",
+                        "detail": _detail(bad) + (
+                            f" [{n_skipped} not assessable]" if n_skipped else ""),
+                    })
 
             for level, want in (exp.get("min_tier_at_rpm") or {}).items():
                 lvl = as_float(level)
@@ -379,11 +445,27 @@ def check_expectations(scenarios, obs):
                         "result": "SKIP", "detail": "",
                     })
                     continue
-                bad = [o for o in at if tier_rank(o["tier"]) < tier_rank(want)]
+                problem = check_tier_name(want, sid, taxon,
+                                          f"min_tier_at_rpm[{level}]")
+                if problem:
+                    results.append(problem)
+                    continue
+                at_gradeable = [o for o in at if o["outcome"] != NOT_ASSESSED]
+                if not at_gradeable:
+                    results.append({
+                        "scenario_id": sid, "taxon": taxon,
+                        "check": f"min_tier_at_rpm[{level}]",
+                        "expected": f">= {want}", "observed": "not assessable",
+                        "result": "SKIP",
+                        "detail": "no reference in the database for this taxon",
+                    })
+                    continue
+                bad = [o for o in at_gradeable
+                       if tier_rank(o["tier"]) < tier_rank(want)]
                 results.append({
                     "scenario_id": sid, "taxon": taxon,
                     "check": f"min_tier_at_rpm[{level}]",
-                    "expected": f">= {want}", "observed": _best(at),
+                    "expected": f">= {want}", "observed": _best(at_gradeable),
                     "result": "FAIL" if bad else "PASS",
                     "detail": _detail(bad),
                 })
@@ -411,7 +493,8 @@ def variant_stats(obs) -> dict:
     assessable = [o for o in obs if o["outcome"] != NOT_ASSESSED and o["role"] != "control"]
     tp = sum(1 for o in assessable if o["truth"] == "present" and o["outcome"] == POSITIVE)
     fn = sum(1 for o in assessable if o["truth"] == "present" and o["outcome"] != POSITIVE)
-    fp = sum(1 for o in assessable if o["truth"] == "absent" and o["outcome"] == POSITIVE)
+    fp = sum(1 for o in assessable
+             if o["truth"] == "absent" and o["outcome"] in PRESENCE_ASSERTING)
     fc = sum(1 for o in assessable if o["truth"] == "absent" and o["tier"] in CONFIRMED_TIERS)
     tc = sum(1 for o in assessable if o["truth"] == "present" and o["tier"] in CONFIRMED_TIERS)
     return {"true_positive": tp, "false_negative": fn, "false_positive": fp,
@@ -540,22 +623,36 @@ def bakeoff_per_taxon(variants: dict) -> list[dict]:
     per: dict[tuple, dict] = {}
     for name, obs in variants.items():
         sens = sensitivity_table(obs)
-        lod = {(r["taxon"], r["platform"]): r for r in lod_table(sens)}
+        # KEYED ON scenario_id TOO.
+        #
+        # lod_table() keys on (scenario_id, taxon, platform), and dropping the
+        # scenario here meant that a taxon appearing in two scenarios - an LOD series
+        # and a near-neighbour confuser series, say - had the LAST scenario's LOD
+        # silently overwrite the other, then printed against both scenarios' rows.
+        lod = {(r["scenario_id"], r["taxon"], r["platform"]): r
+               for r in lod_table(sens)}
         for r in sens:
-            key = (r["taxon"], r["platform"], r["level_rpm"])
-            e = per.setdefault(key, {"taxon": r["taxon"], "platform": r["platform"],
+            # scenario_id is part of the identity of a row here too. Without it, one
+            # taxon measured in two scenarios at the same platform and level collapsed
+            # into a single row and the two scenarios' detection rates overwrote each
+            # other - the same collision as the LOD map below.
+            key = (r["scenario_id"], r["taxon"], r["platform"], r["level_rpm"])
+            e = per.setdefault(key, {"scenario_id": r["scenario_id"],
+                                     "taxon": r["taxon"], "platform": r["platform"],
                                      "level_rpm": r["level_rpm"]})
             e[f"detect__{name}"] = r["detection_rate"]
             e[f"confirm__{name}"] = r["confirm_rate"]
-        for (taxon, plat), r in lod.items():
+        for (sid, taxon, plat), r in lod.items():
             for e in per.values():
-                if e["taxon"] == taxon and e["platform"] == plat:
+                if (e["scenario_id"] == sid and e["taxon"] == taxon
+                        and e["platform"] == plat):
                     e[f"lod__{name}"] = r["lod_all_rpm"]
-    cols = ["taxon", "platform", "level_rpm"]
+    cols = ["scenario_id", "taxon", "platform", "level_rpm"]
     for n in names:
         cols += [f"detect__{n}", f"confirm__{n}", f"lod__{n}"]
     out = []
-    for e in sorted(per.values(), key=lambda x: (x["taxon"], x["platform"],
+    for e in sorted(per.values(), key=lambda x: (x["scenario_id"], x["taxon"],
+                                                 x["platform"],
                                                  as_float(x["level_rpm"], 0))):
         out.append({c: e.get(c, "") for c in cols})
     return out
