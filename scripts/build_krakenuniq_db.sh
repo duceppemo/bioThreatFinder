@@ -520,7 +520,10 @@ download_libraries() {
             skip "library already downloaded: ${spec}"
             continue
         fi
-        log "downloading library '${spec}' (the slow part; bacteria alone is hours)"
+        case "$spec" in
+            *bacteria*) log "downloading library '${spec}' - the slowest single step, hours on its own" ;;
+            *)          log "downloading library '${spec}'" ;;
+        esac
         # --dust masks low-complexity regions at download time. KrakenUniq has no
         # separate masking step at build, and unmasked low-complexity k-mers are a
         # direct source of the spurious hits this index exists to suppress.
@@ -724,7 +727,11 @@ log "k / minimizer: ${KMER} / ${MINIMIZER}   (KrakenUniq caps k at 31)"
 log "threads      : ${THREADS}"
 log "taxonomy     : copy nodes/names/merged/delnodes.dmp from ${TAXDUMP_SRC}"
 log "hll-precision: ${HLL_PRECISION} (classify-time; recorded, not passed to the build)"
-log "memory policy: ${WORK_ON_DISK} (auto = decided from the measured library size)"
+case "$WORK_ON_DISK" in
+    auto) log "memory policy: auto - decided from the measured library size vs 80% of RAM" ;;
+    yes)  log "memory policy: on-disk build (forced with --work-on-disk)" ;;
+    no)   log "memory policy: in-RAM build (forced with --in-ram)" ;;
+esac
 log "work dir     : ${WORK_DIR:-<inside the database directory>}"
 log "format       : Kraken 1 lineage - a Kraken2 DB CANNOT be reused here"
 log "untouched    : /media/36tb/db/** (shared, read-only for this project)"

@@ -99,6 +99,25 @@ independent methods is much stronger evidence than one seen by a single k-mer
 counter. K-mer quality is likewise **flagged, never enforced** at stage 1: a flag
 that reaches scoring is more useful than a candidate that silently vanished.
 
+**Two guards worth knowing about.**
+
+*Taxonomy namespace.* Metabuli publishes GTDB-based indexes as well as
+NCBI-based ones, and **GTDB taxids are not NCBI taxids**. Point the pipeline at a
+GTDB index and every watchlist lookup misses — producing not an error but an empty
+result, indistinguishable from a clean negative across the entire screen. A silent
+false negative on every watchlist organism is worse than a crash, so the pipeline
+reads `BTF_BUILD_MANIFEST.txt` and **refuses to run** on a non-NCBI index rather
+than warning. `parse_screen.py` also detects the same mismatch from the data side,
+in case an index arrives without a manifest.
+
+*HLL precision is a query parameter, not a build parameter.* The sketches are
+built while reading each sample, so `--hll-precision` belongs to the classifier.
+The build script records the intended value beside the index and the module reads
+it back, so query and build cannot drift. Default 12 gives ~1.6% relative error;
+stage 1 uses cardinality as a threshold gate where real separation is ~10×, so
+that changes no call, while p=18 would cost 64× the sketch memory across tens of
+thousands of taxa.
+
 One correctness detail worth knowing: **HyperLogLog cardinalities are not
 additive.** Summing the `kmers` column across descendant nodes double-counts shared
 k-mers and inflates the number, sometimes badly. So distinct-k-mer evidence uses
@@ -328,6 +347,15 @@ Deliberately split across two volumes:
 |---|---|---|
 | `db_root` = `/media/36tb/db` | 36 TB spinning, 97% full | Shared, pre-existing, **read-only**: `taxdump`, sylph GTDB sketch, `nt` |
 | `btf_db` = `/media/8tb/bioThreatFinder` | 7.3 TB NVMe, 15% used | Project-owned: KrakenUniq, Metabuli, Kraken2 indexes, host genomes, pack refs and markers |
+
+A Kraken2 index **cannot** be reused for KrakenUniq — KrakenUniq descends from
+Kraken 1 and uses its format, while Kraken2's hashed-minimizer structure is lossy
+with respect to the k-mers KrakenUniq must count. The two indexes are separate,
+additive disk costs, so "we already have Kraken2" is not a reason to skip this.
+
+Database paths live in `pack.yaml`; the `--krakenuniq_db` / `--metabuli_db` /
+`--kraken2_db` / `--sylph_db` parameters are explicit **overrides** and default to
+null.
 
 NVMe for the project-owned indexes is not cosmetic — KrakenUniq and Metabuli
 indexes are read-heavy and load time dominates per-sample wall clock.

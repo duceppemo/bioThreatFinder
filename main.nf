@@ -115,6 +115,51 @@ def fillMissing(base, produced) {
         .map { meta, placeholder, actual -> tuple(meta, actual ?: placeholder) }
 }
 
+/* Guards against the worst failure mode this pipeline has.
+ *
+ * Classifier output is joined to packs/<pack>/watchlist.resolved.tsv, which is keyed
+ * by NCBI taxid. Metabuli publishes GTDB-based indexes as well, and GTDB taxids are
+ * NOT NCBI taxids. Point the pipeline at a GTDB index and every watchlist lookup
+ * misses - producing not an error but an empty result, indistinguishable from a
+ * clean negative across the entire screen.
+ *
+ * A silent false negative on every watchlist organism is worse than a crash, so this
+ * is refused rather than warned about. The build scripts record the namespace in
+ * BTF_BUILD_MANIFEST.txt precisely so it can be checked here. */
+def assertNcbiTaxonomy(dbDir, label) {
+    def manifest = file("${dbDir}/BTF_BUILD_MANIFEST.txt")
+    if (!manifest.exists()) {
+        log.warn "${label}: no BTF_BUILD_MANIFEST.txt under ${dbDir}, so the taxonomy " +
+                 "namespace cannot be verified. If this index is GTDB-based, its taxids " +
+                 "will not join the NCBI-keyed watchlist and this arm will silently " +
+                 "contribute nothing. Build it with scripts/build_metabuli_db.sh to get " +
+                 "a manifest, or pass --skip_metabuli to be explicit."
+        return
+    }
+    def line = manifest.readLines().find { it.startsWith('taxonomy_namespace=') }
+    if (!line) {
+        log.warn "${label}: BTF_BUILD_MANIFEST.txt under ${dbDir} has no " +
+                 "taxonomy_namespace entry; namespace could not be verified."
+        return
+    }
+    def ns = line.split('=', 2)[1].trim()
+    if (!ns.toUpperCase().startsWith('NCBI')) {
+        exit 1, """
+        ERROR: the ${label} index at ${dbDir} is built in the '${ns}' taxonomy namespace.
+
+        This pipeline joins classifier output to the watchlist by NCBI taxid. A
+        non-NCBI index yields ZERO watchlist matches - not an error, just an empty
+        result, which is indistinguishable from a clean negative for every organism
+        on the watchlist. That is refused rather than warned about.
+
+        Resolve by one of:
+          - build an NCBI-namespaced index:  scripts/build_metabuli_db.sh --mode refseq
+          - point --metabuli_db at an NCBI-namespaced index
+          - drop the arm deliberately:       --skip_metabuli
+        """.stripIndent()
+    }
+}
+
 def parseSamplesheet(path) {
     return Channel.fromPath(path, checkIfExists: true)
         .splitCsv(header: true, strip: true)
@@ -240,6 +285,12 @@ workflow {
     // consensus would discard the sensitivity that running four arms buys.
     def no_file = file("${projectDir}/assets/NO_FILE")
 
+    // pack.yaml supplies the database paths; a CLI --*_db overrides it.
+    def ku_db_path = params.krakenuniq_db ?: pack.screen.krakenuniq_db
+    def mb_db_path = params.metabuli_db   ?: pack.screen.metabuli_db
+    def k2_db_path = params.kraken2_db    ?: pack.screen.kraken2_db
+    def sy_db_path = params.sylph_db      ?: pack.screen.sylph_db
+
     // Every arm is padded out to all samples by fillMissing(), so a skipped or
     // failed classifier never silently drops a sample from the join below.
     ch_arm_base = ch_clean.map { meta, _r -> tuple(meta, no_file) }
@@ -247,14 +298,17 @@ workflow {
     if (params.skip_krakenuniq) {
         ch_ku = ch_clean.map { meta, _r -> tuple(meta, no_file) }
     } else {
-        KRAKENUNIQ(ch_clean, file(pack.screen.krakenuniq_db, checkIfExists: true))
+        KRAKENUNIQ(ch_clean, file(ku_db_path, checkIfExists: true))
         ch_ku = fillMissing(ch_arm_base, KRAKENUNIQ.out.report)
     }
 
     if (params.skip_metabuli) {
         ch_mb = ch_clean.map { meta, _r -> tuple(meta, no_file) }
     } else {
-        METABULI(ch_clean, file(pack.screen.metabuli_db, checkIfExists: true))
+        def mb_db = file(mb_db_path, checkIfExists: true)
+        // Refuses a GTDB-namespaced index outright - see assertNcbiTaxonomy().
+        assertNcbiTaxonomy(mb_db, 'Metabuli')
+        METABULI(ch_clean, mb_db)
         ch_mb = fillMissing(ch_arm_base, METABULI.out.report)
     }
 
@@ -262,19 +316,19 @@ workflow {
         ch_k2      = ch_clean.map { meta, _r -> tuple(meta, no_file) }
         ch_bracken = ch_clean.map { meta, _r -> tuple(meta, no_file) }
     } else {
-        KRAKEN2(ch_clean, file(pack.screen.kraken2_db, checkIfExists: true))
+        KRAKEN2(ch_clean, file(k2_db_path, checkIfExists: true))
         ch_k2 = fillMissing(ch_arm_base, KRAKEN2.out.report)
         // Bracken is built on a fixed read length, so it applies to short reads
         // only; ONT read lengths violate its model.
         BRACKEN(KRAKEN2.out.report.filter { meta, _r -> meta.platform == 'illumina' },
-                file(pack.screen.kraken2_db))
+                file(k2_db_path))
         ch_bracken = fillMissing(ch_arm_base, BRACKEN.out.report)
     }
 
     if (params.skip_sylph) {
         ch_sylph = ch_clean.map { meta, _r -> tuple(meta, no_file) }
     } else {
-        SYLPH_PROFILE(ch_clean, file(pack.screen.sylph_db, checkIfExists: true))
+        SYLPH_PROFILE(ch_clean, file(sy_db_path, checkIfExists: true))
         ch_sylph = fillMissing(ch_arm_base, SYLPH_PROFILE.out.profile)
     }
 
