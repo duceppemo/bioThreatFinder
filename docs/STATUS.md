@@ -128,8 +128,19 @@ Now updated. Two deliberate exceptions:
   candidate is worse than being a version behind.
 
 Several are major-version jumps (fastp 0.23→1.3, chopper 0.7→0.14, sylph 0.6→1.0,
-mmseqs2 15→18, metabuli 1.0→1.2). **None has been run yet** — validate them with the
-benchmark rather than assuming they are drop-in.
+mmseqs2 15→18, metabuli 1.0→1.2).
+
+**This warning cashed in.** `samtools=1.24 conda-forge::python=3.11` is
+**unsatisfiable** — samtools 1.24 wants `htslib >=1.24,<1.25`, which wants
+`libdeflate >=1.25,<1.27`, which does not exist in the channels. It solves happily
+alongside minimap2, so the conflict is specifically with a conda-forge python, and
+MARKER_EVIDENCE died on it during the first end-to-end run. All 13 distinct specs were
+then put through the solver: 12 solved, that one did not. samtools is now pinned to
+**1.22** everywhere, verified to solve both alongside minimap2 and alongside python 3.11.
+
+Re-validate with `bash scripts/check_conda_specs.sh` after any pin change. It is not in
+`tests/test_pipeline.py` because it needs the network and takes minutes; the unit suite
+stays offline and fast by design.
 
 ## Next steps, in order
 

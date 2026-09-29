@@ -74,7 +74,7 @@ process CHOPPER {
 process MINIMAP2_HOST_DEPLETE {
     tag   "${meta.id}"
     label 'process_high'
-    conda "bioconda::minimap2=2.31 bioconda::samtools=1.24"
+    conda "bioconda::minimap2=2.31 bioconda::samtools=1.22"
 
     input:
     tuple val(meta), path(reads), path(index)

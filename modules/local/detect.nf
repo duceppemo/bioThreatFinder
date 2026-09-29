@@ -354,7 +354,7 @@ process PARSE_SCREEN {
 process MINIMAP2_COMPETITIVE {
     tag   "${meta.id}:${meta.taxid}"
     label 'process_medium'
-    conda "bioconda::minimap2=2.31 bioconda::samtools=1.24"
+    conda "bioconda::minimap2=2.31 bioconda::samtools=1.22"
 
     input:
     tuple val(meta), path(reads), path(ref)
@@ -396,7 +396,7 @@ process MINIMAP2_COMPETITIVE {
 process COVERAGE_STATS {
     tag   "${meta.id}:${meta.taxid}"
     label 'process_low'
-    conda "bioconda::samtools=1.24 conda-forge::python=3.11"
+    conda "bioconda::samtools=1.22 conda-forge::python=3.11"
     publishDir "${params.outdir}/confirm", mode: params.publish_dir_mode
 
     input:
@@ -530,7 +530,7 @@ process MAKE_REPORT {
 process MARKER_ALIGN_NT {
     tag   "${meta.id}"
     label 'process_medium'
-    conda "bioconda::minimap2=2.31 bioconda::samtools=1.24"
+    conda "bioconda::minimap2=2.31 bioconda::samtools=1.22"
 
     input:
     tuple val(meta), path(reads)
@@ -649,7 +649,7 @@ process MARKER_SEARCH_HMM {
 process MARKER_EVIDENCE {
     tag   "${meta.id}"
     label 'process_low'
-    conda "bioconda::samtools=1.24 conda-forge::python=3.11"
+    conda "bioconda::samtools=1.22 conda-forge::python=3.11"
     publishDir "${params.outdir}/markers", mode: params.publish_dir_mode
 
     // aa_hits and hmm_hits are both NO_FILE when the protein and HMM tiers are skipped
