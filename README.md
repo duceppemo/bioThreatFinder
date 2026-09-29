@@ -219,6 +219,23 @@ Coverage: 163 markers, 58 rule sets over 89 watchlist taxa. **Every
 regions, which presence markers cannot express, so it correctly caps at
 `supported` rather than producing an unsupportable call.
 
+## Comparing tools rather than arguing about them
+
+Which classifier is best for this job is an empirical question, so the harness
+answers it. `scripts/run_bakeoff.sh` runs the pipeline once per configuration over
+identical simulated data and compares accuracy **and cost** (CPU-minutes, peak RSS,
+harvested from each run's Nextflow trace).
+
+The open question it exists to settle: **Kraken2's `--report-minimizer-data` already
+reports distinct minimizer counts and a duplicity ratio from an index we build
+anyway.** Whether KrakenUniq's HyperLogLog cardinality beats that by enough to
+justify ~1400 GiB transient disk, a 250-450 GiB resident index, a Jellyfish 1.x
+build dependency and 12+ hours is not something to settle from a paper. See
+`docs/benchmarking.md`.
+
+Variants are built as **minimal pairs** — a variant that changes two things at once
+cannot attribute the difference to either.
+
 ## Domain packs
 
 You were right that one database for all three domains would be unusable. The
