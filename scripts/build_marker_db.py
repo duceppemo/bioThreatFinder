@@ -1171,7 +1171,7 @@ def centre_star_msa(seqs: Sequence[str]) -> Optional[List[str]]:
         new_s = ""
         col = 0
         width = len(msa[0])
-        for ca, cs in zip(ac, as_):
+        for ca, cs in zip(ac, as_, strict=True):
             if ca == "-":
                 # Insertion relative to the centre: a brand-new column.
                 for r in range(len(msa)):
@@ -2107,7 +2107,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # the sequence files sat intact on disk.
     existing_manifest: dict = {}
     if args.only_marker or args.only_taxon:
-        mpath = markers_dir / "markers.manifest.tsv"
+        mpath = manifest_path
         if mpath.exists():
             try:
                 with mpath.open(encoding="utf-8") as fh:

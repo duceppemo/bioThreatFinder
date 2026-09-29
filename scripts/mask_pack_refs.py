@@ -70,8 +70,6 @@ from __future__ import annotations
 import argparse
 import csv
 import gzip
-import hashlib
-import json
 import os
 import re
 import shutil

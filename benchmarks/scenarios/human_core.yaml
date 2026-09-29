@@ -32,14 +32,31 @@
 
 schema_version: 1
 
+# ---------------------------------------------------------------------------
+# COST, and why these numbers are what they are.
+#
+# The full matrix is 392 samples. At 20M reads each that is ~8 billion reads and an
+# estimated 8.4 TiB of FASTQ, which exceeds the free space on the machine this was
+# written on (5.8 TiB). Run it in tiers rather than all at once - see the recipe in
+# docs/benchmarking.md - or raise total_reads only for the scenarios whose question
+# actually needs depth.
+#
+# ONT DEPTH IS NOT THE SAME NUMBER AS ILLUMINA DEPTH. 20M reads at a 5 kb mean is
+# ~100 Gbp, which no real flow cell delivers; a PromethION run at that fragment length
+# is closer to 2-6M reads. `ont_total_reads` therefore overrides `total_reads` for the
+# ONT arm. Simulating 20M ONT reads would measure a machine that does not exist, and
+# would flatter long-read sensitivity accordingly.
+# ---------------------------------------------------------------------------
+
 defaults:
     replicates: 3
     platforms: [illumina, ont]
+    total_reads: 20000000
+    ont_total_reads: 4000000
     host: human
     # 95% human is typical of respiratory and tissue specimens. Measuring
     # sensitivity in a clean background would overstate it substantially.
     host_fraction: 0.95
-    total_reads: 20000000
     read_length: 150
     ont_mean_length: 5000
     # Commensal and environmental background, 2% of the library. Without this,
@@ -115,7 +132,21 @@ scenarios:
     #      and tagged with nysdoh_category so the mapping is auditable.
     #   2. "6-8 ten-fold dilutions in specimen matrix with at least one dilution to
     #      extinction." Levels are therefore DECADES, not the arbitrary steps this
-    #      file used before, and start below any plausible detection limit.
+    #      file used before.
+    #
+    #      PLATFORM ASYMMETRY: the RPM floor is set by read count, so it differs by
+    #      platform. At 20M Illumina reads one read is 0.05 rpm; at 4M ONT reads it is
+    #      0.25 rpm. The shared series therefore starts at 1 rpm so both arms can
+    #      represent every level, and `lod_trace_illumina_deep` probes below that on
+    #      Illumina alone at 100M reads. Quoting a sub-1-rpm ONT LoD would require
+    #      simulating a flow cell that does not exist.
+    #
+    #      DEPTH FLOOR: at the default 20M reads, 1 read is 0.05 rpm, so 0.01 rpm
+    #      rounds to zero reads and the simulator refuses it. The series therefore
+    #      bottoms out at 0.1 rpm (~2 reads) - which IS extinction at this depth.
+    #      Probing below it needs a deeper library, not a smaller number; reaching
+    #      NYSDOH's full 6-8 dilutions at trace levels would require ~100M+ reads
+    #      per replicate. Recorded rather than quietly fudged.
     #   3. Separate LoD per specimen type. We approximate specimen type by host
     #      fraction, which is the dominant driver; a real dossier needs real
     #      matrices (CSF, BAL, serum, tissue, stool) and this cannot substitute.
@@ -136,7 +167,7 @@ scenarios:
       spikes:
           - taxon: Yersinia pestis
             source: target
-            levels_rpm: [0.01, 0.1, 1, 10, 100, 1000]
+            levels_rpm: [1, 10, 100, 1000, 10000]
       truth:
           present: [Yersinia pestis]
       expect:
@@ -153,7 +184,7 @@ scenarios:
       spikes:
           - taxon: Listeria monocytogenes
             source: target
-            levels_rpm: [0.01, 0.1, 1, 10, 100, 1000]
+            levels_rpm: [1, 10, 100, 1000, 10000]
       truth:
           present: [Listeria monocytogenes]
       expect:
@@ -169,7 +200,7 @@ scenarios:
       spikes:
           - taxon: Severe acute respiratory syndrome coronavirus 2
             source: target
-            levels_rpm: [0.01, 0.1, 1, 10, 100]
+            levels_rpm: [1, 10, 100, 1000]
       truth:
           present: [Severe acute respiratory syndrome coronavirus 2]
       expect:
@@ -186,7 +217,7 @@ scenarios:
       spikes:
           - taxon: Monkeypox virus
             source: target
-            levels_rpm: [0.01, 0.1, 1, 10, 100]
+            levels_rpm: [1, 10, 100, 1000]
       truth:
           present: [Monkeypox virus]
       expect:
@@ -203,7 +234,7 @@ scenarios:
       spikes:
           - taxon: Plasmodium falciparum
             source: target
-            levels_rpm: [0.1, 1, 10, 100, 1000, 10000]
+            levels_rpm: [1, 10, 100, 1000, 10000]
       truth:
           present: [Plasmodium falciparum]
       expect:
@@ -219,7 +250,7 @@ scenarios:
       spikes:
           - taxon: Candida auris
             source: target
-            levels_rpm: [0.1, 1, 10, 100, 1000]
+            levels_rpm: [1, 10, 100, 1000]
       truth:
           present: [Candida auris]
       expect:
@@ -236,7 +267,7 @@ scenarios:
       spikes:
           - taxon: Aspergillus fumigatus
             source: target
-            levels_rpm: [0.1, 1, 10, 100, 1000]
+            levels_rpm: [1, 10, 100, 1000]
       truth:
           present: [Aspergillus fumigatus]
       expect:
@@ -245,17 +276,50 @@ scenarios:
 
     - id: lod_lowbiomass_gram_negative
       description: >
-        The same Y. pestis series at 99.9% host. NYSDOH requires a separate LoD per
-        specimen type; host fraction is the dominant axis we can simulate. THIS is
-        the number to quote as the practical limit of detection, not the 95% one.
+        The same Y. pestis series at 99.8% host. NYSDOH requires a separate LoD per
+        specimen type; host fraction is the dominant axis we can simulate. THIS is the
+        number to quote as the practical limit of detection, not the one from the 95%
+        host scenarios.
       kind: lod_series
       nysdoh_category: gram_negative_bacteria
-      host_fraction: 0.999
+      # As first written this scenario was arithmetically impossible and I did not
+      # notice: 99.9% host plus a top spike of 10,000 rpm (1% of the library) plus the
+      # 2% commensal background from `defaults` sums past 1.0. The simulator refused it,
+      # correctly.
+      #
+      # Resolved by keeping the punishing host fraction - which is the entire point -
+      # and giving up the top decade instead, since at 99.8% host a 0.1% spike is
+      # already the realistic high end. Background is overridden down to 0.05% so it
+      # does not eat the remaining headroom.
+      #   0.998 host + 0.001 spike + 0.0005 background = 0.9995
+      host_fraction: 0.998
       total_reads: 40000000
+      background:
+          "Escherichia coli": 0.0005
       spikes:
           - taxon: Yersinia pestis
             source: target
-            levels_rpm: [1, 10, 100, 1000, 10000]
+            levels_rpm: [1, 10, 100, 1000]
+      truth:
+          present: [Yersinia pestis]
+
+    - id: lod_trace_illumina_deep
+      description: >
+        The bottom of the range, Illumina only and deeper. Sub-1-rpm detection is not
+        REPRESENTABLE in a realistic ONT run: at 4M reads one read already is 0.25 rpm,
+        so a 0.1 rpm level would round to zero and the simulator refuses it. That is a
+        genuine property of long-read metagenomics at trace abundance, not a simulation
+        artifact, and it belongs in the results rather than being hidden by inflating
+        ONT depth to a number no flow cell produces.
+      kind: lod_series
+      nysdoh_category: gram_negative_bacteria
+      platforms: [illumina]
+      total_reads: 100000000
+      replicates: 3
+      spikes:
+          - taxon: Yersinia pestis
+            source: target
+            levels_rpm: [0.01, 0.1, 1]
       truth:
           present: [Yersinia pestis]
 
