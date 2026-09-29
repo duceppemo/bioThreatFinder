@@ -54,7 +54,12 @@ SKIP_MAPS=1
 FORCE=0
 
 # Existing, current, unpacked NCBI taxdump on the shared volume.
-TAXDUMP_SRC="/media/36tb/db/taxdump"
+# Default is the PINNED, dated project snapshot, not the shared one on /media/36tb.
+# The index and the watchlist must resolve against the SAME taxonomy snapshot; if they
+# differ, taxids disagree and watchlist lookups miss, giving an empty result that is
+# indistinguishable from a clean negative. The shared /media/36tb/db/taxdump was
+# 6.5 months stale and is used by other work on this machine, so it is left alone.
+TAXDUMP_SRC="/media/8tb/bioThreatFinder/taxdump/2026-09-29"
 
 # Pre-flight free-space requirement, GiB.
 #   library/    ~300-400 GiB of downloaded FASTA (bacteria dominates)
@@ -86,6 +91,10 @@ Options:
                        Omitted by default - see WHY in the script.
   --read-lengths "100 150"  Bracken read lengths (default: "100 150 250")
   --skip-bracken       Do not build Bracken distributions
+  --taxdump DIR        Pinned NCBI taxonomy snapshot to reuse
+                       (default: /media/8tb/bioThreatFinder/taxdump/2026-09-29).
+                       MUST be the same snapshot the watchlist was resolved
+                       against, or taxids will silently disagree.
   --download-taxonomy  Force kraken2-build --download-taxonomy instead of
                        reusing /media/36tb/db/taxdump
   --with-maps          Also download the accession2taxid maps (~25 GB). Needed
@@ -138,6 +147,7 @@ while [[ $# -gt 0 ]]; do
         --max-db-size)       MAX_DB_SIZE="${2:?--max-db-size needs a value}"; shift 2 ;;
         --read-lengths)      read -r -a BRACKEN_READ_LENGTHS <<< "${2:?--read-lengths needs a value}"; shift 2 ;;
         --skip-bracken)      SKIP_BRACKEN=1; shift ;;
+        --taxdump)           TAXDUMP_SRC="${2:?--taxdump needs a value}"; shift 2 ;;
         --download-taxonomy) REUSE_TAXDUMP=0; shift ;;
         --with-maps)         SKIP_MAPS=0; shift ;;
         --clean)             CLEAN=1; shift ;;
@@ -270,6 +280,20 @@ prepare_taxonomy() {
 
     if (( REUSE_TAXDUMP == 1 )); then
         if [[ -s "${TAXDUMP_SRC}/nodes.dmp" && -s "${TAXDUMP_SRC}/names.dmp" ]]; then
+            # Refuse to bake a stale taxonomy into a 100+ GB index. kraken2-build
+            # downloads CURRENT library sequences whose kraken:taxid| headers carry
+            # today's taxids; pairing those with an old taxonomy drops or misassigns
+            # every organism added since the snapshot, silently.
+            _td_age_days=$(( ( $(date -u +%s) - $(stat -c %Y "${TAXDUMP_SRC}/nodes.dmp") ) / 86400 ))
+            log "taxdump ${TAXDUMP_SRC} is ${_td_age_days} day(s) old"
+            if (( _td_age_days > 90 )); then
+                die "taxdump is ${_td_age_days} days old. kraken2-build downloads CURRENT
+  library sequences, so an old taxonomy drops or misassigns every organism added
+  since the snapshot - and the index would then disagree with the watchlist.
+  Refresh from https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/new_taxdump/ and pass
+  --taxdump, or pass --download-taxonomy to let kraken2-build fetch its own
+  (which then will NOT match the watchlist)."
+            fi
             log "reusing existing taxdump from ${TAXDUMP_SRC}"
             run mkdir -p "$taxdir"
             # Copy rather than symlink: kraken2-build has historically rewritten

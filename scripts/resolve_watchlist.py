@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import datetime
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -66,6 +67,35 @@ def read_watchlist(path: Path) -> list[dict]:
     if not rows:
         sys.exit(f"ERROR: {path} yielded no watchlist entries")
     return rows
+
+
+def taxdump_age_days(taxdump: Path) -> tuple[float | None, str]:
+    """Age of the taxonomy snapshot in days, and where that date came from.
+
+    Prefers PROVENANCE.txt's recorded NCBI Last-Modified, because a directory's file
+    mtimes say when it was unpacked locally, not when NCBI generated it.
+    """
+    prov = taxdump / "PROVENANCE.txt"
+    if prov.exists():
+        for line in prov.read_text().splitlines():
+            if line.lower().startswith("ncbi_last_modified"):
+                raw = line.split(None, 1)[1].strip() if len(line.split(None, 1)) > 1 else ""
+                for fmt in ("%a, %d %b %Y %H:%M:%S %Z", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d"):
+                    try:
+                        when = datetime.datetime.strptime(raw, fmt)
+                        return (datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - when).total_seconds() / 86400.0, \
+                               f"PROVENANCE.txt ncbi_last_modified={raw}"
+                    except ValueError:
+                        continue
+    newest = 0.0
+    for f in ("nodes.dmp", "names.dmp"):
+        fp = taxdump / f
+        if fp.exists():
+            newest = max(newest, fp.stat().st_mtime)
+    if not newest:
+        return None, "unknown"
+    age = (datetime.datetime.now(datetime.timezone.utc).timestamp() - newest) / 86400.0
+    return age, f"file mtime of nodes.dmp/names.dmp ({datetime.date.fromtimestamp(newest)})"
 
 
 def load_names(taxdump: Path) -> dict[str, list[tuple[int, str]]]:
@@ -205,12 +235,37 @@ def main() -> int:
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--descendants-out", type=Path,
                     help="optional TSV of watchlist_taxid -> descendant taxid")
+    ap.add_argument("--max-taxdump-age-days", type=float, default=90.0,
+                    help="warn when the taxonomy snapshot is older than this [90]")
+    ap.add_argument("--require-fresh-taxdump", action="store_true",
+                    help="fail instead of warning when the snapshot is stale")
     ap.add_argument("--allow-unresolved", action="store_true",
                     help="warn instead of failing on unresolved names (NOT for operational use)")
     args = ap.parse_args()
 
     rows = read_watchlist(args.watchlist)
     sys.stderr.write(f"[resolve] {len(rows)} watchlist entries from {args.watchlist}\n")
+
+    age, how = taxdump_age_days(args.taxdump)
+    if age is None:
+        sys.stderr.write(f"[resolve] WARNING: cannot determine the age of {args.taxdump}\n")
+    elif age > args.max_taxdump_age_days:
+        msg = (
+            f"taxonomy snapshot is {age:.0f} days old (from {how}), above the "
+            f"{args.max_taxdump_age_days:.0f}-day limit.\n"
+            "  NCBI regenerates the taxdump daily and adds roughly 40,000 taxids a\n"
+            "  month. A stale snapshot does not fail loudly - it silently loses\n"
+            "  descendant nodes inside watchlist clades, so reads a classifier assigns\n"
+            "  to a newer node are never recognised as the watchlist organism. A\n"
+            "  6.5-month-old snapshot was measured here as 288,764 taxids short of\n"
+            "  current and 2,581 descendant nodes short inside watchlist clades.\n"
+            "  It must also match the snapshot the k-mer index was built against.\n"
+            "  Refresh: https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/new_taxdump/\n")
+        if args.require_fresh_taxdump:
+            sys.exit(f"ERROR: {msg}")
+        sys.stderr.write(f"[resolve] WARNING: {msg}")
+    else:
+        sys.stderr.write(f"[resolve] taxonomy snapshot is {age:.0f} days old ({how})\n")
 
     sys.stderr.write(f"[resolve] loading taxonomy from {args.taxdump}\n")
     names_idx = load_names(args.taxdump)

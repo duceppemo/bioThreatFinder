@@ -1,30 +1,30 @@
 taxid	name	resolved_rank	group	category	min_unique_reads	min_breadth	near_neighbour_taxids	n_descendants	notes	source	resolution_note
-1392	Bacillus anthracis	species	bacteria	high_consequence	100	0.01	1396;1428;1405	49	Chromosome is near-identical to the B. cereus group. Species call REQUIRES pXO1/pXO2 plasmid marker coverage, not chromosomal breadth alone.	seed	
-632	Yersinia pestis	species	bacteria	high_consequence	100	0.01	633;630	282	>97% chromosomal ANI to Y. pseudotuberculosis. Discriminate on pPCP1/pMT1 plasmids and pseudogene content.	seed	
-263	Francisella tularensis	species	bacteria	high_consequence	100	0.01	264;28110;622488	81	F. novicida is environmental and frequently miscalled as tularensis. Subspecies (tularensis vs holarctica) matters clinically; needs targeted loci.	seed	
-29459	Brucella melitensis	species	bacteria	high_consequence	100	0.01	235;29461;36855;529	98	Brucella spp. are >99% ANI to each other - species-level calls from metagenomes are usually NOT defensible. Report to genus unless marker loci resolve.	seed	
-235	Brucella abortus	species	bacteria	high_consequence	100	0.01	29459;29461;36855	172	See B. melitensis note. Also a vaccine strain (S19, RB51) source - check for vaccine-strain markers.	seed	
-29461	Brucella suis	species	bacteria	high_consequence	100	0.01	29459;235;36855	75	See B. melitensis note.	seed	
+1392	Bacillus anthracis	species	bacteria	high_consequence	100	0.01	1396;1428;1405	51	Chromosome is near-identical to the B. cereus group. Species call REQUIRES pXO1/pXO2 plasmid marker coverage, not chromosomal breadth alone.	seed	
+632	Yersinia pestis	species	bacteria	high_consequence	100	0.01	633;630	287	>97% chromosomal ANI to Y. pseudotuberculosis. Discriminate on pPCP1/pMT1 plasmids and pseudogene content.	seed	
+263	Francisella tularensis	species	bacteria	high_consequence	100	0.01	264;28110;622488	117	F. novicida is environmental and frequently miscalled as tularensis. Subspecies (tularensis vs holarctica) matters clinically; needs targeted loci.	seed	
+29459	Brucella melitensis	species	bacteria	high_consequence	100	0.01	235;29461;36855;529	104	Brucella spp. are >99% ANI to each other - species-level calls from metagenomes are usually NOT defensible. Report to genus unless marker loci resolve.	seed	
+235	Brucella abortus	species	bacteria	high_consequence	100	0.01	29459;29461;36855	175	See B. melitensis note. Also a vaccine strain (S19, RB51) source - check for vaccine-strain markers.	seed	
+29461	Brucella suis	species	bacteria	high_consequence	100	0.01	29459;235;36855	82	See B. melitensis note.	seed	
 28450	Burkholderia pseudomallei	species	bacteria	high_consequence	100	0.01	57975;13373;292	214	B. thailandensis is a common environmental soil organism and the main false-positive source.	seed	
-13373	Burkholderia mallei	species	bacteria	high_consequence	100	0.01	28450;57975	18	A clonal deletion derivative of B. pseudomallei - cannot be separated by breadth alone; requires absence-of-region logic.	seed	
+13373	Burkholderia mallei	species	bacteria	high_consequence	100	0.01	28450;57975	20	A clonal deletion derivative of B. pseudomallei - cannot be separated by breadth alone; requires absence-of-region logic.	seed	
 777	Coxiella burnetii	species	bacteria	high_consequence	100	0.01	446	44	Obligate intracellular, low biomass. Expect few reads; weight marker genes over breadth.	seed	
-1773	Mycobacterium tuberculosis	species	bacteria	notifiable	50	0.01	1765;33892;33894;78331;1764	2915	"MTBC members are ~99.9% ANI. Report as ""M. tuberculosis complex"" unless lineage SNPs resolve. BCG vaccine strain is M. bovis-derived."	seed	
-666	Vibrio cholerae	species	bacteria	notifiable	50	0.01	674;670	282	Non-toxigenic environmental V. cholerae is common. Toxigenicity requires ctxAB/tcpA coverage, not species call.	seed	
-28901	Salmonella enterica	species	bacteria	notifiable	50	0.01	562;546	3809	Serovar is the actionable unit, not species. Hand off to a dedicated serovar caller (sylph salmonella db is already on this box).	seed	
-1639	Listeria monocytogenes	species	bacteria	notifiable	50	0.01	1642;1640;1638	224	L. innocua is a frequent co-isolate; discriminate on the LIPI-1 island.	seed	
+1773	Mycobacterium tuberculosis	species	bacteria	notifiable	50	0.01	1765;33892;33894;78331;1764	2946	"MTBC members are ~99.9% ANI. Report as ""M. tuberculosis complex"" unless lineage SNPs resolve. BCG vaccine strain is M. bovis-derived."	seed	
+666	Vibrio cholerae	species	bacteria	notifiable	50	0.01	674;670	286	Non-toxigenic environmental V. cholerae is common. Toxigenicity requires ctxAB/tcpA coverage, not species call.	seed	
+28901	Salmonella enterica	species	bacteria	notifiable	50	0.01	562;546	5778	Serovar is the actionable unit, not species. Hand off to a dedicated serovar caller (sylph salmonella db is already on this box).	seed	
+1639	Listeria monocytogenes	species	bacteria	notifiable	50	0.01	1642;1640;1638	477	L. innocua is a frequent co-isolate; discriminate on the LIPI-1 island.	seed	
 446	Legionella pneumophila	species	bacteria	notifiable	50	0.01	450;28082	47	Water-system contaminant of reagents is plausible - check controls.	seed	
 1717	Corynebacterium diphtheriae	species	bacteria	notifiable	50	0.01	65058;1719	27	Toxigenicity is tox-gene dependent and phage-borne; species call is insufficient.	seed	
 487	Neisseria meningitidis	species	bacteria	notifiable	50	0.01	486;485;489	232	Commensal Neisseria in nasopharynx cross-map heavily. Capsule locus needed for serogroup.	seed	
-1491	Clostridium botulinum	species	bacteria	high_consequence	100	0.01	1509;1492;1561	279	Polyphyletic species. Actionable signal is the BoNT gene cluster, which also occurs in C. butyricum/baratii.	seed	
+1491	Clostridium botulinum	species	bacteria	high_consequence	100	0.01	1509;1492;1561	284	Polyphyletic species. Actionable signal is the BoNT gene cluster, which also occurs in C. butyricum/baratii.	seed	
 782	Rickettsia prowazekii	species	bacteria	high_consequence	100	0.01	785;783;42862	13	Obligate intracellular, low biomass.	seed	
 784	Orientia tsutsugamushi	species	bacteria	notifiable	50	0.01	780	22	Highly repetitive genome inflates depth CV; relax max_depth_cv.	seed	
-173	Leptospira interrogans	species	bacteria	notifiable	50	0.01	174;172	309	Saprophytic L. biflexa is environmental; pathogenic clade assignment matters.	seed	
+173	Leptospira interrogans	species	bacteria	notifiable	50	0.01	174;172	312	Saprophytic L. biflexa is environmental; pathogenic clade assignment matters.	seed	
 83554	Chlamydia psittaci	species	bacteria	notifiable	50	0.01	813;83555;83558	69	Zoonotic; overlaps the animal pack.	seed	
 622	Shigella dysenteriae	species	bacteria	notifiable	50	0.01	562;623;624	16	Shigella is genomically E. coli. Species-level separation from metagenomes is unreliable; use ipaH plus lineage markers.	seed	
-562	Escherichia coli	species	bacteria	notifiable	50	0.01	620;544	3764	Only pathotype is actionable (e.g. stx1/stx2/eae for STEC). Species presence is uninformative - gate reporting on virulence loci.	seed	
-520	Bordetella pertussis	species	bacteria	notifiable	50	0.01	519;35814;518	49	IS481 is multi-copy and shared with B. holmesii - a classic false-positive route.	seed	
-1314	Streptococcus pyogenes	species	bacteria	notifiable	50	0.01	1334;1311	834	Invasive disease is the notifiable event, not carriage.	seed	
-727	Haemophilus influenzae	species	bacteria	notifiable	50	0.01	726;729	41	H. haemolyticus is a commensal mimic; serotype b needs the cap locus.	seed	
+562	Escherichia coli	species	bacteria	notifiable	50	0.01	620;544	3854	Only pathotype is actionable (e.g. stx1/stx2/eae for STEC). Species presence is uninformative - gate reporting on virulence loci.	seed	
+520	Bordetella pertussis	species	bacteria	notifiable	50	0.01	519;35814;518	50	IS481 is multi-copy and shared with B. holmesii - a classic false-positive route.	seed	
+1314	Streptococcus pyogenes	species	bacteria	notifiable	50	0.01	1334;1311	838	Invasive disease is the notifiable event, not carriage.	seed	
+727	Haemophilus influenzae	species	bacteria	notifiable	50	0.01	726;729	42	H. haemolyticus is a commensal mimic; serotype b needs the cap locus.	seed	
 10255	Variola virus	no rank	virus	high_consequence	20	0.30	10245;10243;10244;28873;12643	4	Orthopoxviruses are highly collinear. A variola call demands high breadth AND discriminating terminal-region content; vaccinia (vaccine/lab strain) is the dominant false-positive source. Escalate immediately on any credible hit.	seed	
 10244	Monkeypox virus	no rank	virus	notifiable	20	0.20	10245;10243;10255	3	Clade I vs II matters; requires breadth across variable regions.	seed	
 186538	Zaire ebolavirus	no rank	virus	high_consequence	10	0.20	186540;565995;186539;3052505	2	Reston is non-pathogenic to humans - species resolution is essential, not optional.	seed	
@@ -33,17 +33,17 @@ taxid	name	resolved_rank	group	category	min_unique_reads	min_breadth	near_neighb
 3052310	Lassa mammarenavirus	species	virus	high_consequence	10	0.20	3052314;3052320;3052303	3	Segmented; require both L and S segments.	seed	matched via equivalent name
 2169991	Junin mammarenavirus	species	virus	high_consequence	10	0.20	3052317;3052307;2907957	1	New World arenaviruses; vaccine strain Candid#1 exists.	seed	matched via equivalent name
 3052676	Rift Valley fever phlebovirus	species	virus	high_consequence	10	0.20	11590;1933189	5	Segmented (L/M/S); require multiple segments. Overlaps animal pack.	seed	matched via equivalent name
-3052518	Crimean-Congo hemorrhagic fever orthonairovirus	species	virus	high_consequence	10	0.20	194540;11596	12	Extremely high sequence diversity - low-identity thresholds needed or true positives are missed.	seed	matched via equivalent name
+3052518	Crimean-Congo hemorrhagic fever orthonairovirus	species	virus	high_consequence	10	0.20	194540;11596	13	Extremely high sequence diversity - low-identity thresholds needed or true positives are missed.	seed	matched via equivalent name
 3052225	Nipah henipavirus	species	virus	high_consequence	10	0.20	3052223;3052221;2971765	2	-	seed	matched via equivalent name
 3052223	Hendra henipavirus	species	virus	high_consequence	10	0.20	3052225;3052221	2	Overlaps animal pack (equine).	seed	matched via equivalent name
 2697049	Severe acute respiratory syndrome coronavirus 2	no rank	virus	notifiable	20	0.20	694009;1335626	1	Ubiquitous; laboratory and index-hopping contamination is the norm, not the exception. Control subtraction is mandatory.	seed	
 1335626	Middle East respiratory syndrome-related coronavirus	no rank	virus	high_consequence	10	0.20	2697049;290028	8	Overlaps animal pack (camelid).	seed	
-11320	Influenza A virus	no rank	virus	notifiable	20	0.15	11520;11552	112717	Segmented and reassorting. Subtype (HA/NA) is the actionable unit - a species call is not enough. Route to a segment-aware subtyper; flag H5/H7 explicitly.	seed	
+11320	Influenza A virus	no rank	virus	notifiable	20	0.15	11520;11552	112867	Segmented and reassorting. Subtype (HA/NA) is the actionable unit - a species call is not enough. Route to a segment-aware subtyper; flag H5/H7 explicitly.	seed	
 11292	Rabies lyssavirus	species	virus	notifiable	10	0.20	90961;57482;38767	24	Vaccine strains (ERA, SAD-B19, Pasteur) are common lab/wildlife-bait contaminants.	seed	matched via equivalent name
 138950	Enterovirus C	no rank	virus	notifiable	10	0.20	138948;138949;147711;12080	57	Poliovirus surveillance context: Sabin vaccine strains and VDPV must be separated from wild-type. VP1 resolution required.	seed	
-11234	Measles morbillivirus	no rank	virus	notifiable	10	0.20	11041;3139435	441	Vaccine strain (Edmonston-derived) vs wild-type genotype separation is essential post-vaccination.	seed	
-11089	Yellow fever virus	no rank	virus	notifiable	10	0.20	12637;64320;11082	12	17D vaccine strain is a frequent confounder.	seed	
-12637	Dengue virus	no rank	virus	notifiable	10	0.20	64320;11089;11072	33	Serotypes 1-4 are distinct enough to resolve; report serotype.	seed	
+11234	Measles morbillivirus	no rank	virus	notifiable	10	0.20	11041;3139435	442	Vaccine strain (Edmonston-derived) vs wild-type genotype separation is essential post-vaccination.	seed	
+11089	Yellow fever virus	no rank	virus	notifiable	10	0.20	12637;64320;11082	13	17D vaccine strain is a frequent confounder.	seed	
+12637	Dengue virus	no rank	virus	notifiable	10	0.20	64320;11089;11072	39	Serotypes 1-4 are distinct enough to resolve; report serotype.	seed	
 64320	Zika virus	no rank	virus	notifiable	10	0.20	12637;64318;11082	4	-	seed	
 37124	Chikungunya virus	no rank	virus	notifiable	10	0.20	2169701;11029;59301	7	-	seed	
 11082	West Nile virus	no rank	virus	notifiable	10	0.20	11072;64286;11080	17	Overlaps animal pack (equine/avian).	seed	
@@ -57,7 +57,7 @@ taxid	name	resolved_rank	group	category	min_unique_reads	min_breadth	near_neighb
 291484	Hepatitis E virus	species	virus	notifiable	10	0.20	12092;2848048	1	Genotype 3/4 are zoonotic (swine) - overlaps animal pack.	seed	
 5833	Plasmodium falciparum	species	parasite	notifiable	50	0.005	5855;5858;36330;5850	173	23 Mb AT-rich genome; breadth accumulates slowly - low min_breadth is correct here, not a mistake. Species mix is common in endemic settings.	seed	
 5855	Plasmodium vivax	species	parasite	notifiable	50	0.005	5833;5850;5827	8	P. knowlesi is morphologically confused with vivax/malariae - sequence resolution is the advantage here.	seed	
-5850	Plasmodium knowlesi	species	parasite	notifiable	50	0.005	5855;5827;208452	3	Zoonotic (macaque).	seed	
+5850	Plasmodium knowlesi	species	parasite	notifiable	50	0.005	5855;5827;208452	6	Zoonotic (macaque).	seed	
 5691	Trypanosoma brucei	species	parasite	notifiable	50	0.005	5693;5692;5697	12	Subspecies gambiense/rhodesiense are the human-infective forms; b. brucei is not. Resolution requires SRA/TgsGP loci.	seed	
 5693	Trypanosoma cruzi	species	parasite	notifiable	50	0.005	5698;5691	14	T. rangeli is non-pathogenic and cross-maps.	seed	
 5661	Leishmania donovani	species	parasite	notifiable	50	0.005	5671;5664;5666	6	L. donovani/infantum complex is barely separable; report to complex.	seed	
@@ -65,7 +65,7 @@ taxid	name	resolved_rank	group	category	min_unique_reads	min_breadth	near_neighb
 5811	Toxoplasma gondii	species	parasite	notifiable	50	0.005	99158;29176	69	H. hammondi is ~99% identical and non-pathogenic to humans.	seed	
 5807	Cryptosporidium parvum	species	parasite	notifiable	50	0.005	237895;93969;117008	3	parvum (zoonotic) vs hominis (anthroponotic) distinction drives the outbreak investigation.	seed	
 237895	Cryptosporidium hominis	species	parasite	notifiable	50	0.005	5807;93969	2	See C. parvum note.	seed	
-5741	Giardia intestinalis	species	parasite	notifiable	50	0.005	5742;5743	15	Assemblages A/B are human-infective; C-H are animal. Assemblage matters.	seed	matched via synonym
+5741	Giardia intestinalis	species	parasite	notifiable	50	0.005	5742;5743	11	Assemblages A/B are human-infective; C-H are animal. Assemblage matters.	seed	matched via synonym
 5763	Naegleria fowleri	species	parasite	high_consequence	50	0.005	5762;51637;5755	1	Free-living; water-system reagent contamination is plausible.	seed	
 66527	Balamuthia mandrillaris	species	parasite	high_consequence	50	0.005	5755;5763	1	Rare, often only detected by sequencing - low read counts are expected and still meaningful.	seed	
 5755	Acanthamoeba castellanii	species	parasite	notifiable	50	0.005	5763;66527	2	Environmental; interpret with care.	seed	
@@ -83,7 +83,7 @@ taxid	name	resolved_rank	group	category	min_unique_reads	min_breadth	near_neighb
 37727	Talaromyces marneffei	species	fungus	notifiable	50	0.005	28564;5073	4	Environmental Penicillium is ubiquitous in reagents; discriminate carefully.	seed	
 37769	Cryptococcus gattii	species	fungus	notifiable	50	0.005	5207;40410	37	gattii affects immunocompetent hosts - the species call changes clinical interpretation. Endemic in BC/PNW.	seed	
 5207	Cryptococcus neoformans	species	fungus	notifiable	50	0.005	37769;40410	419	See C. gattii note.	seed	
-498019	Candida auris	species	fungus	notifiable	50	0.005	45357;1231522;418784	1	Multidrug-resistant, outbreak-prone in healthcare. C. haemulonii complex is the misidentification route. Clade assignment is epidemiologically useful.	seed	matched via synonym
+498019	Candida auris	species	fungus	notifiable	50	0.005	45357;1231522;418784	2	Multidrug-resistant, outbreak-prone in healthcare. C. haemulonii complex is the misidentification route. Clade assignment is epidemiologically useful.	seed	matched via synonym
 746128	Aspergillus fumigatus	species	fungus	emerging	50	0.005	293939;91492;5059	15	Ubiquitous airborne contaminant - a positive means little without clinical context. Azole-resistance cyp51A alleles are the actionable signal.	seed	
 42068	Pneumocystis jirovecii	species	fungus	notifiable	50	0.005	4754;263815	6	Cannot be cultured; sequencing is a primary detection route. Colonisation vs disease is not resolvable by sequence.	seed	
 64495	Rhizopus arrhizus	species	fungus	emerging	50	0.005	58291;36080;42458	9	Mucorales; environmental and a common reagent contaminant.	seed	
