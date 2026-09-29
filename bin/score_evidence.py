@@ -86,6 +86,34 @@ def read_tsv(path: Path) -> list[dict]:
     return list(csv.DictReader(lines, delimiter="\t"))
 
 
+def apply_threshold_overrides(thresholds: dict, specs: list) -> dict:
+    """Apply KEY=VALUE overrides onto the pack thresholds, loudly.
+
+    Anything unparseable, or any key the pack does not define, is FATAL: a silently
+    ignored override is how -profile test came to assert relaxed gates that were never
+    applied. A typo must not look like a threshold that took effect.
+    """
+    out = dict(thresholds)
+    for spec in specs or []:
+        if "=" not in spec:
+            sys.exit(f"[score] FATAL: --threshold expects KEY=VALUE, got {spec!r}")
+        key, _, raw = spec.partition("=")
+        key, raw = key.strip(), raw.strip()
+        if key not in out:
+            sys.exit(f"[score] FATAL: --threshold {key!r} is not a known threshold. "
+                     f"Known: {', '.join(sorted(k for k in out))}")
+        if isinstance(out[key], dict):
+            sys.exit(f"[score] FATAL: --threshold {key!r} is a nested mapping and "
+                     f"cannot be overridden from the command line; edit the pack.")
+        try:
+            out[key] = float(raw)
+        except ValueError:
+            sys.exit(f"[score] FATAL: --threshold {key}={raw!r} is not a number")
+        sys.stderr.write(f"[score] threshold override: {key} = {out[key]} "
+                         f"(pack.yaml said {thresholds[key]})\n")
+    return out
+
+
 def resolve_identity_floor(thresholds: dict, group: str,
                            platform: str) -> tuple[float, str]:
     """The read-identity floor for this group ON THIS PLATFORM, and why.
@@ -212,10 +240,20 @@ def main() -> int:
                     help="per-sample marker state TSVs from marker_evidence.py")
     ap.add_argument("--marker-rules", type=Path, default=None,
                     help="packs/<pack>/marker_rules.yaml")
+    ap.add_argument("--threshold", action="append", default=[], metavar="KEY=VALUE",
+                    help="Override one pack.yaml threshold, repeatable. pack.yaml is "
+                         "the source of truth; this exists so a profile or a CLI flag "
+                         "can relax a gate for a smoke test WITHOUT editing the pack. "
+                         "Seven params used to be declared in nextflow.config and "
+                         "reach no process at all: -profile test set min_unique_reads=1 "
+                         "and min_breadth=0.0 intending to relax stage 2, both were "
+                         "silently ignored, and the tiny test input produced zero "
+                         "confirmations that looked like a clean negative.")
     ap.add_argument("--out", required=True, type=Path)
     args = ap.parse_args()
 
-    thresholds = load_pack_thresholds(args.pack_yaml)
+    thresholds = apply_threshold_overrides(load_pack_thresholds(args.pack_yaml),
+                                           args.threshold)
 
     # ---- marker evidence and rules -------------------------------------
     # marker_state[sample][marker_id] = mr.TRUE / mr.FALSE. A marker that is

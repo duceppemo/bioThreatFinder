@@ -24,6 +24,8 @@ process RESOLVE_WATCHLIST {
     resolve_watchlist.py \\
         --watchlist ${watchlist} \\
         --taxdump ${taxdump} \\
+        --require-fresh-taxdump \\
+        --max-taxdump-age-days ${params.max_taxdump_age_days} \\
         --out watchlist.resolved.tsv \\
         --descendants-out watchlist.descendants.tsv \\
         2> resolve.log
@@ -183,8 +185,15 @@ process KRAKENUNIQ {
     elif [ -f "${db}/btf_classify_defaults.env" ]; then
         # shellcheck disable=SC1091
         . "${db}/btf_classify_defaults.env"
-        if [ -n "\${hll_precision_for_classify:-}" ]; then
-            HLL_ARGS="--hll-precision \${hll_precision_for_classify}"
+        # KRAKENUNIQ_HLL_PRECISION is the key build_krakenuniq_db.sh writes into
+        # btf_classify_defaults.env. This tested `hll_precision_for_classify`, which
+        # appears only inside BTF_BUILD_MANIFEST.txt - a file this module never reads -
+        # so HLL_ARGS was ALWAYS empty and krakenuniq fell back to its own default.
+        # Building with --hll-precision 14 and classifying at 12 is exactly the
+        # build/query drift this mechanism exists to prevent, and it was silent.
+        # Latent only because the build default (12) happens to match krakenuniq's.
+        if [ -n "\${KRAKENUNIQ_HLL_PRECISION:-}" ]; then
+            HLL_ARGS="--hll-precision \${KRAKENUNIQ_HLL_PRECISION}"
         fi
     fi
     echo "krakenuniq HLL args: \${HLL_ARGS:-<tool default>}" >&2
@@ -416,6 +425,20 @@ process SCORE_EVIDENCE {
     def miss_arg = missing_refs.name != 'NO_FILE' ? "--missing-refs ${missing_refs}" : ''
     def mk_arg   = marker_states ? "--marker-evidence ${marker_states.join(' ')}" : ''
     def mr_arg   = marker_rules.name != 'NO_FILE' ? "--marker-rules ${marker_rules}" : ''
+    // pack.yaml is the source of truth for thresholds; these params exist so a
+    // profile can relax a gate without editing the pack. They were DECLARED in
+    // nextflow.config and passed to nothing, so `-profile test` asserted relaxed
+    // gates that never applied and its empty result looked like a clean negative.
+    // Null means "use the pack value". score_evidence.py rejects an unknown key.
+    def thr = [
+        'min_unique_reads': params.min_unique_reads,
+        'min_breadth': params.min_breadth,
+        'max_depth_cv': params.max_depth_cv,
+        'min_read_identity': params.min_read_identity,
+        'mapq_min': params.mapq_min,
+    ].findAll { _k, v -> v != null }
+     .collect { k, v -> "--threshold ${k}=${v}" }
+     .join(' ')
     """
     score_evidence.py \\
         ${cov_arg} \\
@@ -426,6 +449,7 @@ process SCORE_EVIDENCE {
         --watchlist ${watchlist} \\
         --pack-yaml ${pack_yaml} \\
         --control-ratio ${params.control_ratio} \\
+        ${thr} \\
         --out findings.tsv \\
         2> score.log
     cat score.log >&2
@@ -601,6 +625,7 @@ process MARKER_EVIDENCE {
         --sample ${meta.id} \\
         ${nt_arg} ${aa_arg} ${hmm_arg} \\
         --mapq-min ${params.mapq_min} \\
+        --hmm-min-bits ${params.hmm_min_bits} \\
         --out ${meta.id}.marker_states.tsv \\
         2> ${meta.id}.marker.log
     cat ${meta.id}.marker.log >&2

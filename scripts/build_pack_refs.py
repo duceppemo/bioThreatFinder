@@ -70,7 +70,12 @@ LOG = logging.getLogger("build_pack_refs")
 # ---------------------------------------------------------------------------
 
 DEFAULT_DB_ROOT = Path("/media/36tb/db")
-DEFAULT_TAXDUMP = Path("/media/36tb/db/taxdump")
+# The PINNED dated snapshot, not the shared /media/36tb/db/taxdump. D8 measured that
+# one at 201 days stale (+288,764 taxids) and decided to stop using it; build_marker_db.py
+# already defaults to the pin, and this file disagreeing meant that omitting --taxdump
+# expanded watchlist subtrees against a 6.5-month-old tree. The refs base path has a
+# mismatch guard; the taxdump default had none.
+DEFAULT_TAXDUMP = Path("/media/8tb/bioThreatFinder/taxdump/2026-09-29")
 CONDA_BIN = Path("/home/bioinfo/miniconda3/bin")
 
 # The shared volume runs at ~97% capacity. Refuse to start rather than fill it.
