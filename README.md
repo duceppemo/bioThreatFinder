@@ -1,4 +1,9 @@
-# bioThreatFinder
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/bioThreatFinder-logo-dark.svg">
+    <img alt="bioThreatFinder" src="assets/logo/bioThreatFinder-logo-light.svg" width="440">
+  </picture>
+</h1>
 
 Metagenomic screening and in-silico confirmation of high-consequence pathogens,
 across human, animal and plant health.
