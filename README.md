@@ -295,6 +295,21 @@ Design targets, set deliberately rather than by what happened to be installed:
 - Analysis scripts in `bin/` are **stdlib-only Python 3** plus `samtools`, so
   they run in whatever env the pipeline hands them
 
+## Benchmarking
+
+25 scenarios, 23 machine-checkable expectations, weighted deliberately towards
+failure modes rather than easy positives — near neighbours with the target
+genuinely absent, target chromosomes stripped of their virulence plasmids,
+vaccine strains, index hopping, and a 99.9%-host low-biomass case.
+
+`no_reference` observations are excluded from every rate, so adding watchlist taxa
+without building their references cannot fake an improvement in specificity.
+
+Simulation flatters every tool and establishes relative performance only — not
+clinical performance. `docs/benchmarking.md` states what it cannot tell you, and
+the two limits benchmarking never removes: software cannot beat its input, and
+homology-based detection cannot see a wholly novel agent.
+
 ## Status
 
 v0.1.0 — scaffold complete and internally validated:
@@ -316,8 +331,9 @@ Not yet run on real sequencing data, and no databases built yet.
 
 ### Known gaps
 
-- **Nothing is measured.** Every threshold is a reasoned guess until the
-  benchmark harness exists. No accuracy claim is assertable yet.
+- **Nothing is measured YET.** The harness exists and is self-tested, but no
+  datasets have been generated and no pipeline run has happened, so every
+  threshold is still a reasoned guess. See `docs/benchmarking.md`.
 - Calling is fixed-threshold; the intended design is an empirical null built from
   a background panel, giving calibrated FDR instead of guessed cutoffs
 - No assembly tier. A contig spanning pPCP1 is far stronger evidence than 50
