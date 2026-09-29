@@ -42,6 +42,27 @@ defaults:
     total_reads: 20000000
     read_length: 150
     ont_mean_length: 5000
+    # Commensal and environmental background, 2% of the library. Without this,
+    # "negative" means host-only, which understates the false-positive rate -
+    # real specimens contain plenty of organisms that are genomically adjacent to
+    # watchlist taxa. Every taxon here is a near neighbour already present in the
+    # pack's reference manifest, so no extra genomes need fetching.
+    #
+    # Note E. coli: commensal E. coli SHOULD be detected and should NOT be
+    # confirmed, because confirmation is gated on pathotype markers it does not
+    # carry. Having it in every background is a free, continuous test of that rule.
+    #
+    # Background taxa are deliberately NOT listed in per-scenario `truth` blocks.
+    # The evaluator reports findings it cannot match to truth as `unlisted` and
+    # keeps them out of the PPV denominator, so background does not silently
+    # inflate or deflate specificity. `negative_host_only` lists them explicitly,
+    # so that one scenario's false-positive rate is exact.
+    background:
+        "Escherichia coli": 0.008
+        "Neisseria lactamica": 0.004
+        "Haemophilus haemolyticus": 0.003
+        "Listeria innocua": 0.003
+        "Bacillus thuringiensis": 0.002
 
 scenarios:
 
@@ -446,8 +467,11 @@ scenarios:
       kind: negative
       spikes: []
       truth:
-          present: []
-          absent: [Bacillus anthracis, Yersinia pestis, Francisella tularensis, Burkholderia pseudomallei, Variola virus, Zaire ebolavirus, Mycobacterium tuberculosis, Entamoeba histolytica]
+          # Background taxa listed explicitly HERE and nowhere else, so this one
+          # scenario's false-positive rate is exact rather than diluted by
+          # 'unlisted' findings.
+          present: [Escherichia coli, Neisseria lactamica, Haemophilus haemolyticus, Listeria innocua, Bacillus thuringiensis]
+          absent: [Bacillus anthracis, Yersinia pestis, Francisella tularensis, Burkholderia pseudomallei, Variola virus, Zaire ebolavirus, Mycobacterium tuberculosis, Entamoeba histolytica, Listeria monocytogenes, Neisseria meningitidis, Haemophilus influenzae]
       controls:
           include_ntc: true
 
@@ -468,9 +492,20 @@ scenarios:
           include_ntc: true
           index_hop_fraction: 0.001
       expect:
+          # The control must not read as a positive finding. Note the expected
+          # tier is control_background, NOT suppressed_control: a control's own
+          # content is tiered control_background, while suppressed_control is what
+          # a SAMPLE gets when its signal fails to exceed the control. Asserting
+          # suppressed_control here would be asserting the wrong mechanism.
           - taxon: Yersinia pestis
             sample_role: control
-            max_tier: suppressed_control
+            max_tier: control_background
+          # And the genuine 5000 RPM positive must survive control subtraction.
+          # A contamination guard that suppresses true positives is worse than
+          # none, so this half of the test matters as much as the other.
+          - taxon: Yersinia pestis
+            sample_role: sample
+            min_tier: confirmed_in_silico
 
     - id: contamination_no_control
       description: >
