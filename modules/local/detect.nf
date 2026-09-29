@@ -680,6 +680,8 @@ process MARKER_EVIDENCE {
         --mapq-min ${params.mapq_min} \\
         --platform ${meta.platform} \\
         --hmm-min-bits ${params.hmm_min_bits} \\
+        --min-low-depth-reads ${params.marker_min_low_depth_reads} \\
+        --low-depth-breadth-fraction ${params.marker_low_depth_breadth_fraction} \\
         --out ${meta.id}.marker_states.tsv \\
         2> ${meta.id}.marker.log
     cat ${meta.id}.marker.log >&2

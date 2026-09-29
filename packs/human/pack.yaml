@@ -155,6 +155,38 @@ thresholds:
   # Short alignments are a documented false-positive source on ONT, where a 50 bp
   # match inside a 10 kb read says almost nothing about where that read came from.
   min_alignment_length: 100
+
+  # ---- DEPTH-CONDITIONAL STRAIN / SUB-SPECIES TYPING ----
+  #
+  # A strain claim must be refused when the depth cannot support it, and must SAY it
+  # was refused. The arithmetic is unforgiving and worth writing down: a 4.83 Mb
+  # bacterial genome at 150 bp reads needs ~161,000 reads per million of the library to
+  # reach 20x, which is 16% of all reads - not a detection scenario. The plumbing
+  # positive control at 5,000 rpm delivered 0.62x. At the benchmark's 100 rpm rung it is
+  # 0.012x, where 1.2% of the genome is seen at most once.
+  #
+  # So the two claims separate, and they get separate gates.
+  #
+  # (1) MARKER / PATHOTYPE TYPING works at low depth because it needs reads on a short
+  #     locus, not across a genome - which is why 57 of the 163 markers are pathotype,
+  #     lineage, vaccine_strain or resistance. But ABSENCE does not work at low depth. A
+  #     single-copy 1.5 kb marker at 0.012x expects 0.12 reads, so seeing none is the
+  #     expected outcome whether or not the locus is there. Calling that ABSENT is
+  #     positive evidence against a real finding, manufactured from no data.
+  #     Below min_expected_reads_for_absence, a searched-and-not-found marker is
+  #     reported UNKNOWN instead, which under the Kleene rules cannot promote a finding
+  #     and cannot fire a veto or a vaccine stand-down.
+  min_expected_reads_for_absence: 3.0
+  #     Used when a marker has no nucleotide length recorded (protein- or HMM-only
+  #     tiers). Deliberately a round assumption, not a measurement, and it only ever
+  #     makes the gate MORE conservative.
+  assumed_marker_bp: 1000
+  # (2) GENOME-WIDE STRAIN IDENTITY - cgMLST, SNP typing, consensus lineage assignment -
+  #     is not attempted at all below this mean depth. Nothing in the pipeline computes
+  #     it yet; the gate exists so the report states "not attempted, depth X < Y" rather
+  #     than leaving a reader to assume it was checked. ~20x is the conventional floor
+  #     for confident haploid SNP calling.
+  min_depth_for_genome_typing: 20.0
   mapq_min: 10
 
 # ---------------------------------------------------------------------------

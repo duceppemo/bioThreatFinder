@@ -308,7 +308,12 @@ data alone - read the taxon caveats column.</p>
                     "window_occupancy", "mean_identity", "neighbour_ratio",
                     "n_classifiers", "classifiers", "distinct_kmers", "screen_flags",
                     "reads_in_masked_regions", "masked_fraction_of_reference",
-                    "orthogonal_concordance", "marker_verdict", "taxon_notes", "reasons"]
+                    "orthogonal_concordance", "marker_verdict",
+                    # Sub-species typing and what the depth can carry. A reader must be
+                    # able to see that genome-wide typing was NOT attempted, rather than
+                    # assume it was checked and came back negative.
+                    "strain_claim", "strain_typing", "strain_claim_reason",
+                    "taxon_notes", "reasons"]
     with args.summary.open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=summary_cols, delimiter="\t", extrasaction="ignore")
         w.writeheader()

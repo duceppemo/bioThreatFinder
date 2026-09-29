@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import re
 import subprocess
 import sys
@@ -123,6 +124,27 @@ def fasta_lengths(path: Path | None) -> dict[str, int]:
 # Tier: nucleotide read alignment
 # ---------------------------------------------------------------------------
 
+def expected_breadth_at(depth: float) -> float:
+    """Breadth a locus can reach at this depth: Lander-Waterman, 1 - e^-d.
+
+    THE REASON A FIXED BREADTH FLOOR IS NOT DEPTH-NEUTRAL. A catalogue min_coverage of
+    0.80 silently requires depth >= -ln(0.20) = 1.6x on the locus. Below that the
+    threshold is unreachable no matter how real the organism is, and the marker is
+    recorded ABSENT - which is not a missing call but positive evidence against a true
+    finding, and it propagates into support_requires and the tier.
+
+    Measured on the plumbing positive control: Y. pestis at 0.34x mean depth, marker
+    ypest_pmt1_caf1 with 13 reads at 99.8% identity, observed breadth 0.323 against an
+    expectation of 1 - e^-0.34 = 0.29. Fully covered for the depth available, and called
+    ABSENT against a 0.80 floor - so the four plasmid markers all failed, support_requires
+    evaluated FALSE, and a correct Y. pestis detection was held at `screened_only` on the
+    one scenario whose file says any outcome other than confirmed is a configuration fault.
+    """
+    if depth <= 0:
+        return 0.0
+    return 1.0 - math.exp(-depth)
+
+
 def nt_evidence(bam: Path, mapq_min: int) -> dict[str, dict]:
     lengths: dict[str, int] = defaultdict(int)
     ref_to_marker: dict[str, str] = {}
@@ -185,11 +207,17 @@ def nt_evidence(bam: Path, mapq_min: int) -> dict[str, dict]:
     out = {}
     for mid, length in lengths.items():
         rec = agg.get(mid, {"reads": 0, "nm": 0, "aln": 0})
+        # Depth ON THIS MARKER, from aligned bases - exact, with no read-length
+        # assumption. It is what makes a depth-aware presence call possible: see
+        # expected_breadth_at().
+        depth = (rec["aln"] / length) if length else 0.0
         out[mid] = {
             "nt_reads": rec["reads"],
             "nt_breadth": (covered.get(mid, 0) / length) if length else 0.0,
             "nt_identity": (1.0 - rec["nm"] / rec["aln"]) if rec["aln"] else 0.0,
             "nt_length": length,
+            "nt_depth": depth,
+            "nt_expected_breadth": expected_breadth_at(depth),
         }
     return out
 
@@ -303,6 +331,13 @@ def main() -> int:
                          "reads cannot meet those on sequencing error alone, so a "
                          "genuine marker would read ABSENT on that platform - positive "
                          "evidence against a real finding. See --ont-identity-slack.")
+    ap.add_argument("--min-low-depth-reads", type=int, default=5,
+                    help="Minimum reads for the depth-limited presence route, used only "
+                         "when the marker's achievable breadth is below its min_coverage. "
+                         "Identity is never relaxed. [5]")
+    ap.add_argument("--low-depth-breadth-fraction", type=float, default=0.60,
+                    help="On the depth-limited route, observed breadth must be at least "
+                         "this fraction of what the depth allows (1-e^-d). [0.60]")
     ap.add_argument("--ont-identity-slack", type=float, default=0.05,
                     help="Subtracted from each marker's nucleotide min_identity when "
                          "--platform ont, floored at 0.70. PROVISIONAL: reasoned from "
@@ -398,6 +433,11 @@ def main() -> int:
             "nt_reads": "", "nt_breadth": "", "nt_identity": "",
             "aa_hits": "", "aa_coverage": "", "aa_identity": "", "aa_bits": "",
             "hmm_domains": "", "hmm_coverage": "", "hmm_bits": "",
+            # Carried so score_evidence.py can compute, from the target's observed
+            # depth, whether a marker that was not found would have been SAMPLED at
+            # all. Without the length, "searched and not found" cannot be told apart
+            # from "never had a chance of being seen".
+            "nt_length": "",
         }
 
         # Gate 1: was this marker ever built?
@@ -427,7 +467,7 @@ def main() -> int:
             e = nt.get(mid)
             if e:
                 rec.update({k: (f"{v:.4f}" if isinstance(v, float) else v)
-                            for k, v in e.items() if k != "nt_length"})
+                            for k, v in e.items()})
                 tried.append("dna")
                 # AT LEAST ONE READ, WHATEVER THE THRESHOLDS SAY.
                 #
@@ -437,13 +477,33 @@ def main() -> int:
                 # which bmallei_deletions carries - the gate passed on zero evidence
                 # and the marker was reported PRESENT. Any marker with a 0 floor
                 # became a permanent free PRESENT the moment a rule referenced it.
+                # DEPTH-AWARE PRESENCE.
+                #
+                # The strict floor still applies wherever the depth can actually reach
+                # it. Where it cannot - expected breadth below the floor - a marker may
+                # instead qualify on being as covered as the depth permits, backed by a
+                # minimum read count and the full identity requirement. Identity is
+                # never relaxed: that is what distinguishes a real locus from a
+                # mismapped read, and it is the discriminator that survives low depth.
+                exp_b = e.get("nt_expected_breadth", 0.0)
+                depth_limited = exp_b < min_cov
+                strict_ok = e["nt_breadth"] >= min_cov
+                low_depth_ok = (
+                    depth_limited
+                    and e["nt_reads"] >= args.min_low_depth_reads
+                    and exp_b > 0
+                    and e["nt_breadth"] >= args.low_depth_breadth_fraction * exp_b)
                 if (e["nt_reads"] >= 1
-                        and e["nt_breadth"] >= min_cov
+                        and (strict_ok or low_depth_ok)
                         and e["nt_identity"] >= min_id):
+                    how = "" if strict_ok else (
+                        f", DEPTH-LIMITED: {e['nt_depth']:.2f}x on this marker allows "
+                        f"at most {exp_b:.3f} breadth vs a {min_cov:g} floor, "
+                        f"observed {e['nt_breadth']:.3f}")
                     passed.append(
                         f"dna(breadth={e['nt_breadth']:.3f}>={min_cov:g}, "
                         f"id={e['nt_identity']:.3f}>={min_id:g}, "
-                        f"reads={e['nt_reads']}){id_note}")
+                        f"reads={e['nt_reads']}){id_note}{how}")
             else:
                 tried.append("dna")
 

@@ -114,6 +114,76 @@ def apply_threshold_overrides(thresholds: dict, specs: list) -> dict:
     return out
 
 
+TYPING_CLASSES = ("pathotype", "lineage", "vaccine_strain", "resistance")
+
+
+def expected_marker_reads(mean_depth: float, marker_bp: float,
+                          read_len: float) -> float:
+    """Reads expected on a single-copy locus of `marker_bp` at `mean_depth`.
+
+    depth = reads * read_len / length, so reads = depth * length / read_len. Using the
+    CHROMOSOMAL depth for a locus that may sit on a multi-copy plasmid underestimates
+    the expectation, which only ever makes the gate more conservative - it errs towards
+    UNKNOWN rather than towards a confident absence.
+    """
+    if marker_bp <= 0 or read_len <= 0:
+        return 0.0
+    return mean_depth * marker_bp / read_len
+
+
+def gate_absence_on_depth(states: dict, metas: dict, taxon: str, mean_depth: float,
+                          read_len: float, thresholds: dict) -> tuple[dict, list]:
+    """Demote ABSENT to UNKNOWN for this taxon's markers that depth could not sample.
+
+    WHY THIS EXISTS. Marker typing survives low depth because it needs reads on a short
+    locus rather than across a genome - that is what makes pathotype calling useful at
+    detection-level titres. ABSENCE does not survive it. A single-copy 1.5 kb marker at
+    0.012x mean depth expects 0.12 reads, so finding none is the expected outcome
+    whether or not the locus is present, and recording ABSENT turns no data into
+    positive evidence against a real finding.
+
+    Returning UNKNOWN instead composes with the rest of the tiering: under Kleene rules
+    UNKNOWN cannot satisfy confirm_requires, and an unevaluable veto or vaccine check
+    already holds a finding at `supported` rather than confirming it.
+    """
+    floor = as_float(thresholds.get("min_expected_reads_for_absence"), 3.0)
+    assumed_bp = as_float(thresholds.get("assumed_marker_bp"), 1000.0)
+    adjusted = dict(states)
+    demoted: list[tuple[str, float]] = []
+    for mid, meta in metas.items():
+        if meta.get("state") != "ABSENT":
+            continue
+        # Only this taxon's markers: depth is per taxon, and a neighbour's marker must
+        # not be re-judged using this taxon's coverage.
+        if taxon and meta.get("taxon") and meta["taxon"] != taxon:
+            continue
+        marker_bp = meta.get("nt_length") or assumed_bp
+        exp = expected_marker_reads(mean_depth, marker_bp, read_len)
+        if exp < floor:
+            adjusted.pop(mid, None)          # absent from the dict == UNKNOWN
+            demoted.append((mid, exp))
+    return adjusted, sorted(demoted)
+
+
+def describe_strain_claim(mean_depth: float, thresholds: dict) -> tuple[str, str]:
+    """What kind of strain claim the observed depth can carry, and the reason.
+
+    Says "not attempted" out loud rather than leaving a reader to assume genome-wide
+    typing was checked. Nothing in the pipeline computes cgMLST, SNP typing or a
+    consensus lineage yet; this records the depth finding either way so that when one
+    is added the gate is already the thing deciding.
+    """
+    need = as_float(thresholds.get("min_depth_for_genome_typing"), 20.0)
+    if mean_depth >= need:
+        return ("genome_typing_supported", (
+            f"mean depth {mean_depth:.2f}x >= {need:g}x, so genome-wide typing "
+            f"(cgMLST/SNP/consensus lineage) is supportable - NOT YET IMPLEMENTED"))
+    return ("marker_typing_only", (
+        f"genome-wide strain typing NOT ATTEMPTED: mean depth {mean_depth:.2f}x "
+        f"< {need:g}x required for confident SNP/cgMLST calling. Sub-species "
+        f"evidence below is marker presence/absence only"))
+
+
 def resolve_identity_floor(thresholds: dict, group: str,
                            platform: str) -> tuple[float, str]:
     """The read-identity floor for this group ON THIS PLATFORM, and why.
@@ -167,6 +237,9 @@ def load_pack_thresholds(pack_yaml: Path) -> dict:
         "min_alignment_length": 100.0,
         "min_read_identity_by_group": {},
         "min_read_identity_by_platform": {},
+        "min_expected_reads_for_absence": 3.0,
+        "assumed_marker_bp": 1000.0,
+        "min_depth_for_genome_typing": 20.0,
     }
     if not pack_yaml or not pack_yaml.exists():
         return defaults
@@ -260,6 +333,9 @@ def main() -> int:
     # UNKNOWN is deliberately ABSENT FROM THE DICT, so the rule engine's default
     # of UNKNOWN applies and indeterminacy propagates correctly.
     marker_state: dict[str, dict[str, int]] = defaultdict(dict)
+    # Metadata per (sample, marker), so the depth gate below can ask whether a marker
+    # that was NOT found had any chance of being sampled at the observed depth.
+    marker_meta: dict[str, dict[str, dict]] = defaultdict(dict)
     marker_seen = 0
     for path in args.marker_evidence:
         for row in read_tsv(path):
@@ -269,6 +345,13 @@ def main() -> int:
             if not mid or not sample or mr is None:
                 continue
             marker_seen += 1
+            marker_meta[sample][mid] = {
+                "taxon": (row.get("taxon") or "").strip(),
+                "marker_class": (row.get("marker_class") or "").strip(),
+                "nt_length": as_float(row.get("nt_length"), 0.0),
+                "nt_reads": as_float(row.get("nt_reads"), 0.0),
+                "state": state,
+            }
             if state == "PRESENT":
                 marker_state[sample][mid] = mr.TRUE
             elif state == "ABSENT":
@@ -443,11 +526,46 @@ def main() -> int:
                 "is computed over a small trusted fraction - treat the reference as "
                 "suspect and consider recuration")
 
+        # ---- depth-conditional typing gate ---------------------------
+        # Runs BEFORE rule evaluation, so a marker absence that the depth could not
+        # have established never reaches the rules as FALSE.
+        this_taxon = row.get("taxon") or meta.get("name", "")
+        this_sample = row.get("sample", "")
+        mean_depth = as_float(row.get("mean_depth"), 0.0)
+        read_len = as_float(row.get("mean_alignment_length"), 0.0) or 150.0
+        metas = marker_meta.get(this_sample, {})
+        eff_state, depth_demoted = gate_absence_on_depth(
+            marker_state.get(this_sample, {}), metas, this_taxon,
+            mean_depth, read_len, thresholds)
+        strain_claim, strain_reason = describe_strain_claim(mean_depth, thresholds)
+        if depth_demoted:
+            shown = ", ".join(f"{m}~{e:.2f} reads" for m, e in depth_demoted[:4])
+            more = ", ..." if len(depth_demoted) > 4 else ""
+            need_reads = as_float(
+                thresholds.get("min_expected_reads_for_absence"), 3.0)
+            reasons.append(
+                f"DEPTH GATE: {len(depth_demoted)} marker absence(s) for this taxon "
+                f"reported UNKNOWN rather than ABSENT - at {mean_depth:.3f}x mean "
+                f"depth fewer than {need_reads:g} reads were expected on them, so not "
+                f"finding them is uninformative ({shown}{more})")
+
+        # Sub-species typing evidence: the marker classes that carry a strain claim.
+        typing_bits = []
+        for mid, m in sorted(metas.items()):
+            if m.get("marker_class") not in TYPING_CLASSES:
+                continue
+            if this_taxon and m.get("taxon") and m["taxon"] != this_taxon:
+                continue
+            st = ("PRESENT" if eff_state.get(mid) == mr.TRUE
+                  else "ABSENT" if eff_state.get(mid) == mr.FALSE else "UNKNOWN")
+            typing_bits.append(f"{m['marker_class']}:{mid}={st}")
+        strain_typing = "; ".join(typing_bits)
+
         # ---- marker gating -------------------------------------------
         marker_summary = ""
-        spec = marker_rules.get(row.get("taxon") or meta.get("name", ""))
+        spec = marker_rules.get(this_taxon)
         if spec and mr is not None and tier in ("supported", "confirmed_in_silico"):
-            verdict = mr.evaluate(row.get("taxon", ""), spec, marker_state.get(row.get("sample", ""), {}))
+            verdict = mr.evaluate(row.get("taxon", ""), spec, eff_state)
             marker_summary = "; ".join(verdict["reasons"])
 
             if verdict["veto"] == mr.TRUE:
@@ -628,6 +746,10 @@ def main() -> int:
             "reference_bp": row.get("reference_bp", ""),
             "taxon_notes": meta.get("notes", ""),
             "marker_verdict": marker_summary,
+            # Sub-species / strain evidence, and what the depth can actually carry.
+            "strain_typing": strain_typing,
+            "strain_claim": strain_claim,
+            "strain_claim_reason": strain_reason,
             "reasons": " | ".join(reasons),
         })
 
@@ -667,6 +789,9 @@ def main() -> int:
                 "sylph_abundance": "", "orthogonal_concordance": "",
                 "reference_bp": "", "taxon_notes": meta.get("notes", ""),
                 "marker_verdict": "",
+                "strain_typing": "", "strain_claim": "not_attempted_no_reference",
+                "strain_claim_reason": ("no reference genome, so neither depth nor "
+                                        "marker typing could be assessed"),
                 "reasons": "DATABASE GAP: no reference genome in pack; stage-2 "
                            "confirmation could not run. Build refs and rerun.",
             })

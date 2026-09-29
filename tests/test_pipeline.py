@@ -695,6 +695,99 @@ def test_pack_integrity(tmp: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 7b. Depth-conditional strain / sub-species typing
+# ---------------------------------------------------------------------------
+
+def test_depth_gate(tmp: Path) -> None:
+    """A strain claim must be refused when the depth cannot support it.
+
+    Marker typing survives low depth (short locus, not a whole genome) but ABSENCE does
+    not: a single-copy 1.5 kb marker at 0.012x expects 0.12 reads, so finding none is
+    the expected outcome whether or not the locus is there. Reporting ABSENT there turns
+    no data into positive evidence against a real finding.
+    """
+    sys.path.insert(0, str(BIN))
+    import score_evidence as se
+
+    th = {"min_expected_reads_for_absence": 3.0, "assumed_marker_bp": 1000.0,
+          "min_depth_for_genome_typing": 20.0}
+
+    # The arithmetic itself: reads = depth * length / read_len.
+    record("depth:expected reads at 0.62x on a 1.5 kb marker is ~6",
+           abs(se.expected_marker_reads(0.62, 1500, 150) - 6.2) < 0.01,
+           f"{se.expected_marker_reads(0.62, 1500, 150):.2f}")
+    record("depth:expected reads at 0.012x on a 1.5 kb marker is ~0.12",
+           se.expected_marker_reads(0.012, 1500, 150) < 0.2,
+           f"{se.expected_marker_reads(0.012, 1500, 150):.3f}")
+
+    try:
+        import marker_rules as mr
+    except Exception as exc:
+        record("depth:marker_rules importable", False, str(exc))
+        return
+
+    metas = {
+        "ecoli_stx1": {"taxon": "Escherichia coli", "marker_class": "pathotype",
+                       "nt_length": 1500.0, "nt_reads": 0.0, "state": "ABSENT"},
+        "other_taxon": {"taxon": "Yersinia pestis", "marker_class": "pathotype",
+                        "nt_length": 1500.0, "nt_reads": 0.0, "state": "ABSENT"},
+    }
+    states = {"ecoli_stx1": mr.FALSE, "other_taxon": mr.FALSE}
+
+    # Low depth: the absence is not interpretable, so it must become UNKNOWN.
+    adj, demoted = se.gate_absence_on_depth(states, metas, "Escherichia coli",
+                                            0.012, 150.0, th)
+    record("depth:an uninterpretable absence becomes UNKNOWN",
+           "ecoli_stx1" not in adj and len(demoted) == 1,
+           f"adjusted={adj}, demoted={demoted}")
+    record("depth:another taxon's marker is left alone",
+           adj.get("other_taxon") == mr.FALSE,
+           "depth is per taxon; a neighbour's marker must not be rejudged")
+
+    # Ample depth: the absence IS evidence and must survive.
+    adj2, demoted2 = se.gate_absence_on_depth(states, metas, "Escherichia coli",
+                                              30.0, 150.0, th)
+    record("depth:a real absence at good depth stays ABSENT",
+           adj2.get("ecoli_stx1") == mr.FALSE and not demoted2,
+           f"adjusted={adj2}, demoted={demoted2}")
+
+    # ---- depth-aware marker PRESENCE, the mirror of the above ----
+    #
+    # A fixed min_coverage of 0.80 silently demands >= 1.6x on the locus. Below that it
+    # is unreachable however real the organism is. Measured on the plumbing control:
+    # ypest_pmt1_caf1, 13 reads at 99.8% identity, 0.323 breadth against a 0.80 floor,
+    # which held a correct Y. pestis detection at screened_only.
+    import marker_evidence as me
+    record("depth:achievable breadth at 0.34x is ~0.29, so a 0.80 floor is unreachable",
+           abs(me.expected_breadth_at(0.34) - 0.288) < 0.005
+           and me.expected_breadth_at(0.34) < 0.80,
+           f"{me.expected_breadth_at(0.34):.3f}")
+    record("depth:a 0.80 floor becomes reachable by ~3x",
+           me.expected_breadth_at(3.0) > 0.80, f"{me.expected_breadth_at(3.0):.3f}")
+    record("depth:expected breadth is 0 at zero depth",
+           me.expected_breadth_at(0.0) == 0.0)
+    # The caf1 case: observed breadth clears 0.60 x achievable.
+    caf1_depth, caf1_obs = 0.47, 0.323
+    record("depth:caf1 qualifies on the depth-limited route",
+           caf1_obs >= 0.60 * me.expected_breadth_at(caf1_depth),
+           f"observed {caf1_obs} vs required "
+           f"{0.60 * me.expected_breadth_at(caf1_depth):.3f}")
+    # And it must NOT qualify on the strict route, or the relaxation is meaningless.
+    record("depth:caf1 still fails the strict 0.80 floor",
+           caf1_obs < 0.80, "the depth-limited route is what admits it, not the floor")
+
+    # And the genome-wide claim must say it was not attempted.
+    claim, why = se.describe_strain_claim(0.62, th)
+    record("depth:genome typing is reported NOT ATTEMPTED at 0.62x",
+           claim == "marker_typing_only" and "NOT ATTEMPTED" in why, f"{claim}: {why[:70]}")
+    claim2, why2 = se.describe_strain_claim(25.0, th)
+    record("depth:genome typing is flagged supportable at 25x",
+           claim2 == "genome_typing_supported", f"{claim2}")
+    record("depth:and says it is not implemented yet, rather than implying a result",
+           "NOT YET IMPLEMENTED" in why2, why2[:80])
+
+
+# ---------------------------------------------------------------------------
 # 8. Benchmark evaluator: the assertions that gate CI must be able to fail
 # ---------------------------------------------------------------------------
 
@@ -850,6 +943,7 @@ CASES = {
     "coverage": test_coverage_metrics,
     "screen": test_screen,
     "pack": test_pack_integrity,
+    "depth": test_depth_gate,
     "eval": test_evaluator,
     "workflow": test_workflow_scripts,
 }
