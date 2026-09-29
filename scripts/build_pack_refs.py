@@ -1056,6 +1056,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     # ---- competitive FASTAs + indexes -----------------------------------
     fully_built, partially_built, unbuildable = [], [], []
+    duplicate_neighbours: list[tuple[str, str, list[str]]] = []
+
+    # Path -> accession. The dedup below MUST key on the assembly accession, not on
+    # the file path and not on the file's md5:
+    #   * paths differ, because each taxid gets its own <taxid>_<name>.fna.gz even
+    #     when `datasets` returned the same assembly for both;
+    #   * gzip md5s differ too, because the container embeds the original filename
+    #     and mtime, so two byte-identical genomes hash differently.
+    # Only the accession identifies the underlying assembly. An earlier version of
+    # this fix keyed on resolved path, silently changed nothing, and was caught only
+    # by re-reading the written bundle - which is why the post-write check below now
+    # exists.
+    accession_by_path: dict[str, str] = {}
+    for mrow in manifest_rows:
+        mp = (mrow.get("path") or "").strip()
+        acc = (mrow.get("accession") or "").strip()
+        if mp and acc:
+            accession_by_path[str(Path(mp).resolve())] = acc
 
     for t in targets:
         tid = t["taxid"]
@@ -1078,13 +1096,90 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                      len(present_neighbours), len(t["neighbours"]))
             tmp = comp.with_suffix(".gz.part")
             try:
+                # DE-DUPLICATE BY SOURCE FILE.
+                #
+                # A neighbour taxid can resolve to the SAME assembly as its target -
+                # `datasets` returns the parent species' reference for a subspecies
+                # taxid, and a genus taxid returns one of its species. Observed here
+                # for F. tularensis (263) vs subsp. novicida (264), which both
+                # resolved to GCF_000833355.1.
+                #
+                # Writing that assembly twice under two taxid prefixes does not just
+                # waste space, it INVERTS the result: every read maps equally well to
+                # both copies, minimap2 assigns MAPQ 0, the MAPQ filter removes them,
+                # unique_reads collapses to ~0 and neighbour_ratio approaches 1. The
+                # taxon then reads as attributed_to_neighbour and can never confirm -
+                # a systematic FALSE NEGATIVE, and worst of all on exactly the
+                # target/near-neighbour pairs the bundle exists to discriminate.
+                def _key(src) -> str:
+                    rp = str(Path(src).resolve())
+                    return accession_by_path.get(rp) or rp
+
+                written: set[str] = set()
+                dropped: list[tuple[str, str]] = []
                 with gzip.open(tmp, "wt", compresslevel=6, encoding="utf-8") as out:
                     for src in target_genomes:
                         append_with_taxid_prefix(src, tid, out)
+                        written.add(_key(src))
                     for ntid in present_neighbours:
                         for src in genomes_by_taxid[ntid]:
+                            k = _key(src)
+                            if k in written:
+                                dropped.append((ntid, k))
+                                continue
                             append_with_taxid_prefix(src, ntid, out)
+                            written.add(k)
                 tmp.replace(comp)
+
+                # Verify what was actually written, rather than trusting the logic
+                # above. Hash each sequence and assert no identical sequence appears
+                # under two taxid prefixes.
+                seen_md5: dict[str, str] = {}
+                collisions: set[tuple[str, str]] = set()
+                cur_tax, buf = None, []
+
+                def _flush(cur_tax, buf):
+                    if not cur_tax or not buf:
+                        return
+                    h = hashlib.md5("".join(buf).encode()).hexdigest()
+                    prev = seen_md5.get(h)
+                    if prev is not None and prev != cur_tax:
+                        collisions.add(tuple(sorted((prev, cur_tax))))
+                    else:
+                        seen_md5[h] = cur_tax
+
+                with gzip.open(comp, "rt") as chk:
+                    for line in chk:
+                        if line.startswith(">"):
+                            _flush(cur_tax, buf)
+                            bits = line[1:].split("|", 2)
+                            cur_tax = bits[1] if len(bits) >= 2 else "?"
+                            buf = []
+                        else:
+                            buf.append(line.strip())
+                _flush(cur_tax, buf)
+
+                if collisions:
+                    LOG.error(
+                        "target %s (%s): POST-WRITE CHECK FAILED - the bundle still "
+                        "contains identical sequence under two taxid prefixes %s. Every "
+                        "read over that sequence will get MAPQ 0 and this taxon cannot "
+                        "confirm. Do not use this bundle.",
+                        tid, t["name"], sorted(collisions))
+                    unbuildable.append(t)
+                    continue
+                for ntid, fname in dropped:
+                    LOG.warning(
+                        "target %s (%s): neighbour taxid %s resolved to the SAME "
+                        "assembly as the target (%s) and was DROPPED from the "
+                        "competitive bundle. Keeping it would give every read MAPQ 0 "
+                        "and make this taxon impossible to confirm. Consequence: this "
+                        "bundle cannot discriminate %s from %s - curate a distinct "
+                        "assembly for the neighbour to restore that discrimination.",
+                        tid, t["name"], ntid, fname, tid, ntid)
+                if dropped:
+                    duplicate_neighbours.append((tid, t["name"],
+                                                 [d[0] for d in dropped]))
             except OSError as exc:
                 tmp.unlink(missing_ok=True)
                 LOG.error("target %s: failed to write %s: %s", tid, comp, exc)
@@ -1156,6 +1251,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                  _human(sum(f.stat().st_size for f in refs_dir.rglob("*") if f.is_file())))
     except OSError:
         pass
+    if duplicate_neighbours:
+        LOG.warning("")
+        LOG.warning("%d competitive bundle(s) lost a neighbour because it resolved to "
+                    "the target's own assembly. Those pairs CANNOT be discriminated "
+                    "until a distinct assembly is curated for the neighbour:",
+                    len(duplicate_neighbours))
+        for tid, name, ntids in duplicate_neighbours:
+            LOG.warning("  %s (%s): lost neighbour(s) %s", tid, name, ", ".join(ntids))
+
     LOG.info("free space remaining: %s", _human(shutil.disk_usage(btf_base).free))
     LOG.info("===============================================================")
 
