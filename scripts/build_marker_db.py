@@ -489,14 +489,65 @@ def parse_fasta(text: str) -> List[SeqRecord]:
     return records
 
 
+def sam_name_of(header: str) -> str:
+    """The part of a FASTA header an aligner uses as the reference NAME.
+
+    Everything from the first whitespace onwards is a description and is discarded by
+    minimap2/samtools. That distinction is load-bearing and it was missed: see
+    write_marker_fasta().
+    """
+    return header.split(None, 1)[0]
+
+
 def write_marker_fasta(path: Path, marker_id: str, records: Sequence[SeqRecord],
                        wrap: int = 60) -> None:
-    """Write records under the load-bearing header convention, atomically."""
+    """Write records under the load-bearing header convention, atomically.
+
+    REFERENCE NAMES MUST BE UNIQUE, AND THE DESCRIPTION DOES NOT HELP.
+    samtools rejects a SAM header carrying two @SQ lines with the same SN, and an
+    aligner's reference name is only the text before the first whitespace. The header
+    is `marker|<id>|<accession>|<description>`, so the name ends at the first space
+    INSIDE the description - in practice `marker|banth_pxo1_cya|WP_000197748.1|[gene=cya]`.
+    For a CDS-level fetch the same PROTEIN accession recurs for the same gene across
+    different strains (protein_id WP_000197748.1 appeared for both CWH_RS28280 and
+    DBA56_RS28000), and the only distinguishing text - locus_tag, location - sits after
+    a space where no aligner looks.
+    Result: 16 of 524 sequences collided, minimap2 emitted the duplicate @SQ lines,
+    `samtools sort` failed with "Duplicate entry ... in sam header", and MARKER_ALIGN_NT
+    died - taking the entire nucleotide marker tier with it. Found by running the
+    pipeline; no amount of reading the FASTA found it, because the full headers ARE
+    distinct and only the first tokens collide.
+    """
     tmp = path.with_name(path.name + ".part")
+    seen: dict[str, int] = {}
     with tmp.open("w", encoding="utf-8", newline="\n") as fh:
         for rec in records:
-            fh.write(">" + make_marker_header(marker_id, rec.accession,
-                                              rec.description) + "\n")
+            # SANITISE FIRST, THEN DISAMBIGUATE.
+            #
+            # The first version of this appended the suffix to the RAW accession, and
+            # sanitise_accession() then matched `pdb|7CKL|A.dup2` against its
+            # `^pdb\|([^|]+)\|` rule and returned `7CKL` - silently discarding the
+            # suffix, so the collision survived and concat_files' guard rejected the
+            # file again. Two PDB chains of one entry (7CKL chain A and B for lassa_Z,
+            # 4CO6 for nipah_N) both reduce to the same accession, and both
+            # descriptions begin "Chain", so the reference name matched exactly.
+            # sanitise_accession is idempotent on an already-clean accession, so
+            # suffixing afterwards is safe.
+            acc = sanitise_accession(rec.accession)
+            header = make_marker_header(marker_id, acc, rec.description)
+            name = sam_name_of(header)
+            if name in seen:
+                seen[name] += 1
+                # Disambiguate in the ACCESSION field, which keeps marker_id at
+                # index 1 for parse_marker_header() and marker_evidence.py, and keeps
+                # the original accession readable as the prefix.
+                header = make_marker_header(
+                    marker_id, f"{acc}.dup{seen[name]}", rec.description)
+                LOG.info("  %s: duplicate reference name %s -> %s",
+                         marker_id, name, sam_name_of(header))
+            else:
+                seen[name] = 1
+            fh.write(">" + header + "\n")
             seq = rec.seq
             for i in range(0, len(seq), wrap):
                 fh.write(seq[i:i + wrap] + "\n")
@@ -1634,14 +1685,37 @@ def concat_files(sources: Sequence[Path], dest: Path) -> int:
     combined file, which is what makes the manifest md5 meaningful.
     """
     n = 0
+    names: dict[str, str] = {}          # reference name -> source file that wrote it
+    dupes: list[tuple[str, str, str]] = []
     tmp = dest.with_name(dest.name + ".part")
     with tmp.open("w", encoding="utf-8", newline="\n") as out:
         for src in sources:
             with src.open(encoding="utf-8", errors="replace") as fh:
                 for line in fh:
                     if line.startswith(">"):
+                        nm = sam_name_of(line[1:].rstrip("\n"))
+                        if nm in names:
+                            dupes.append((nm, names[nm], src.name))
+                        else:
+                            names[nm] = src.name
                         n += 1
                     out.write(line if line.endswith("\n") else line + "\n")
+    # REFUSE TO PUBLISH A FASTA AN ALIGNER CANNOT INDEX.
+    #
+    # A duplicate reference NAME (the text before the first whitespace) makes
+    # `samtools sort` fail with "Duplicate entry ... in sam header", which killed
+    # MARKER_ALIGN_NT and with it the whole nucleotide marker tier. Per-marker writes
+    # now disambiguate, but two DIFFERENT markers could still collide, and this is the
+    # check against the written artifact rather than trust in the writer.
+    if dupes:
+        tmp.unlink(missing_ok=True)
+        detail = "; ".join(f"{nm} (in {a} and {b})" for nm, a, b in dupes[:5])
+        raise SystemExit(
+            f"ERROR: {dest.name} would contain {len(dupes)} duplicate reference "
+            f"name(s): {detail}\n"
+            f"       An aligner's reference name is only the text before the first "
+            f"whitespace, so samtools rejects the SAM header and the tier that reads "
+            f"this file dies. Refusing to write it.")
     tmp.replace(dest)
     return n
 
