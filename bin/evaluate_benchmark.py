@@ -151,8 +151,16 @@ def load_findings(paths: list[Path]) -> dict[tuple[str, str], dict]:
 
 # ---------------------------------------------------------------------------
 
-def evaluate(scenarios, manifest, findings):
-    """Build per-observation records: one per (sample, taxon-of-interest)."""
+def evaluate(scenarios, manifest, findings, targeted: set[str] | None = None):
+    """Build per-observation records: one per (sample, taxon-of-interest).
+
+    `targeted` is the pack's watchlist. A spiked organism that is NOT on the
+    watchlist cannot be reported by the pipeline at all - background commensals
+    and near-neighbour confusers are spiked precisely so they are present, but
+    the tool is not looking for them. Scoring those as detection failures would
+    put "LOD not reached" in the report for an organism no LOD exists for. They
+    are marked `present_untargeted` and excluded from sensitivity and LOD.
+    """
     obs = []
     for m in manifest:
         sample = m["sample"]
@@ -172,7 +180,8 @@ def evaluate(scenarios, manifest, findings):
             if taxon in vaccine:
                 truth = "vaccine"
             elif taxon in present:
-                truth = "present"
+                truth = ("present" if (targeted is None or taxon in targeted)
+                         else "present_untargeted")
             elif taxon in absent:
                 truth = "absent"
             else:
@@ -520,6 +529,14 @@ def write_summary(path: Path, tables: dict, exp_results: list[dict], abl):
                      f"{r['without_marker_gating']} |")
         L.append("")
 
+    untargeted = sum(1 for o in tables.get("_obs", []) or []
+                     if o.get("truth") == "present_untargeted")
+    if untargeted:
+        L.append(f"## Untargeted spikes\n\n{untargeted} observation(s) are organisms "
+                 "spiked as background or as near-neighbour confusers that are NOT on "
+                 "the watchlist. The pipeline is not looking for them, so they are "
+                 "excluded from sensitivity and LOD rather than counted as misses.\n")
+
     na = sum(r["n_not_assessed"] for r in tables.get("sensitivity", []))
     if na:
         L.append(f"## Database gaps\n\n{na} observation(s) could not be assessed "
@@ -540,6 +557,10 @@ def main() -> int:
                     help="findings.tsv from one or more pipeline runs")
     ap.add_argument("--ablation-findings", nargs="*", type=Path, default=[],
                     help="findings.tsv from the same data scored WITHOUT marker gating")
+    ap.add_argument("--watchlist", type=Path,
+                    help="packs/<pack>/watchlist.resolved.tsv - spiked organisms not on "
+                         "the watchlist are excluded from sensitivity/LOD, since the "
+                         "pipeline is not looking for them")
     ap.add_argument("--out-dir", required=True, type=Path)
     ap.add_argument("--fail-on-skip", action="store_true",
                     help="treat SKIPped expectations as failures (for CI)")
@@ -557,6 +578,19 @@ def main() -> int:
     if missing:
         sys.exit(f"ERROR: manifest is missing required column(s): {', '.join(missing)}")
 
+    targeted = None
+    if args.watchlist:
+        wl = read_tsv(args.watchlist)
+        if not wl:
+            sys.exit(f"ERROR: empty or unreadable watchlist {args.watchlist}")
+        targeted = {r["name"] for r in wl if r.get("name")}
+        sys.stderr.write(f"[bench] {len(targeted)} targeted taxa from {args.watchlist}\n")
+    else:
+        sys.stderr.write(
+            "[bench] WARNING: no --watchlist given; spiked background and confuser "
+            "organisms will be scored as detection targets and may appear as "
+            "spurious LOD failures\n")
+
     findings = load_findings(args.findings)
     sys.stderr.write(
         f"[bench] {len(scenarios)} scenarios, {len(manifest)} benchmark samples, "
@@ -568,7 +602,7 @@ def main() -> int:
             f"[bench] WARNING: manifest references {len(unknown)} scenario id(s) not in "
             f"the scenario file: {', '.join(sorted(unknown))}\n")
 
-    obs = evaluate(scenarios, manifest, findings)
+    obs = evaluate(scenarios, manifest, findings, targeted)
     tables = {
         "sensitivity": sensitivity_table(obs),
         "specificity": specificity_table(obs),
@@ -580,7 +614,8 @@ def main() -> int:
 
     abl = None
     if args.ablation_findings:
-        obs_wo = evaluate(scenarios, manifest, load_findings(args.ablation_findings))
+        obs_wo = evaluate(scenarios, manifest,
+                          load_findings(args.ablation_findings), targeted)
         abl = ablation(obs, obs_wo)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -590,7 +625,9 @@ def main() -> int:
     write_tsv(args.out_dir / "expectations.tsv", exp_results)
     if abl:
         write_tsv(args.out_dir / "ablation.tsv", abl)
+    tables["_obs"] = obs
     write_summary(args.out_dir / "summary.md", tables, exp_results, abl)
+    tables.pop("_obs", None)
 
     fails = [r for r in exp_results if r["result"] == "FAIL"]
     skips = [r for r in exp_results if r["result"] == "SKIP"]
@@ -677,6 +714,14 @@ def self_test() -> int:
 
     obs = evaluate(scenarios, manifest, findings)
 
+    # Untargeted spikes must not be scored as detection targets.
+    obs_t = evaluate(scenarios, manifest, findings, targeted={"Yersinia pestis",
+                                                             "Bacillus anthracis",
+                                                             "Mycobacterium tuberculosis",
+                                                             "Variola virus"})
+    untgt = [o for o in obs_t if o["truth"] == "present_untargeted"]
+    sens_t = sensitivity_table(obs_t)
+
     def check(cond, label):
         if not cond:
             fails.append(label)
@@ -751,6 +796,13 @@ def self_test() -> int:
     check(abl["false_confirmed"]["with_marker_gating"] == 1
           and abl["false_confirmed"]["without_marker_gating"] == 2,
           f"ablation shows gating prevents a false confirm, got {abl['false_confirmed']}")
+
+    check(any(o["taxon"] == "Bacillus cereus" for o in untgt),
+          "B. cereus spiked but not on the watchlist -> present_untargeted")
+    check(not any(r["taxon"] == "Bacillus cereus" for r in sens_t),
+          "untargeted taxon must NOT appear in the sensitivity/LOD tables")
+    check(any(r["taxon"] == "Yersinia pestis" for r in sens_t),
+          "targeted taxon still appears in the sensitivity table")
 
     if fails:
         sys.stderr.write(f"evaluate_benchmark self-test FAILED ({len(fails)}):\n")

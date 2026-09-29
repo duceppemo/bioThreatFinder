@@ -69,6 +69,12 @@ Tiers map to four outcomes. These are defined in code, not left implicit:
 | NEGATIVE | `screened_only`, `attributed_to_neighbour`, `marker_veto`, `suppressed_control`, `control_background`, or no finding |
 | NOT_ASSESSED | `no_reference` |
 
+A fifth case: an organism spiked as **background or as a near-neighbour confuser
+that is not on the watchlist**. The pipeline is not looking for it, so scoring it
+as a detection target would print "LOD not reached" for an organism no LOD exists
+for. Pass `--watchlist` and these are marked `present_untargeted` and excluded
+from sensitivity and LOD. Without `--watchlist` the evaluator warns.
+
 **`NOT_ASSESSED` is excluded from every numerator and denominator.** If a missing
 reference genome counted as a true negative, adding watchlist taxa without
 building their references would appear to *improve* specificity. The
@@ -112,6 +118,7 @@ nextflow run . -profile conda,workstation \
 python3 bin/evaluate_benchmark.py \
     --scenarios benchmarks/scenarios/human_core.yaml \
     --manifest benchmarks/runs/v1/manifest.tsv \
+    --watchlist packs/human/watchlist.resolved.tsv \
     --findings benchmarks/runs/v1/results/score_evidence/findings.tsv \
     --ablation-findings benchmarks/runs/v1/results_nomarkers/score_evidence/findings.tsv \
     --out-dir benchmarks/runs/v1/evaluation
@@ -130,6 +137,23 @@ python3 bin/btf_yaml.py --self-test           # config parser
 python3 bin/marker_rules.py --self-test       # three-valued rule logic
 python3 bin/evaluate_benchmark.py --self-test --scenarios x --manifest x --findings x --out-dir x
 ```
+
+## A note on the background composition
+
+`defaults.background` puts 2% commensal and environmental organisms in every
+library. Without it, "negative" means host-only, which understates the
+false-positive rate — real specimens are full of organisms genomically adjacent to
+watchlist taxa.
+
+Every background taxon is a near neighbour already in the pack's reference
+manifest, so nothing extra needs fetching. Note *E. coli* in particular: commensal
+*E. coli* **should** be detected and should **not** be confirmed, because
+confirmation is gated on pathotype markers it does not carry. Having it in every
+background is a free, continuous test of that rule.
+
+Background taxa are deliberately absent from per-scenario `truth` blocks, so they
+report as `unlisted` and stay out of the PPV denominator. `negative_host_only`
+lists them explicitly, so that one scenario's false-positive rate is exact.
 
 ## Once results exist
 

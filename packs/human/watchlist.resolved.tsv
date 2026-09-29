@@ -8,7 +8,7 @@ taxid	name	resolved_rank	group	category	min_unique_reads	min_breadth	near_neighb
 28450	Burkholderia pseudomallei	species	bacteria	high_consequence	30	0.15	57975;13373;292	214	B. thailandensis is a common environmental soil organism and the main false-positive source.	seed	
 13373	Burkholderia mallei	species	bacteria	high_consequence	30	0.15	28450;57975	18	A clonal deletion derivative of B. pseudomallei - cannot be separated by breadth alone; requires absence-of-region logic.	seed	
 777	Coxiella burnetii	species	bacteria	high_consequence	20	0.10	446	44	Obligate intracellular, low biomass. Expect few reads; weight marker genes over breadth.	seed	
-1773	Mycobacterium tuberculosis	species	bacteria	notifiable	20	0.10	1765;33894;78331;1764	2915	"MTBC members are ~99.9% ANI. Report as ""M. tuberculosis complex"" unless lineage SNPs resolve. BCG vaccine strain is M. bovis-derived."	seed	
+1773	Mycobacterium tuberculosis	species	bacteria	notifiable	20	0.10	1765;33892;33894;78331;1764	2915	"MTBC members are ~99.9% ANI. Report as ""M. tuberculosis complex"" unless lineage SNPs resolve. BCG vaccine strain is M. bovis-derived."	seed	
 666	Vibrio cholerae	species	bacteria	notifiable	20	0.10	674;670	282	Non-toxigenic environmental V. cholerae is common. Toxigenicity requires ctxAB/tcpA coverage, not species call.	seed	
 28901	Salmonella enterica	species	bacteria	notifiable	20	0.10	562;546	3809	Serovar is the actionable unit, not species. Hand off to a dedicated serovar caller (sylph salmonella db is already on this box).	seed	
 1639	Listeria monocytogenes	species	bacteria	notifiable	20	0.10	1642;1640;1638	224	L. innocua is a frequent co-isolate; discriminate on the LIPI-1 island.	seed	
@@ -40,7 +40,7 @@ taxid	name	resolved_rank	group	category	min_unique_reads	min_breadth	near_neighb
 1335626	Middle East respiratory syndrome-related coronavirus	no rank	virus	high_consequence	10	0.20	2697049;290028	8	Overlaps animal pack (camelid).	seed	
 11320	Influenza A virus	no rank	virus	notifiable	20	0.15	11520;11552	112717	Segmented and reassorting. Subtype (HA/NA) is the actionable unit - a species call is not enough. Route to a segment-aware subtyper; flag H5/H7 explicitly.	seed	
 11292	Rabies lyssavirus	species	virus	notifiable	10	0.20	90961;57482;38767	24	Vaccine strains (ERA, SAD-B19, Pasteur) are common lab/wildlife-bait contaminants.	seed	matched via equivalent name
-138950	Enterovirus C	no rank	virus	notifiable	10	0.20	138948;138949;147711	57	Poliovirus surveillance context: Sabin vaccine strains and VDPV must be separated from wild-type. VP1 resolution required.	seed	
+138950	Enterovirus C	no rank	virus	notifiable	10	0.20	138948;138949;147711;12080	57	Poliovirus surveillance context: Sabin vaccine strains and VDPV must be separated from wild-type. VP1 resolution required.	seed	
 11234	Measles morbillivirus	no rank	virus	notifiable	10	0.20	11041;3139435	441	Vaccine strain (Edmonston-derived) vs wild-type genotype separation is essential post-vaccination.	seed	
 11089	Yellow fever virus	no rank	virus	notifiable	10	0.20	12637;64320;11082	12	17D vaccine strain is a frequent confounder.	seed	
 12637	Dengue virus	no rank	virus	notifiable	10	0.20	64320;11089;11072	33	Serotypes 1-4 are distinct enough to resolve; report serotype.	seed	
