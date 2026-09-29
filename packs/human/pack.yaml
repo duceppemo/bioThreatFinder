@@ -31,13 +31,17 @@ host:
 # ---------------------------------------------------------------------------
 screen:
   # Shared across packs - one general-purpose index answers "what is in here".
-  # KrakenUniq is the primary arm: distinct-k-mer cardinality is what separates
-  # reads spread across a genome from reads piled on one conserved k-mer.
-  krakenuniq_db: "${btf_db}/krakenuniq/standard"
-  # Amino-acid-aware arm, for divergent and novel agents that nucleotide k-mers
-  # miss entirely.
-  metabuli_db: "${btf_db}/metabuli/refseq"
+  #
+  # kraken2 is the PRIMARY arm: --report-minimizer-data supplies the distinct-minimizer
+  # count and duplicity that separate reads spread across a genome from reads piled on
+  # one conserved k-mer. Requires kraken2 >= 2.1.0.
   kraken2_db: "${btf_db}/kraken2/pluspf"
+  # Amino-acid-aware arm, for divergent and novel agents that nucleotide k-mers
+  # miss entirely. Poor precision in independent benchmarks, so its role is RECALL.
+  metabuli_db: "${btf_db}/metabuli/refseq"
+  # OPT-IN second opinion (--skip_krakenuniq defaults true), NOT the primary arm.
+  # See docs/decisions.md D2 for why, and prefer a prebuilt index over a build.
+  krakenuniq_db: "${btf_db}/krakenuniq/standard"
   # Orthogonal, ANI-based, very low false-positive rate for bacteria/archaea.
   sylph_db: "${db_root}/sylph/gtdb-r220-c200-dbv1.syldb"
   # Eukaryotic pathogens (parasites, fungi) are poorly served by GTDB; rely on

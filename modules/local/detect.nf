@@ -136,15 +136,18 @@ process SYLPH_PROFILE {
 
 /*
  * ---------------------------------------------------------------------------
- * Stage 1, primary arm: KrakenUniq
+ * Stage 1, OPT-IN arm: KrakenUniq (--skip_krakenuniq defaults true)
  *
- * The reason this replaces Kraken2 as primary: Kraken2 counts READS. It cannot
- * distinguish 500 reads spread across a genome from 500 reads piled on a single
- * conserved k-mer, and the second case is what a near neighbour or a low-complexity
- * repeat produces. KrakenUniq additionally reports the DISTINCT k-mer cardinality
- * per taxon (HyperLogLog), plus a duplication ratio and an estimated genome
- * coverage. That turns a read count into evidence about breadth at stage 1,
- * before any alignment compute is spent.
+ * Reports distinct K-MER cardinality per taxon (HyperLogLog) plus a duplication
+ * ratio and estimated coverage. Kraken2's --report-minimizer-data columns are
+ * literally this same HyperLogLog implementation at the same default precision,
+ * counting distinct MINIMIZERS - a subsample - which is why Kraken2 is primary and
+ * this is a second opinion rather than a dependency: the only published comparison
+ * finds comparable F1 once the threshold is shifted by the 2-3x that subsampling
+ * implies, and KrakenUniq has had no commit since December 2023.
+ *
+ * If you do enable it, download a prebuilt index rather than building one: a build
+ * costs ~1400 GiB transient and needs Jellyfish 1.x. See docs/decisions.md D2.
  * ---------------------------------------------------------------------------
  */
 process KRAKENUNIQ {
