@@ -45,9 +45,10 @@ negative and unrelated metagenomes. Report a calibrated statistic alongside the
 interpretable gate breakdown.
 
 ### DONE - Stage-1 classifier upgrade (v0.3.0)
-KrakenUniq is now the primary arm (distinct k-mer cardinality), Metabuli adds the
-DNA+amino-acid arm for divergent agents, Kraken2/Bracken retained for abundance,
-sylph for ANI. Any-classifier OR; concordance and k-mer quality recorded and
+Kraken2 with --report-minimizer-data is the primary arm; KrakenUniq is opt-in and off
+by default (this was reversed after reading Kraken2's source and Oskolkov 2026 - see
+docs/decisions.md D2). Metabuli adds the DNA+amino-acid arm for divergent agents,
+Bracken abundance, sylph ANI. Any-classifier OR; concordance and k-mer quality recorded and
 surfaced in the report. Project DBs moved to NVMe at /media/8tb/bioThreatFinder.
 Remaining stage-1 work:
   * Centrifuger as an ONT-specific arm (low memory, FM-index) - evaluate whether

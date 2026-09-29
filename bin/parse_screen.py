@@ -5,24 +5,30 @@ Intersect stage-1 screen output with the watchlist to produce stage-2 candidates
 MULTI-CLASSIFIER BY DESIGN
 
 Stage 1 runs up to four independent classifiers, because they fail in different
-directions and no single one is good enough for a "is organism X present" question:
+directions and no single one is good enough for a "is organism X present" question.
+THREE RUN BY DEFAULT; KrakenUniq is a fourth, opt-in:
 
-  krakenuniq  PRIMARY nucleotide screen. Unlike Kraken2 it reports the number of
-              DISTINCT k-mers hit per taxon (HyperLogLog cardinality) plus a
-              duplication ratio and an estimated genome coverage. This is the
-              specificity fix: Kraken2 counts READS, so 500 reads piled on one
-              conserved k-mer are indistinguishable from 500 reads spread across a
-              genome. KrakenUniq tells those apart at stage 1, before any
-              alignment is spent on them.
+  kraken2     PRIMARY nucleotide screen, via --report-minimizer-data: distinct
+              MINIMIZER count and duplicity per taxon. Reads alone cannot tell 500
+              reads spread across a genome from 500 piled on one conserved k-mer,
+              and the second case is what a near neighbour or a repeat produces.
+              The minimizer columns tell them apart at stage 1, before any
+              alignment is spent. Bracken adds abundance.
   metabuli    Joint DNA + amino-acid k-mer screen. Sees divergent and novel agents
-              that nucleotide k-mers miss entirely. Until now only the marker tier
-              could see through divergence, and only for curated markers.
-  kraken2     Retained for abundance estimation via Bracken and for continuity
-              with existing runs. No longer the primary evidence.
+              that nucleotide k-mers miss entirely - the marker tier is the only
+              other place that sees through divergence, and only for curated
+              markers. Its precision is poor in independent benchmarks, so its
+              role here is RECALL; stage 2 supplies the precision.
   sylph       ANI/containment based. Very low false-positive rate for bacteria and
               fungi, and it disagrees with k-mer methods in exactly the cases that
               matter - a taxon assembled from scattered conserved k-mers gets no
               sylph support.
+  krakenuniq  OPT-IN (--skip_krakenuniq defaults true). Distinct K-MER cardinality
+              rather than minimizers. Kraken2's columns are literally KrakenUniq's
+              HyperLogLog code at the same default precision, counting a subsample,
+              and the only published comparison finds comparable F1 once the
+              threshold is shifted by the 2-3x that implies. Kept available as a
+              second opinion, not as a dependency. See docs/decisions.md D2.
 
 A candidate is raised if ANY classifier supports it. This is deliberate: stage 1
 stays permissive and stage 2 does the discriminating. Requiring consensus here
