@@ -64,11 +64,41 @@ confirm:
 # ---------------------------------------------------------------------------
 # Default confirmation thresholds (per-taxon overrides live in watchlist.tsv)
 # ---------------------------------------------------------------------------
+# Derived from Wright et al. 2026, "From classification to confirmation: verifying
+# taxonomic classifications by mapping metagenomic reads to reference genomes",
+# Microbial Genomics, doi:10.1099/mgen.0.001739. Mapping-based confirmation removed
+# 99.7% of false-positive taxa at ~52% read retention - the largest published effect
+# size of any single intervention in this literature, and an order of magnitude
+# larger than the differences between k-mer classifiers.
+#
+# Their recommended composite, which these encode:
+#   (i)   at least one read maps
+#   (ii)  >= 50% of classifier-assigned reads actually map
+#   (iii) genome fraction covered >= 0.5%
+#   (iv)  >= 98% identity of mapped reads to the reference
+#
+# (iv) is the NEAR-NEIGHBOUR discriminator and the one this pack previously got
+# wrong at 0.90. In their Elizabethkingia case the call was correct at genus and
+# wrong at species, and ~96% mapped-read identity is what revealed it. 0.90 would
+# have passed it.
+#
+# NOTE these are simulation-calibrated floors, not universal constants. Their own
+# low-biomass blood and tumour samples lost nearly all calls at these thresholds.
+# Recalibrate per specimen type against the benchmark.
 thresholds:
   min_unique_reads: 20
-  min_breadth: 0.10
+  min_breadth: 0.005
   max_depth_cv: 2.5
-  min_read_identity: 0.90
+  min_read_identity: 0.98
+  # Divergent viruses are legitimately far from any available reference, so a
+  # species-discrimination floor built for bacteria would produce false negatives
+  # exactly where sensitivity matters most.
+  min_read_identity_by_group:
+    virus: 0.88
+    parasite: 0.95
+  # Wright et al. (ii): if most of the reads a classifier assigned do not survive
+  # alignment, the k-mer evidence did not hold up.
+  min_mapped_fraction_of_assigned: 0.50
   mapq_min: 10
 
 # ---------------------------------------------------------------------------

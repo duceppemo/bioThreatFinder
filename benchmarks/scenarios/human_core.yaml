@@ -67,6 +67,39 @@ defaults:
 scenarios:
 
     # -----------------------------------------------------------------------
+    # PLUMBING POSITIVE CONTROL
+    #
+    # This scenario exists to fail loudly when the pipeline is misconfigured, and
+    # for no other reason. A 5000 RPM spike is far above any plausible detection
+    # limit, so if it does not come back confirmed_in_silico then something is wrong
+    # with the wiring and NO other result in the batch should be trusted.
+    #
+    # It earns its place because this project has now hit the same failure shape
+    # three times: a rotted watchlist taxid, a GTDB-namespaced Metabuli index, and a
+    # refs base written to the wrong volume. Every one produces an EMPTY result that
+    # is indistinguishable from a clean negative. Guards were added for all three,
+    # but a guard only catches the mechanism it knows about; a loud positive control
+    # catches the class.
+    # -----------------------------------------------------------------------
+
+    - id: plumbing_positive_control
+      description: >
+        Overwhelming spike of an easy target. Any outcome other than confirmed is a
+        configuration fault, not a biological result. Check this first.
+      kind: lod_series
+      replicates: 1
+      host_fraction: 0.50
+      spikes:
+          - taxon: Yersinia pestis
+            source: target
+            levels_rpm: [5000]
+      truth:
+          present: [Yersinia pestis]
+      expect:
+          - taxon: Yersinia pestis
+            min_tier: confirmed_in_silico
+
+    # -----------------------------------------------------------------------
     # SENSITIVITY / LIMIT OF DETECTION
     # One representative per group, since genome size and composition drive the
     # detection curve more than taxon identity does.

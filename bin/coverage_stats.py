@@ -199,6 +199,12 @@ def main() -> int:
                     help="window size in bp for occupancy [1000]")
     ap.add_argument("--total-reads", type=int, default=0,
                     help="host-depleted read count, for normalisation across samples")
+    ap.add_argument("--assigned-reads", type=int, default=0,
+                    help="reads the stage-1 classifier assigned to this taxon. Used for "
+                         "mapped_fraction_of_assigned - if most of the reads a k-mer "
+                         "classifier attributed to a taxon do not survive alignment, the "
+                         "k-mer evidence did not hold up (Wright et al. 2026, "
+                         "doi:10.1099/mgen.0.001739)")
     ap.add_argument("--out", required=True, type=Path)
     args = ap.parse_args()
 
@@ -246,6 +252,10 @@ def main() -> int:
     # against the negative control.
     rpm = (unique_reads / args.total_reads * 1e6) if args.total_reads else 0.0
     nb_ratio = (unique_reads / best_nb_reads) if best_nb_reads else float("inf")
+    # Wright et al. criterion (ii). Capped at 1.0: a competitive bundle can recruit
+    # reads the stage-1 classifier attributed elsewhere, which would otherwise give a
+    # nonsensical fraction above one.
+    mapped_frac = min(1.0, unique_reads / args.assigned_reads) if args.assigned_reads else -1.0
 
     row = {
         "sample": args.sample,
@@ -269,6 +279,8 @@ def main() -> int:
         "best_neighbour_taxid": best_nb,
         "best_neighbour_reads": best_nb_reads,
         "neighbour_ratio": ("inf" if nb_ratio == float("inf") else f"{nb_ratio:.4f}"),
+        "screen_assigned_reads": args.assigned_reads,
+        "mapped_fraction_of_assigned": (f"{mapped_frac:.4f}" if mapped_frac >= 0 else ""),
         "total_reads_screened": args.total_reads,
         "mapq_min": args.mapq_min,
     }
@@ -282,7 +294,8 @@ def main() -> int:
         f"[coverage] {args.sample} taxid={args.taxid} ({args.taxon}): "
         f"{unique_reads} reads, breadth={breadth:.4f}, occupancy={occupancy:.4f}, "
         f"nb_ratio={row['neighbour_ratio']} (best neighbour {best_nb or 'none'}: "
-        f"{best_nb_reads} reads)\n"
+        f"{best_nb_reads} reads), mapped_frac="
+        f"{row['mapped_fraction_of_assigned'] or 'n/a'}\n"
     )
     return 0
 

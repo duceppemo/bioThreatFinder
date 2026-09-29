@@ -53,13 +53,20 @@ def helpMessage() {
       --btf_db           Project-owned DBs on fast NVMe             [${params.btf_db}]
 
     Stage-1 classifier arms (any-classifier OR; consensus recorded, not required):
-      --skip_krakenuniq  Disable the PRIMARY arm. KrakenUniq is what provides
-                         distinct-k-mer counts; without it, reads piled on a few
-                         conserved k-mers cannot be told from reads spread across
-                         a genome at stage 1.
-      --skip_metabuli    Disable the DNA+amino-acid arm, which is what sees
-                         divergent and novel agents that nucleotide k-mers miss.
-      --skip_kraken2     Disable Kraken2/Bracken (abundance + continuity arm).
+      --skip_kraken2     Disable the PRIMARY arm. Kraken2 with
+                         --report-minimizer-data supplies distinct-minimizer counts
+                         and a duplicity ratio, which is what separates reads spread
+                         across a genome from reads piled on a conserved locus.
+      --krakenuniq       OPT-IN second opinion (default off). Kraken2's minimizer
+                         columns are literally KrakenUniq's HyperLogLog code at the
+                         same default precision, counting minimizers rather than
+                         k-mers, and the only published comparison finds comparable
+                         F1 once the threshold is shifted. KrakenUniq has had no
+                         commit since Dec 2023. Prefer the prebuilt index over a
+                         build if you enable this.
+      --skip_metabuli    Disable the DNA+amino-acid arm. Independent benchmarks
+                         rank its precision poorly and several upstream bugs are
+                         open, so treat its calls as leads to confirm.
       --skip_sylph       Disable ANI/containment.
       --min_distinct_kmers / --max_kmer_dup   stage-1 k-mer quality flags
       --skip_host_depletion
@@ -212,9 +219,10 @@ workflow {
     if (arms.isEmpty()) {
         exit 1, "ERROR: every stage-1 classifier is disabled. Nothing would be screened."
     }
-    if (params.skip_krakenuniq) {
-        log.warn "KrakenUniq is disabled. Distinct-k-mer evidence will be unavailable, " +
-                 "so reads piled on a few conserved k-mers cannot be told apart from " +
+    if (params.skip_kraken2) {
+        log.warn "Kraken2 is disabled. It is the PRIMARY nucleotide arm and the source " +
+                 "of distinct-minimizer evidence (--report-minimizer-data), so without " +
+                 "it reads piled on a few conserved k-mers cannot be told apart from " +
                  "reads spread across a genome at stage 1."
     }
 
@@ -360,7 +368,8 @@ workflow {
             def ref = mmi.exists()
                     ? mmi
                     : file("${pack.confirm.refs_dir}/competitive/${row.taxid}.fna.gz")
-            tuple(meta + [taxid: row.taxid, taxon: row.name, group: row.group], reads, ref, row)
+            tuple(meta + [taxid: row.taxid, taxon: row.name, group: row.group,
+                          assigned_reads: row.assigned_reads], reads, ref, row)
         }
         .branch { _meta, _reads, ref, _row ->
             present: ref.exists()

@@ -72,15 +72,29 @@ arms fail in different directions:
 | Kraken2 + Bracken | Abundance estimation, continuity with existing runs |
 | sylph | ANI/containment; very low FP for bacteria and fungi |
 
-**Why KrakenUniq is now primary.** Kraken2 counts *reads*. It cannot distinguish
-500 reads spread across a genome from 500 reads piled on one conserved k-mer — and
-the second case is exactly what a near neighbour or a low-complexity repeat
-produces. KrakenUniq additionally reports how many *distinct* k-mers were hit.
-That turns a read count into evidence about breadth **at stage 1, before any
-alignment compute is spent**. It is the same insight as window occupancy in stage 2,
-applied a step earlier.
+**Kraken2 is primary; KrakenUniq is opt-in.** An earlier version of this design made
+KrakenUniq primary on the grounds that "Kraken2 only counts reads." That was wrong.
+Kraken2's `--report-minimizer-data` columns are *literally KrakenUniq's HyperLogLog
+implementation* — same author, same `hyperloglogplus.h`, same default precision
+p=12 — counting distinct **minimizers** instead of distinct **k-mers**. The only
+published comparison (Oskolkov 2026, *Front Microbiol*, doi:10.3389/fmicb.2026.1603339)
+finds **comparable F1** once the threshold is shifted by the 2–3× that minimizer
+subsampling implies: ~1,000 unique k-mers for KrakenUniq vs ~2,000–3,000 distinct
+minimizers for Kraken2. KrakenUniq has had no commit since December 2023.
 
-Demonstrated on fixtures — comparable read counts, opposite k-mer evidence:
+So the distinct-k-mer signal is kept and KrakenUniq's index is not. If you want it
+as a second opinion, **download a prebuilt index rather than building one** — a
+build costs ~1400 GiB transient and needs Jellyfish 1.x.
+
+Three caveats on Kraken2's columns, verified from source rather than inferred:
+columns 4–5 are **clade-aggregated**, so threshold at species rows and not genus
+rows; minimizers are keyed by the minimizer's database LCA, not the read's final
+call; and upstream issue #445 (column 5 exceeding `kraken2-inspect`'s count) is
+still open, so treat column 5 as a monotone evidence score to calibrate empirically,
+not as a literal breadth measurement.
+
+Demonstrated on fixtures — comparable read counts, opposite k-mer evidence
+(thresholds shown are pre-calibration illustrations):
 
 | Taxon | Reads | Distinct k-mers | Dup | Arms | Outcome |
 |---|---|---|---|---|---|
