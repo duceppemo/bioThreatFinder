@@ -124,18 +124,40 @@ scenarios:
         configuration fault, not a biological result. Check this first.
       kind: lod_series
       replicates: 1
-      # Deliberately shallow. This scenario's only job is to prove the wiring, and at
-      # 5000 rpm even 2M reads gives 10,000 spike reads - far above any threshold. Full
-      # depth here would mean simulating ~19M host reads to answer a question that does
-      # not depend on depth, and the point of a plumbing check is that it is cheap
-      # enough to run before every batch.
+      # Deliberately shallow in TOTAL reads, and deliberately high in SPIKE FRACTION.
+      # The library stays small so this is cheap enough to run before every batch;
+      # raising the spike fraction costs nothing extra, because the library size is
+      # unchanged and only its composition shifts.
+      #
+      # THE SPIKE WAS 5000 rpm AND THAT WAS WRONG. The old note here reasoned that
+      # "even 2M reads gives 10,000 spike reads - far above any threshold", which
+      # confuses a READ COUNT with a DEPTH. Measured on the first end-to-end run:
+      # 9,999 spike pairs gave Y. pestis 0.34x mean depth. Confirmation needs plasmid
+      # markers, and a marker's min_coverage of 0.80 requires >= 1.6x on the locus
+      # (Lander-Waterman: breadth = 1 - e^-d), so at 0.34x the floor was UNREACHABLE -
+      # ypest_pmt1_caf1 came back with 13 reads at 99.95% identity and 0.323 breadth
+      # and was recorded ABSENT. Worse, ypest_ppcp1_pla is a 939 bp gene on the 9.6 kb
+      # pPCP1 plasmid, ~0.2% of the assembly, so it expected ~2 reads: whether this
+      # control confirmed was decided by Poisson noise, not by configuration. A control
+      # whose stated contract is "any outcome other than confirmed is a configuration
+      # fault" cannot be gated on a coin flip.
+      #
+      # At 100,000 rpm (measured calibration: 0.34x per 10,000 pairs) the spike is
+      # 200,000 pairs, ~6.8x depth, achievable breadth 0.9989 against the strictest
+      # 0.80 floor, and ~43 reads expected on pla. Every threshold is cleared by a wide
+      # margin and the depth-limited presence route is not needed - which is the point:
+      # if THIS fails, the wiring is broken.
+      #
+      # A 10% pathogen fraction is not a realistic clinical specimen and is not meant to
+      # be. host_fraction 0.50 already says so. Realistic low-titre behaviour is what
+      # the lod_* scenarios measure.
       total_reads: 2000000
       ont_total_reads: 400000
       host_fraction: 0.50
       spikes:
           - taxon: Yersinia pestis
             source: target
-            levels_rpm: [5000]
+            levels_rpm: [100000]
       truth:
           present: [Yersinia pestis]
       expect:
