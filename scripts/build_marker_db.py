@@ -253,6 +253,26 @@ def sanitise(name: str) -> str:
     return re.sub(r"_+", "_", s).strip("_") or "unknown"
 
 
+def md5_or_none(path: Path) -> Optional[str]:
+    """md5 of a file, or None when it does not exist. Used to decide whether a
+    downstream index is stale.
+
+    WHY. concat_files() always rewrites markers.nt.fna / markers.aa.faa / markers.hmm
+    from every manifest row, but build_mm2_indexes(), build_mmseqs_db() and
+    press_hmms() all SKIP when their output exists and --force was not passed. So
+    `--only-marker bmand_18S` put the marker's sequences into markers.nt.fna, logged
+    "SKIP minimap2 index (exists)", and left an index that does not contain them. The
+    manifest then said status=built, marker_evidence.py treated the marker as testable,
+    and the nucleotide tier could never match it - producing state=ABSENT, which is
+    positive evidence AGAINST a real finding, rather than UNKNOWN. bmand_18S is the
+    `required` marker for Balamuthia mandrillaris.
+    """
+    try:
+        return md5_of(path) if path.is_file() else None
+    except OSError:
+        return None
+
+
 def md5_of(path: Path, chunk: int = 1 << 20) -> str:
     h = hashlib.md5()
     with path.open("rb") as fh:
@@ -1408,13 +1428,47 @@ def process_marker(row: dict, ctx: Context, prior: Dict[str, dict]) -> dict:
                         if old.get(k)]
             if declared and all(p.is_file() and p.stat().st_size > 0 for p in declared):
                 got = combined_md5(declared)
-                if not old.get("md5") or old["md5"] == got:
+                # A RESUMED ROW MUST STILL DESCRIBE THE CURRENT CATALOGUE.
+                #
+                # This returned dict(old) verbatim - the prior row's evidence_type,
+                # marker_class and taxon included - and never compared it against the
+                # catalogue row being processed. Two consequences, both silent:
+                #
+                #  * Change a marker from `dna` to `dna+protein+hmm` in markers.tsv to
+                #    add the remote-homology tier D3 relies on, rerun without --force,
+                #    and the marker is SKIPped: no protein is fetched, the manifest
+                #    keeps evidence_type=dna and status=built, while
+                #    marker_evidence.py reads evidence_type from the CATALOGUE and so
+                #    expects protein and hmm. The manifest says built, so the marker is
+                #    treated as testable, and the two missing tiers evaluate as ABSENCE
+                #    rather than UNKNOWN.
+                #  * Promote a marker to `required` and rerun: the carried-forward row
+                #    still says the old class, and the blocking exit code filters on the
+                #    MANIFEST's marker_class - so the build exits 0 with a
+                #    now-required marker unbuilt.
+                #
+                # A fresh run and a resumed run produced different manifests from
+                # identical inputs. Anything the catalogue declares is compared here.
+                # Only columns the manifest actually carries - copy_expectation is
+                # catalogue-only, and comparing it would report drift on every marker.
+                drifted = [k for k in ("taxon", "marker_class", "evidence_type",
+                                       "query_strategy")
+                           if (row.get(k) or "").strip()
+                           != (old.get(k) or "").strip()]
+                if drifted:
+                    LOG.warning("  %s: catalogue changed since this was built (%s) - "
+                                "rebuilding rather than carrying the stale row forward",
+                                marker_id,
+                                ", ".join(f"{k}: {old.get(k)!r} -> {row.get(k)!r}"
+                                          for k in drifted))
+                elif not old.get("md5") or old["md5"] == got:
                     LOG.info("  SKIP %s: %s already built (%s), md5 OK",
                              marker_id, ", ".join(p.name for p in declared),
                              old.get("status"))
                     return dict(old)
-                LOG.warning("  %s: md5 changed on disk (manifest %s, actual %s) - "
-                            "rebuilding", marker_id, old["md5"], got)
+                elif old.get("md5"):
+                    LOG.warning("  %s: md5 changed on disk (manifest %s, actual %s) - "
+                                "rebuilding", marker_id, old["md5"], got)
             else:
                 LOG.warning("  %s: manifest says %s but file(s) are missing or empty "
                             "- rebuilding", marker_id, old.get("status"))
@@ -2246,12 +2300,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     combined_hmm = out_dir / "markers.hmm"
 
     if nt_sources:
+        before = md5_or_none(combined_nt)
         n = concat_files(nt_sources, combined_nt)
-        LOG.info("wrote %s (%d sequence(s) from %d marker(s))",
-                 combined_nt.name, n, len(nt_sources))
+        nt_changed = md5_or_none(combined_nt) != before
+        LOG.info("wrote %s (%d sequence(s) from %d marker(s))%s",
+                 combined_nt.name, n, len(nt_sources),
+                 " [content changed - indexes will be rebuilt]" if nt_changed else "")
         if tools.get("minimap2"):
             build_mm2_indexes(tools["minimap2"], combined_nt, out_dir, "markers.nt",
-                              args.threads, args.force)
+                              args.threads, args.force or nt_changed)
         else:
             LOG.warning("minimap2 absent: %s left unindexed (install: %s)",
                         combined_nt.name, TOOL_INSTALL["minimap2"])
@@ -2259,12 +2316,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         LOG.warning("no nucleotide sequences at all - %s not written", combined_nt.name)
 
     if aa_sources:
+        before = md5_or_none(combined_aa)
         n = concat_files(aa_sources, combined_aa)
-        LOG.info("wrote %s (%d sequence(s) from %d marker(s))",
-                 combined_aa.name, n, len(aa_sources))
+        aa_changed = md5_or_none(combined_aa) != before
+        LOG.info("wrote %s (%d sequence(s) from %d marker(s))%s",
+                 combined_aa.name, n, len(aa_sources),
+                 " [content changed - database will be rebuilt]" if aa_changed else "")
         if tools.get("mmseqs"):
             build_mmseqs_db(tools["mmseqs"], combined_aa, out_dir / "mmseqs" / "markers_aa",
-                            args.force)
+                            args.force or aa_changed)
         else:
             LOG.warning("mmseqs absent: no MMseqs2 database built (install: %s)",
                         TOOL_INSTALL["mmseqs"])
@@ -2272,14 +2332,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         LOG.warning("no protein sequences at all - %s not written", combined_aa.name)
 
     if hmm_sources:
+        before = md5_or_none(combined_hmm)
         tmp = combined_hmm.with_name(combined_hmm.name + ".part")
         with tmp.open("w", encoding="utf-8", newline="\n") as out:
             for src in hmm_sources:
                 out.write(src.read_text(encoding="utf-8", errors="replace"))
         tmp.replace(combined_hmm)
-        LOG.info("wrote %s (%d profile(s))", combined_hmm.name, len(hmm_sources))
+        hmm_changed = md5_or_none(combined_hmm) != before
+        LOG.info("wrote %s (%d profile(s))%s", combined_hmm.name, len(hmm_sources),
+                 " [content changed - will be re-pressed]" if hmm_changed else "")
         if tools.get("hmmpress"):
-            press_hmms(tools["hmmpress"], combined_hmm, args.force)
+            press_hmms(tools["hmmpress"], combined_hmm, args.force or hmm_changed)
         else:
             LOG.warning("hmmpress absent: %s not pressed (install: %s)",
                         combined_hmm.name, TOOL_INSTALL["hmmpress"])

@@ -380,7 +380,8 @@ class Scenario:
     __slots__ = ("sid", "description", "kind", "spikes", "present", "absent",
                  "vaccine", "include_ntc", "index_hop_fraction", "replicates",
                  "platforms", "host", "host_fraction", "total_reads",
-                 "ont_total_reads", "read_length", "ont_mean_length", "background")
+                 "ont_total_reads", "read_length", "ont_mean_length", "background",
+                 "downsample_total_reads")
 
     def __init__(self, **kw):
         for k in self.__slots__:
@@ -401,6 +402,44 @@ class Scenario:
         return self.spikes[0] if self.spikes else None
 
 
+# RECOGNISED KEYS AT EACH LEVEL OF THE SCENARIO FILE.
+#
+# The loader had no key-set validation, so an unrecognised key was silently ignored.
+# The shipped file declared
+#     downsample_total_reads: [40000000, 20000000, ...]
+# on the depth-titration scenario, and `grep -rn downsample_total_reads` matched that
+# YAML line and nothing else in the repository: the scenario generated ONE depth while
+# the file said it measured six, and the run reported success. The same silence would
+# swallow `host_fracton: 0.998`, leaving the sample at the default with no warning.
+#
+# `expect` is listed as a scenario key because evaluate_benchmark.py reads it even
+# though this script does not - omitting it would make every real scenario fail.
+DOC_KEYS = {"schema_version", "defaults", "scenarios"}
+DEFAULTS_KEYS = {"replicates", "platforms", "host", "host_fraction", "total_reads",
+                 "ont_total_reads", "read_length", "ont_mean_length", "background"}
+SCENARIO_KEYS = {"id", "description", "kind", "spikes", "truth", "controls",
+                 "background", "host", "host_fraction", "total_reads",
+                 "ont_total_reads", "read_length", "ont_mean_length", "platforms",
+                 "replicates", "expect", "downsample_total_reads",
+                 # Documentation/metadata read elsewhere: tests/test_pipeline.py asserts
+                 # all 7 NYSDOH pathogen categories are covered via nysdoh_category.
+                 "nysdoh_category"}
+SPIKE_KEYS = {"taxon", "source", "genome", "levels_rpm", "exclude_loci"}
+TRUTH_KEYS = {"present", "absent", "vaccine"}
+CONTROLS_KEYS = {"include_ntc", "index_hop_fraction"}
+
+
+def reject_unknown_keys(mapping, allowed: set, where: str) -> None:
+    """Fail on any key this loader does not read. Silence here is a missing axis."""
+    unknown = sorted(k for k in (mapping or {}) if k not in allowed)
+    if unknown:
+        raise _bad(where,
+                   f"unrecognised key(s) {', '.join(repr(k) for k in unknown)}. "
+                   f"Nothing reads them, so whatever they declare would silently not "
+                   f"happen while the run reported success. "
+                   f"Recognised here: {', '.join(sorted(allowed))}")
+
+
 def load_scenarios(path: Path) -> Tuple[Scenario, ...]:
     btf_yaml = import_btf_yaml()
     if not path.is_file():
@@ -419,6 +458,7 @@ def load_scenarios(path: Path) -> Tuple[Scenario, ...]:
             f"anything it might mis-read; fix the line it names."
         )
     doc = as_mapping(doc, "<document>")
+    reject_unknown_keys(doc, DOC_KEYS, "<document>")
 
     version = as_int(doc.get("schema_version"), "schema_version", 1)
     if version != 1:
@@ -426,6 +466,7 @@ def load_scenarios(path: Path) -> Tuple[Scenario, ...]:
                    f"this script understands version 1, file declares {version}")
 
     d = as_mapping(doc.get("defaults"), "defaults")
+    reject_unknown_keys(d, DEFAULTS_KEYS, "defaults")
     base = {
         "replicates": as_int(d.get("replicates"), "defaults.replicates",
                              DEFAULTS["replicates"]),
@@ -474,6 +515,7 @@ def load_scenarios(path: Path) -> Tuple[Scenario, ...]:
     for i, raw in enumerate(raw_scenarios):
         where = f"scenarios[{i}]"
         s = as_mapping(raw, where)
+        reject_unknown_keys(s, SCENARIO_KEYS, where)
         sid = as_str(s.get("id"), f"{where}.id")
         if not sid:
             raise _bad(f"{where}.id", "is required (it names the samples on disk)")
@@ -510,6 +552,7 @@ def load_scenarios(path: Path) -> Tuple[Scenario, ...]:
         for j, rawsp in enumerate(as_list(s.get("spikes"), f"{where}.spikes")):
             spwhere = f"{where}.spikes[{j}]"
             sp = as_mapping(rawsp, spwhere)
+            reject_unknown_keys(sp, SPIKE_KEYS, spwhere)
             taxon = as_str(sp.get("taxon"), f"{spwhere}.taxon")
             if not taxon:
                 raise _bad(f"{spwhere}.taxon",
@@ -559,8 +602,26 @@ def load_scenarios(path: Path) -> Tuple[Scenario, ...]:
                        "kind: marker_ablation must exclude at least one locus, "
                        "otherwise it is an ordinary positive control")
 
+        # IN-SILICO DOWN-SAMPLING: one library, several depths.
+        #
+        # This key was declared in the shipped scenario file and read by nothing, so
+        # downsample_accuracy_floor - whose entire purpose is to find the depth at which
+        # the pipeline stops being accurate, and which cites NYSDOH CLEP's endorsement
+        # of exactly this design - generated a SINGLE depth while the file said six,
+        # and reported success. Implemented rather than deleted: removing the key would
+        # have removed a validation axis the design deliberately included.
+        depths = [as_int(v, f"{where}.downsample_total_reads[]")
+                  for v in as_list(s.get("downsample_total_reads"),
+                                   f"{where}.downsample_total_reads")]
+        for dv in depths:
+            if dv <= 0:
+                raise _bad(f"{where}.downsample_total_reads",
+                           "every depth must be positive")
+
         truth = as_mapping(s.get("truth"), f"{where}.truth")
+        reject_unknown_keys(truth, TRUTH_KEYS, f"{where}.truth")
         controls = as_mapping(s.get("controls"), f"{where}.controls")
+        reject_unknown_keys(controls, CONTROLS_KEYS, f"{where}.controls")
         hop = as_float(controls.get("index_hop_fraction"),
                        f"{where}.controls.index_hop_fraction", 0.0)
         if not 0.0 <= hop < 0.5:
@@ -604,6 +665,7 @@ def load_scenarios(path: Path) -> Tuple[Scenario, ...]:
                                    f"{where}.ont_mean_length",
                                    base["ont_mean_length"]),
             background=background,
+            downsample_total_reads=depths,
         ))
 
     # Truth cross-check. A scenario that spikes an organism and then lists it as
@@ -1486,13 +1548,16 @@ def plan_batch(scenarios: Sequence[Scenario], genomes: GenomeIndex,
         # detection measurement, it is a misleading one.
         mine: List[SamplePlan] = []
         try:
+            # None means "the scenario's own depth"; a list adds a depth axis.
+            depth_axis = sc.downsample_total_reads or [None]
             for platform in platforms:
                 for rep in range(1, reps + 1):
                     for level in levels:
-                        mine.append(build_sample_plan(
-                            sc, platform, rep, level, spike_refs, bg_refs,
-                            host_fasta, reads_dir, master_seed, primary,
-                            role="sample"))
+                        for depth in depth_axis:
+                            mine.append(build_sample_plan(
+                                sc, platform, rep, level, spike_refs, bg_refs,
+                                host_fasta, reads_dir, master_seed, primary,
+                                role="sample", depth_override=depth))
                     if sc.include_ntc:
                         mine.append(build_ntc_plan(
                             sc, platform, rep, bg_refs, reads_dir, master_seed))
@@ -1603,9 +1668,48 @@ def _compose(sc: Scenario, level: Optional[float],
     else:
         host_frac = 0.0
         if remainder > 1e-9:
-            if components:
-                # No host to absorb the remainder: scale what we do have, so the
-                # library is still total_reads deep and rpm keeps its meaning.
+            has_spike = any(c.kind == "spike" for c in components)
+            if components and has_spike:
+                # THE OLD BEHAVIOUR HERE MISREPORTED CONCENTRATION BY ORDERS OF
+                # MAGNITUDE, AND SAID THE OPPOSITE IN A COMMENT.
+                #
+                # It scaled every component by 1/claimed and noted "rpm keeps its
+                # meaning". It does not. With no host there is nothing to dilute with,
+                # so the spike's share of the DELIVERED library is spike_frac/claimed,
+                # not spike_frac - scaling changes the library's size, not that ratio.
+                # For a 100 rpm spike with 0.1% background and host_fraction 0,
+                # claimed is 0.0011 and the realised concentration is ~90,900 rpm while
+                # the manifest's level_rpm column still said 100. Every LoD point from
+                # such a scenario would be wrong by ~3 orders of magnitude, in the
+                # direction that flatters sensitivity, and evaluate_benchmark keys its
+                # curves on level_rpm.
+                #
+                # Refused rather than recorded, because there is no honest number to
+                # put in level_rpm: the operator asked for a concentration the mixture
+                # cannot express.
+                #
+                # Only when a SPIKE is present. A no-template control and a negative
+                # scenario are background-only BY DESIGN (build_ntc_plan sets
+                # host_fraction to 0 deliberately) and carry level_rpm = None, so there
+                # is no declared concentration to misreport and filling the library to
+                # depth is correct. Gating on spikes rather than on host_fraction is
+                # what separates the two cases.
+                raise SystemExit(
+                    f"ERROR: {sc.sid}: spikes and background claim only "
+                    f"{claimed:.6f} of the library and there is no host to make up "
+                    f"the remaining {remainder:.6f}.\n"
+                    f"       The delivered library would then be {claimed:.6f} of the "
+                    f"requested depth, so every component's concentration would be "
+                    f"{1.0 / max(claimed, 1e-12):.4g}x what was declared - and "
+                    f"level_rpm would report the declared value.\n"
+                    f"       Fix by one of:\n"
+                    f"         - set host_fraction (the host absorbs the remainder), or\n"
+                    f"         - add background organisms summing to "
+                    f"{remainder:.6f}, or\n"
+                    f"         - raise levels_rpm so the spikes fill the library.")
+            elif components:
+                # Spike-free: ratios among background organisms are preserved and no
+                # declared concentration is affected, so fill the library to depth.
                 scale = 1.0 / max(claimed, 1e-12)
                 for comp in components:
                     comp.reads = max(1, int(round(comp.reads * scale)))
@@ -1618,20 +1722,44 @@ def _compose(sc: Scenario, level: Optional[float],
 def build_sample_plan(sc: Scenario, platform: str, rep: int, level: Optional[float],
                       spike_refs: List[dict], bg_refs, host_fasta: Optional[Path],
                       reads_dir: Path, master_seed: int, primary: Optional[Spike],
-                      role: str) -> SamplePlan:
+                      role: str, depth_override: Optional[int] = None) -> SamplePlan:
     parts = [sc.sid, platform, f"r{rep}"]
     if sc.kind == "lod_series" and level is not None:
         parts.append(f"rpm{level_tag(level)}")
+    # The depth belongs in the NAME, or the six down-sampled libraries of one
+    # scenario would all resolve to one filename and overwrite each other.
+    if depth_override is not None:
+        parts.append(f"n{depth_override}")
     sample = "_".join(parts)
     seed = derive_seed(master_seed, sc.sid, rep, platform,
-                       "" if level is None else "%g" % level, role)
+                       "" if level is None else "%g" % level, role,
+                       "" if depth_override is None else str(depth_override))
     # Per-platform depth. An ONT run at a 5 kb mean does not deliver an Illumina
     # read count, so using one number for both would simulate a flow cell that does
     # not exist and overstate long-read sensitivity.
     depth = sc.ont_total_reads if platform == "ont" else sc.total_reads
+    depth_note = None
+    if depth_override is not None:
+        # downsample_total_reads is written in ILLUMINA read counts. Applying them
+        # verbatim to ONT would simulate 40M reads at a 5 kb mean - 200 Gbp, which no
+        # flow cell delivers - and would overstate long-read sensitivity for the same
+        # reason ont_total_reads exists at all. Scale by the platform's own depth ratio
+        # so the titration keeps its SHAPE at depths the platform can actually reach,
+        # and record the scaling rather than leaving the manifest to imply otherwise.
+        if platform == "ont" and sc.total_reads:
+            ratio = sc.ont_total_reads / float(sc.total_reads)
+            depth = max(1, int(round(depth_override * ratio)))
+            depth_note = (f"downsample={depth_override}|ont_scaled_by={ratio:g}"
+                          f"|realised={depth}")
+        else:
+            depth = depth_override
+            depth_note = f"downsample={depth_override}"
     components, host_frac, notes = _compose(
         sc, level, spike_refs, bg_refs, host_fasta, depth,
         primary, master_seed, sample)
+
+    if depth_note:
+        notes.append(depth_note)
 
     excluded = []
     for sp in sc.spikes:
@@ -1662,7 +1790,14 @@ def build_ntc_plan(sc: Scenario, platform: str, rep: int, bg_refs,
     `suppressed_control` tier untestable.
     """
     sample = f"{sc.sid}_{platform}_r{rep}_NTC"
-    total = max(NTC_MIN_READS, int(sc.total_reads * NTC_READ_FRACTION))
+    # PER-PLATFORM DEPTH, like build_sample_plan. This used sc.total_reads on both
+    # platforms, so with the defaults (20M Illumina / 4M ONT) the ONT NTC was planned
+    # at 200,000 reads against ONT samples of 4M - a control five times more
+    # concentrated relative to its samples than intended, which is the wrong
+    # denominator for control subtraction. At a 5 kb mean it is also ~1 Gbp of
+    # simulated ONT reads per NTC, for nothing.
+    sample_depth = sc.ont_total_reads if platform == "ont" else sc.total_reads
+    total = max(NTC_MIN_READS, int(sample_depth * NTC_READ_FRACTION))
     seed = derive_seed(master_seed, sc.sid, rep, platform, "NTC")
     ntc_sc = Scenario(**{k: getattr(sc, k) for k in Scenario.__slots__})
     ntc_sc.spikes = []
@@ -1776,17 +1911,55 @@ def generate_sample(plan: SamplePlan, sim: Simulator, work_dir: Path,
         if sidecar.is_file():
             try:
                 data = json.loads(sidecar.read_text(encoding="utf-8"))
-                plan.spiked_reads = int(data.get("spiked_reads", 0))
-                plan.actual_total = int(data.get("actual_total_reads", 0))
-                plan.status = "skipped"
-                plan.notes.append("resumed")
-                # Re-add the notes a fresh run would have written, so a resumed
-                # batch's manifest is byte-comparable with the original.
-                if plan.actual_total != plan.total_reads:
-                    plan.notes.append(f"actual_total_reads={plan.actual_total}")
-                LOG.info("SKIP %s (outputs present, counts from %s)",
-                         plan.sample, sidecar.name)
-                return True
+
+                # THE READS ON DISK MUST MATCH THE PLAN THAT WAS JUST COMPUTED.
+                #
+                # The skip only required the FASTQs to exist and the sidecar to parse.
+                # It never compared what the sidecar recorded against the plan. So
+                # editing a scenario - bumping host_fraction, changing a level, a new
+                # seed - and re-running the same batch reused the old FASTQs for every
+                # sample whose NAME was unchanged, while the manifest was rewritten
+                # from the NEW plan. The manifest then described libraries that were
+                # never generated, and the evaluator computed an LoD curve against
+                # declared levels that did not match the reads. Ground truth that
+                # silently does not describe the data is worse than no ground truth.
+                mismatches = []
+                if data.get("seed") is not None and int(data["seed"]) != int(plan.seed):
+                    mismatches.append(f"seed {data['seed']} != {plan.seed}")
+                old_lvl, new_lvl = data.get("level_rpm"), plan.level_rpm
+                if (old_lvl is None) != (new_lvl is None) or (
+                        old_lvl is not None and new_lvl is not None
+                        and abs(float(old_lvl) - float(new_lvl)) > 1e-9):
+                    mismatches.append(f"level_rpm {old_lvl} != {new_lvl}")
+                old_hf = data.get("host_fraction")
+                if old_hf is not None and abs(float(old_hf)
+                                              - float(plan.host_fraction)) > 1e-6:
+                    mismatches.append(
+                        f"host_fraction {old_hf} != {plan.host_fraction}")
+                old_tr = data.get("total_reads_intended")
+                if old_tr is not None and int(old_tr) != int(plan.total_reads):
+                    mismatches.append(f"total_reads {old_tr} != {plan.total_reads}")
+                if mismatches:
+                    LOG.warning("REGENERATE %s: existing reads do not match the "
+                                "current plan (%s). Rebuilding rather than shipping a "
+                                "manifest that describes data that was never made.",
+                                plan.sample, "; ".join(mismatches))
+                    for pth in outputs:
+                        pth.unlink(missing_ok=True)
+                    sidecar.unlink(missing_ok=True)
+                else:
+                    plan.spiked_reads = int(data.get("spiked_reads", 0))
+                    plan.actual_total = int(data.get("actual_total_reads", 0))
+                    plan.status = "skipped"
+                    plan.notes.append("resumed")
+                    # Re-add the notes a fresh run would have written, so a resumed
+                    # batch's manifest is byte-comparable with the original.
+                    if plan.actual_total != plan.total_reads:
+                        plan.notes.append(
+                            f"actual_total_reads={plan.actual_total}")
+                    LOG.info("SKIP %s (outputs present, counts from %s)",
+                             plan.sample, sidecar.name)
+                    return True
             except (OSError, ValueError, TypeError):
                 LOG.warning("%s: outputs exist but %s is unreadable", plan.sample,
                             sidecar.name)
@@ -1912,6 +2085,49 @@ def generate_sample(plan: SamplePlan, sim: Simulator, work_dir: Path,
 # behaviour for the recipient remains "do not call it".
 # ---------------------------------------------------------------------------
 
+def spike_read_ranges(logs_dir: Optional[Path], plan: SamplePlan) -> List[Tuple[int, int]]:
+    """Half-open [start, end) read-index ranges of the SPIKE components in plan's FASTQ.
+
+    generate_sample() concatenates the per-component FASTQs in component order and
+    records reads_generated for each, in that same order, so the cumulative sum locates
+    any component's reads inside the merged file.
+
+    WHY THIS IS NEEDED. The hop used `rng.sample(range(donor.actual_total), n)` - a
+    uniform draw over the donor's WHOLE library, host and background included. The
+    number of TARGET reads moved was therefore n x spike_fraction, not n. With the
+    shipped human_core.yaml (host_fraction 0.94, background 4.9%, 20M reads) a 100 rpm
+    donor is 1e-4 spike, an NTC recipient plans 200,000 reads, and at
+    index_hop_fraction 0.001 that is n=200 reads carrying an EXPECTED 0.02 target
+    reads. The NTC received 200 host and background reads, `notes` asserted a hop had
+    happened, and the contamination scenarios were effectively clean with respect to
+    the target - so a pipeline with no control-subtraction step at all would pass them.
+    The module comment above says `suppressed_control` "cannot be validated on clean
+    data", and that is exactly what the data was.
+    """
+    if not logs_dir:
+        return []
+    sidecar = logs_dir / f"{plan.sample}.json"
+    if not sidecar.is_file():
+        return []
+    try:
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    ranges: List[Tuple[int, int]] = []
+    offset = 0
+    for comp in data.get("components") or []:
+        try:
+            count = int(comp.get("reads_generated") or 0)
+        except (TypeError, ValueError):
+            count = 0
+        if count <= 0:
+            continue
+        if comp.get("kind") == "spike":
+            ranges.append((offset, offset + count))
+        offset += count
+    return ranges
+
+
 def apply_index_hopping(plans: Sequence[SamplePlan], master_seed: int,
                         logs_dir: Optional[Path], dry_run: bool) -> int:
     groups: Dict[Tuple[str, str, int], List[SamplePlan]] = {}
@@ -1968,21 +2184,48 @@ def apply_index_hopping(plans: Sequence[SamplePlan], master_seed: int,
                 LOG.warning("  donor %s has no reads; no hop into %s",
                             donor.sample, recipient.sample)
                 continue
-            n = min(n, available)
+
+            # Draw from the donor's SPIKE reads, so the recipient really does receive
+            # target sequence. This makes the simulation a deliberate WORST CASE rather
+            # than a faithful uniform-bleed model: on a real flow cell the hopped reads
+            # would be dominated by host, and at these spike fractions essentially no
+            # target read would move - which is physically accurate and tests nothing.
+            # The tier being validated (`suppressed_control`) is only exercised when
+            # target reads are present in the control, so that is what is injected, and
+            # the note records it as target-derived rather than implying a uniform bleed.
+            spike_ranges = spike_read_ranges(logs_dir, donor)
+            eligible = [i for a, b in spike_ranges for i in range(a, b)]
+            if eligible:
+                n = min(n, len(eligible))
+                pool, drawn_from = eligible, "spike"
+            else:
+                # No per-component record (an older batch, or a donor whose sidecar is
+                # gone): fall back to the whole library and SAY SO, because the hop
+                # then probably carries no target reads and the scenario is not
+                # measuring what it claims.
+                LOG.warning("  donor %s has no per-component read counts; hopping "
+                            "uniformly from the whole library, which at its spike "
+                            "fraction will carry few or no target reads - the "
+                            "contamination scenario will not exercise "
+                            "suppressed_control. Regenerate the donor with --force.",
+                            donor.sample)
+                n = min(n, available)
+                pool, drawn_from = list(range(available)), "library"
             rng = random.Random(derive_seed(master_seed, donor.sample,
                                            recipient.sample, "index_hop"))
-            picks = sorted(rng.sample(range(available), n))
+            picks = sorted(rng.sample(pool, n))
             moved = append_selected_reads(donor.fastq_1, recipient.fastq_1, picks)
             if recipient.fastq_2 and donor.fastq_2:
                 # Same record indices in both mates: the pair hops together,
                 # because it is one physical fragment with one mis-assigned index.
                 append_selected_reads(donor.fastq_2, recipient.fastq_2, picks)
             recipient.notes.append(
-                f"index_hop={frac:g}|from={donor.sample}|reads={moved}")
+                f"index_hop={frac:g}|from={donor.sample}|reads={moved}"
+                f"|drawn_from={drawn_from}")
             recipient.actual_total += moved
             if sidecar:
                 done.append({"from": donor.sample, "fraction": frac, "reads": moved,
-                             "applied_utc": utc_now()})
+                             "drawn_from": drawn_from, "applied_utc": utc_now()})
                 # actual_total_reads is deliberately NOT updated: it means "reads
                 # this script generated for this sample", and hopped reads are
                 # contamination from another library, tracked in index_hops.
@@ -1999,26 +2242,64 @@ def apply_index_hopping(plans: Sequence[SamplePlan], master_seed: int,
 # Output writing (atomic, after every sample)
 # ---------------------------------------------------------------------------
 
+def carry_forward(path: Path, produced: set, key: str, delimiter: str) -> list:
+    """Rows of an existing manifest/samplesheet for samples NOT produced this run.
+
+    WHY THIS EXISTS. Both writers rewrote the whole file from the current
+    invocation's plans, and `plans` is built from the --scenario/--platform filtered
+    scenario list. So generating a 359-sample batch and then re-running
+    `--batch v1 --scenario lod_banthracis` to regenerate one series rewrote
+    manifest.tsv with that scenario's ~30 rows. Every other sample's FASTQ was still
+    in reads/ with its sidecar intact - only its TRUTH row was gone.
+
+    That is worse than an obviously incomplete file, because evaluate_benchmark.py
+    iterates the manifest and scores one observation per row: a sample missing from
+    the manifest is not "untested" and not an error, it silently leaves the
+    denominator. Sensitivity would then be computed over 30 samples and reported as
+    the batch result.
+    """
+    if not path.exists():
+        return []
+    try:
+        with path.open(encoding="utf-8", newline="") as fh:
+            rows = list(csv.DictReader(fh, delimiter=delimiter))
+    except OSError as exc:
+        raise SystemExit(
+            f"ERROR: cannot read {path} to merge ({exc}). Refusing to rewrite it from "
+            f"this run alone: the other samples' reads would stay on disk while their "
+            f"ground-truth rows vanished, and the evaluator would silently score a "
+            f"smaller batch and report it as the batch result.") from exc
+    return [r for r in rows if (r.get(key) or "").strip() not in produced]
+
+
 def write_manifest(path: Path, plans: Sequence[SamplePlan]) -> None:
+    fresh = [p for p in plans if p.status in ("generated", "skipped")]
+    produced = {p.sample for p in fresh}
+    carried = carry_forward(path, produced, "sample", "\t")
     tmp = path.with_suffix(".tsv.part")
     with tmp.open("w", encoding="utf-8", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=MANIFEST_COLUMNS, delimiter="\t",
                            extrasaction="ignore", lineterminator="\n")
         w.writeheader()
-        for plan in plans:
-            if plan.status in ("generated", "skipped"):
-                w.writerow(plan.manifest_row())
+        for plan in fresh:
+            w.writerow(plan.manifest_row())
+        for row in carried:
+            w.writerow({c: row.get(c, "") for c in MANIFEST_COLUMNS})
     tmp.replace(path)
 
 
 def write_samplesheet(path: Path, plans: Sequence[SamplePlan]) -> None:
+    fresh = [p for p in plans if p.status in ("generated", "skipped")]
+    produced = {p.sample for p in fresh}
+    carried = carry_forward(path, produced, "sample", ",")
     tmp = path.with_suffix(".csv.part")
     with tmp.open("w", encoding="utf-8", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=SAMPLESHEET_COLUMNS, lineterminator="\n")
         w.writeheader()
-        for plan in plans:
-            if plan.status in ("generated", "skipped"):
-                w.writerow(plan.samplesheet_row())
+        for plan in fresh:
+            w.writerow(plan.samplesheet_row())
+        for row in carried:
+            w.writerow({c: row.get(c, "") for c in SAMPLESHEET_COLUMNS})
     tmp.replace(path)
 
 
