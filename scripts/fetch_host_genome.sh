@@ -35,7 +35,12 @@ trap '_btf_on_err $LINENO' ERR
 # --------------------------------------------------------------------------
 # Defaults
 # --------------------------------------------------------------------------
-DB_ROOT="/media/36tb/db"
+# The volume the PIPELINE reads from (pack.yaml's ${btf_db} resolves under this).
+# It used to default to /media/36tb/db, so with no arguments the files landed in
+# /media/36tb/db/bioThreatFinder/host/human while pack.yaml points at
+# /media/8tb/bioThreatFinder/host/human - and the cross-check below passed anyway,
+# because it compared BASENAMES.
+DB_ROOT="/media/8tb"
 # minimap2 indexing is dominated by a poorly-parallel sort; past ~16 threads the
 # return is negligible while the memory high-water mark keeps climbing. The box
 # has 64 cores but there is no reason to use them all here.
@@ -362,16 +367,60 @@ fetch_human() {
     build_mmi "$fasta" "$mmi_sr"  sr
     build_mmi "$fasta" "$mmi_ont" map-ont
 
-    # Cross-check against pack.yaml so a path drift is caught here rather than
-    # three stages downstream when depletion silently finds no index.
+    # Cross-check against pack.yaml so a path drift is caught here rather than three
+    # stages downstream when depletion silently finds no index.
+    #
+    # THIS USED TO COMPARE BASENAMES ONLY. It grepped pack.yaml for "chm13v2.0.fa.gz"
+    # and friends and never for the DIRECTORY, so with the old --db-root default the
+    # files were written to /media/36tb/db/... while pack.yaml pointed at
+    # /media/8tb/... and every check passed - a guard satisfying its own logic while
+    # failing the purpose its comment states. The full resolved path is what matters,
+    # so that is what is compared.
     local pack_yaml
     pack_yaml="$(dirname "$0")/../packs/human/pack.yaml"
-    if [[ -f "$pack_yaml" ]]; then
-        local p
+    local nf_config; nf_config="$(dirname "$0")/../nextflow.config"
+    if [[ -f "$pack_yaml" && -f "$nf_config" ]]; then
+        # RESOLVE THE TEMPLATE WITH THE PIPELINE'S BASE, NOT THIS SCRIPT'S.
+        #
+        # My first version of this check substituted THIS run's DB_ROOT into
+        # pack.yaml's ${btf_db} template and compared the result with this run's
+        # HOST_DIR - both derived from DB_ROOT, so they always agreed and the check
+        # could never fail. That is the identical tautology already fixed in
+        # build_pack_refs.py, written a second time. The invariant that matters is
+        # that this script writes where the PIPELINE reads, and the pipeline's base is
+        # params.btf_db in nextflow.config.
+        local pipeline_base
+        pipeline_base="$(sed -nE "s/^[[:space:]]*btf_db[[:space:]]*=[[:space:]]*['\"]([^'\"]+)['\"].*/\1/p" \
+            "$nf_config" | head -1)"
+        local p want resolved bad=0
+        if [[ -z "$pipeline_base" ]]; then
+            warn "could not read params.btf_db from ${nf_config}; host path not verified"
+        else
         for p in "chm13v2.0.fa.gz" "chm13v2.0.sr.mmi" "chm13v2.0.map-ont.mmi"; do
-            grep -q "$p" "$pack_yaml" \
-                || warn "packs/human/pack.yaml does not mention ${p}; paths may have drifted"
+            want="$(grep -oE "[^[:space:]\"']*${p}" "$pack_yaml" | head -1 || true)"
+            if [[ -z "$want" ]]; then
+                warn "packs/human/pack.yaml does not mention ${p}; paths may have drifted"
+                bad=1
+                continue
+            fi
+            # Resolve pack.yaml's ${btf_db} placeholder the way main.nf does.
+            resolved="${want//\$\{btf_db\}/$pipeline_base}"
+            if [[ "$resolved" != "${HOST_DIR}/${p}" ]]; then
+                warn "pack.yaml + nextflow.config expect ${resolved}"
+                warn "  but this run writes             ${HOST_DIR}/${p}"
+                bad=1
+            fi
         done
+        fi
+        if (( bad )); then
+            warn "HOST PATH MISMATCH. The pipeline reads the pack.yaml path, so host"
+            warn "depletion would find no index there and silently deplete nothing -"
+            warn "leaving host reads to be classified. Re-run with"
+            warn "  --db-root <parent of the bioThreatFinder directory pack.yaml names>"
+            warn "or update packs/human/pack.yaml to match."
+        else
+            log "host paths agree with packs/human/pack.yaml (${HOST_DIR})"
+        fi
     fi
 }
 
