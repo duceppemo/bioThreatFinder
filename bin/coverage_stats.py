@@ -129,11 +129,33 @@ def cigar_spans(cigar: str) -> tuple[int, int]:
 
 
 def collect_alignments(bam: Path, mapq_min: int):
-    """Primary, non-supplementary, mapped alignments grouped by taxid."""
-    per_taxid = defaultdict(lambda: {"reads": 0, "nm": 0, "aln": 0, "bases": 0})
+    """Primary, non-supplementary, mapped alignments grouped by taxid.
+
+    The extra counters here mirror the per-alignment metric set UKHSA's mSCAPE
+    programme stores in production (evenness, coverage_1x/10x, mapped vs uniquely
+    mapped reads, mean_read_identity, read_duplication_rate, forward_proportion,
+    mean_alignment_length). Two of them catch artifacts the others miss:
+
+      forward_proportion    a genuine shotgun alignment is near 0.5. A strong strand
+                            imbalance points at a single amplicon, an adapter
+                            artifact or a repeat, not an organism.
+      duplication_rate      reads stacked at identical start positions inflate depth
+                            without adding evidence. Without an upstream markdup
+                            step this is a PROXY - the fraction of primary reads
+                            sharing a start position and strand - so it reads high
+                            for genuinely deep, narrow coverage too. Interpret it
+                            with breadth, not alone.
+    """
+    per_taxid = defaultdict(lambda: {"reads": 0, "nm": 0, "aln": 0, "bases": 0,
+                                     "mapped_any_mapq": 0, "forward": 0,
+                                     "starts": None})
     # 0x904 = unmapped + secondary + supplementary. Excluding these leaves one
     # record per read at its best locus, which is the competitive assignment.
-    cmd = ["samtools", "view", "-F", "0x904", "-q", str(mapq_min), str(bam)]
+    # No -q here: we want BOTH the MAPQ-filtered count (evidence) and the raw mapped
+    # count (denominator), because their ratio is itself informative - a taxon whose
+    # reads nearly all fall below the MAPQ floor is one whose reads map equally well
+    # somewhere else.
+    cmd = ["samtools", "view", "-F", "0x904", str(bam)]
     for line in stream(cmd):
         f = line.rstrip("\n").split("\t")
         if len(f) < 11:
@@ -141,6 +163,20 @@ def collect_alignments(bam: Path, mapq_min: int):
         tid = taxid_of(f[2])
         if tid is None:
             continue
+        try:
+            flag = int(f[1])
+            mapq = int(f[4])
+        except ValueError:
+            continue
+        rec0 = per_taxid[tid]
+        rec0["mapped_any_mapq"] += 1
+        if rec0["starts"] is None:
+            rec0["starts"] = defaultdict(int)
+        if mapq < mapq_min:
+            continue
+        rec0["starts"][(f[2], f[3], flag & 0x10)] += 1
+        if not (flag & 0x10):
+            rec0["forward"] += 1
         ref_span, aln_len = cigar_spans(f[5])
         nm = 0
         for tag in f[11:]:
@@ -166,6 +202,7 @@ def depth_profile(bam: Path, mapq_min: int, target_refs: set[str], window: int):
     benefit. Only the target needs a depth profile.
     """
     covered = 0
+    covered10 = 0
     total = 0
     depths: list[int] = []
     window_hits: dict[tuple[str, int], bool] = {}
@@ -181,8 +218,10 @@ def depth_profile(bam: Path, mapq_min: int, target_refs: set[str], window: int):
         if d > 0:
             covered += 1
             window_hits[(f[0], int(f[1]) // window)] = True
+        if d >= 10:
+            covered10 += 1
 
-    return covered, total, depths, len(window_hits)
+    return covered, total, depths, len(window_hits), covered10
 
 
 def main() -> int:
@@ -227,7 +266,7 @@ def main() -> int:
     window = min(args.window, max(100, target_len // 50)) if target_len else args.window
 
     per_taxid = collect_alignments(args.bam, args.mapq_min)
-    covered, total_bases, depths, occupied_windows = depth_profile(
+    covered, total_bases, depths, occupied_windows, covered10 = depth_profile(
         args.bam, args.mapq_min, target_refs, window
     )
 
@@ -241,6 +280,7 @@ def main() -> int:
         best_nb, best_nb_reads = max(neighbours.items(), key=lambda kv: kv[1])
 
     breadth = (covered / total_bases) if total_bases else 0.0
+    breadth10 = (covered10 / total_bases) if total_bases else 0.0
     mean_depth = statistics.fmean(depths) if depths else 0.0
     # CV over the whole reference (zeros included) - an organism present at low
     # depth everywhere has a lower CV than one stacked on a single locus.
@@ -257,6 +297,14 @@ def main() -> int:
     # nonsensical fraction above one.
     mapped_frac = min(1.0, unique_reads / args.assigned_reads) if args.assigned_reads else -1.0
 
+    starts = tgt.get("starts") or {}
+    n_start_positions = len(starts)
+    dup_rate = (1.0 - n_start_positions / unique_reads) if unique_reads else 0.0
+    fwd_prop = (tgt.get("forward", 0) / unique_reads) if unique_reads else 0.0
+    mean_aln_len = (tgt["aln"] / unique_reads) if unique_reads else 0.0
+    mapped_any = tgt.get("mapped_any_mapq", 0)
+    mapq_pass_frac = (unique_reads / mapped_any) if mapped_any else 0.0
+
     row = {
         "sample": args.sample,
         "role": args.role,
@@ -269,6 +317,7 @@ def main() -> int:
         "reads_per_million": f"{rpm:.4f}",
         "aligned_bases": tgt["bases"],
         "breadth": f"{breadth:.6f}",
+        "coverage_10x": f"{breadth10:.6f}",
         "mean_depth": f"{mean_depth:.4f}",
         "depth_cv": f"{depth_cv:.4f}",
         "window_bp": window,
@@ -276,6 +325,12 @@ def main() -> int:
         "windows_occupied": occupied_windows,
         "window_occupancy": f"{occupancy:.6f}",
         "mean_identity": f"{mean_identity:.6f}",
+        "mean_alignment_length": f"{mean_aln_len:.1f}",
+        "mapped_reads_any_mapq": mapped_any,
+        "mapq_pass_fraction": f"{mapq_pass_frac:.4f}",
+        "forward_proportion": f"{fwd_prop:.4f}",
+        "duplication_rate_proxy": f"{dup_rate:.4f}",
+        "distinct_start_positions": n_start_positions,
         "best_neighbour_taxid": best_nb,
         "best_neighbour_reads": best_nb_reads,
         "neighbour_ratio": ("inf" if nb_ratio == float("inf") else f"{nb_ratio:.4f}"),
