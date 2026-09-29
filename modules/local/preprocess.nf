@@ -7,7 +7,7 @@
 process FASTP {
     tag   "${meta.id}"
     label 'process_medium'
-    conda "bioconda::fastp=0.23.4"
+    conda "bioconda::fastp=1.3.7"
 
     input:
     tuple val(meta), path(reads)
@@ -47,7 +47,7 @@ process FASTP {
 process CHOPPER {
     tag   "${meta.id}"
     label 'process_medium'
-    conda "bioconda::chopper=0.7.0"
+    conda "bioconda::chopper=0.14.1"
 
     input:
     tuple val(meta), path(reads)
@@ -74,7 +74,7 @@ process CHOPPER {
 process MINIMAP2_HOST_DEPLETE {
     tag   "${meta.id}"
     label 'process_high'
-    conda "bioconda::minimap2=2.28 bioconda::samtools=1.20"
+    conda "bioconda::minimap2=2.31 bioconda::samtools=1.24"
 
     input:
     tuple val(meta), path(reads), path(index)
@@ -110,7 +110,7 @@ process MINIMAP2_HOST_DEPLETE {
 process SEQKIT_STATS {
     tag   "${meta.id}"
     label 'process_low'
-    conda "bioconda::seqkit=2.8.2"
+    conda "bioconda::seqkit=2.14.0"
 
     input:
     tuple val(meta), path(reads)
