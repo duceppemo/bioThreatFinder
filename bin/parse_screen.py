@@ -423,6 +423,25 @@ def main() -> int:
     # index is keyed in a different namespace (GTDB taxids are not NCBI taxids). Say
     # so explicitly - the alternative is an arm that looks like it ran and found
     # nothing, which is indistinguishable from a clean negative.
+    # Same failure shape for sylph, and it is easier to miss because the symptom looks
+    # like a legitimate result. sylph reports GENOME FILE NAMES, not taxids, so its hits
+    # only map to watchlist taxa when those filenames carry the taxid - true for a DB
+    # built from this pack's refs (<taxid>_<name>.fna.gz), FALSE for the GTDB
+    # distribution, whose files are named by GTDB accession. Against GTDB every lookup
+    # misses, sylph_abundance is empty for everything, and score_evidence then prints
+    # "no sylph/ANI support (expected for viruses and eukaryotes)" on every finding -
+    # which an analyst reads as evidence rather than as a broken arm.
+    if sy and not any(r["sylph_abundance"] for r in rows):
+        sys.stderr.write(
+            f"[screen] WARNING: the sylph profile held {len(sy)} entr(ies) but NONE "
+            "mapped to a watchlist taxid, so this arm contributed nothing. sylph is "
+            "keyed by genome FILENAME: it only works when the filenames carry the "
+            "taxid. The GTDB distribution names files by GTDB accession, which never "
+            "matches an NCBI taxid. Build a sylph DB from this pack's refs (whose "
+            "filenames are <taxid>_<name>.fna.gz), or supply a GTDB->NCBI mapping. "
+            "Treat any 'no sylph support' note in the report as UNINFORMATIVE until "
+            "then.\n")
+
     if mb and not any(r["metabuli_reads"] > 0 for r in rows):
         other = any(r["krakenuniq_reads"] > 0 or r["kraken2_reads"] > 0 for r in rows)
         if other:

@@ -124,6 +124,13 @@ scenarios:
         configuration fault, not a biological result. Check this first.
       kind: lod_series
       replicates: 1
+      # Deliberately shallow. This scenario's only job is to prove the wiring, and at
+      # 5000 rpm even 2M reads gives 10,000 spike reads - far above any threshold. Full
+      # depth here would mean simulating ~19M host reads to answer a question that does
+      # not depend on depth, and the point of a plumbing check is that it is cheap
+      # enough to run before every batch.
+      total_reads: 2000000
+      ont_total_reads: 400000
       host_fraction: 0.50
       spikes:
           - taxon: Yersinia pestis
