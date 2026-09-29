@@ -54,16 +54,35 @@ defaults:
     total_reads: 20000000
     ont_total_reads: 4000000
     host: human
-    # 95% human is typical of respiratory and tissue specimens. Measuring
+    # ~94-95% human, typical of respiratory and tissue specimens. Measuring
     # sensitivity in a clean background would overstate it substantially.
-    host_fraction: 0.95
+    #
+    # host_fraction is a FLOOR, not a target, and it is validated against the HIGHEST
+    # spike level in the scenario. The simulator gives spikes and background their
+    # declared shares and the host absorbs whatever is left, recording the realised
+    # fraction per sample in the manifest. With 4.9% background and a 1%-of-library top
+    # spike, the most the host can take at that level is 94.1% - so declaring 0.95
+    # makes the scenario unbuildable, which is how this was found. 0.94 holds at every
+    # level; realised host runs ~94.1% at the top spike to ~95.1% at the bottom.
+    host_fraction: 0.94
     read_length: 150
     ont_mean_length: 5000
-    # Commensal and environmental background, 2% of the library. Without this,
+    # Commensal and environmental background, 4.9% of the library. Without this,
     # "negative" means host-only, which understates the false-positive rate -
     # real specimens contain plenty of organisms that are genomically adjacent to
     # watchlist taxa. Every taxon here is a near neighbour already present in the
     # pack's reference manifest, so no extra genomes need fetching.
+    #
+    # WHY 5% AND NOT 2%: host_fraction is a FLOOR, not a target. The simulator gives
+    # spikes and background their declared shares and the HOST ABSORBS THE REMAINDER,
+    # recording the realised fraction in the manifest. So with a 2% background these
+    # scenarios declared 95% host and actually produced ~97.5%, and the low-biomass
+    # scenario's "99.8% host" was barely distinguishable from them. Setting non-host
+    # load to 4.9% makes the declared 0.95 realisable - it has to sit just UNDER 5%,
+    # because the spike itself also claims a share and host_fraction + spikes +
+    # background must not exceed the library. And
+    # leaves the low-biomass scenario (0.05% background) genuinely ~40x lower in
+    # microbial load - which is what low biomass means.
     #
     # Note E. coli: commensal E. coli SHOULD be detected and should NOT be
     # confirmed, because confirmation is gated on pathotype markers it does not
@@ -75,11 +94,11 @@ defaults:
     # inflate or deflate specificity. `negative_host_only` lists them explicitly,
     # so that one scenario's false-positive rate is exact.
     background:
-        "Escherichia coli": 0.008
-        "Neisseria lactamica": 0.004
-        "Haemophilus haemolyticus": 0.003
-        "Listeria innocua": 0.003
-        "Bacillus thuringiensis": 0.002
+        "Escherichia coli": 0.020
+        "Neisseria lactamica": 0.010
+        "Haemophilus haemolyticus": 0.007
+        "Listeria innocua": 0.007
+        "Bacillus thuringiensis": 0.005
 
 scenarios:
 
