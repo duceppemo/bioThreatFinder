@@ -50,6 +50,11 @@ BRACKEN_READ_LENGTHS=(100 150 250)
 DRY_RUN=0
 CLEAN=0
 REUSE_TAXDUMP=1
+# rsync (port 873) is blocked on many networks, including this host, while HTTPS is
+# open. kraken2-build defaults to rsync and dies with "Error downloading assembly
+# summary file", which reads like an NCBI outage rather than a local firewall.
+# 'auto' probes port 873 and falls back to --use-ftp (wget over HTTPS/FTP).
+TRANSPORT="auto"
 SKIP_MAPS=1
 FORCE=0
 
@@ -91,6 +96,11 @@ Options:
                        Omitted by default - see WHY in the script.
   --read-lengths "100 150"  Bracken read lengths (default: "100 150 250")
   --skip-bracken       Do not build Bracken distributions
+  --transport MODE     auto | rsync | ftp (default: auto). kraken2-build uses
+                       rsync by default; many networks block port 873 while
+                       allowing HTTPS, and the resulting error looks like an NCBI
+                       outage. 'auto' probes and falls back to ftp.
+  --use-ftp            Shorthand for --transport ftp.
   --taxdump DIR        Pinned NCBI taxonomy snapshot to reuse
                        (default: /media/8tb/bioThreatFinder/taxdump/2026-09-29).
                        MUST be the same snapshot the watchlist was resolved
@@ -148,6 +158,8 @@ while [[ $# -gt 0 ]]; do
         --read-lengths)      read -r -a BRACKEN_READ_LENGTHS <<< "${2:?--read-lengths needs a value}"; shift 2 ;;
         --skip-bracken)      SKIP_BRACKEN=1; shift ;;
         --taxdump)           TAXDUMP_SRC="${2:?--taxdump needs a value}"; shift 2 ;;
+        --transport)         TRANSPORT="${2:?--transport needs auto|rsync|ftp}"; shift 2 ;;
+        --use-ftp)           TRANSPORT="ftp"; shift ;;
         --download-taxonomy) REUSE_TAXDUMP=0; shift ;;
         --with-maps)         SKIP_MAPS=0; shift ;;
         --clean)             CLEAN=1; shift ;;
@@ -330,15 +342,71 @@ prepare_taxonomy() {
 # One kraken2-build call per library, each with its own stamp file, so an
 # interrupted run resumes at the library that failed instead of re-downloading
 # the ~200 GB bacteria set.
+# kraken2's --use-ftp path shells out to `wget`, and a broken wget produces the same
+# "Error downloading assembly summary file" as a network failure - which sent this
+# build chasing NCBI and firewalls for a while. The conda-forge wget in this env is
+# linked against libunistring.so.2 while the env ships .so.5, so it cannot start at
+# all. Detect that and fall back to a working wget rather than mis-diagnosing it.
+#
+# A shim directory is used instead of removing the conda package, because kraken2
+# DECLARES wget as a dependency - removing it uninstalls kraken2 and bracken too.
+ensure_working_wget() {
+    if wget --version >/dev/null 2>&1; then
+        log "wget: $(command -v wget) (working)"
+        return
+    fi
+    local broken; broken="$(command -v wget 2>/dev/null || echo none)"
+    local cand
+    for cand in /usr/bin/wget /bin/wget /usr/local/bin/wget; do
+        if [[ -x "$cand" ]] && "$cand" --version >/dev/null 2>&1; then
+            local shim="${BTF_SHIM_DIR:-${DB_ROOT}/bioThreatFinder/toolshim}"
+            mkdir -p "$shim"
+            ln -sf "$cand" "${shim}/wget"
+            export PATH="${shim}:${PATH}"
+            warn "wget at ${broken} is broken (cannot load its shared libraries)."
+            warn "  Shimming ${cand} ahead of it via ${shim}."
+            warn "  Left the conda package in place on purpose: kraken2 declares wget as"
+            warn "  a dependency, so removing it uninstalls kraken2 and bracken as well."
+            return
+        fi
+    done
+    die "wget at ${broken} cannot run and no working wget was found.
+  kraken2-build needs it for --use-ftp, and rsync (port 873) is unavailable here.
+  Install a working wget, or pass --transport rsync if port 873 is open for you."
+}
+
+# Decide the transport once, before spending hours discovering it the hard way.
+choose_transport() {
+    DL_OPTS=""
+    case "$TRANSPORT" in
+        rsync) log "transport: rsync (forced)" ;;
+        ftp)   DL_OPTS="--use-ftp"; log "transport: ftp/https (forced)" ;;
+        auto)
+            if timeout 12 bash -c 'cat < /dev/null > /dev/tcp/ftp.ncbi.nlm.nih.gov/873' 2>/dev/null; then
+                log "transport: rsync (port 873 reachable)"
+            else
+                DL_OPTS="--use-ftp"
+                log "transport: ftp/https - rsync port 873 is NOT reachable from this host."
+                log "  Without this fallback kraken2-build fails with 'Error downloading"
+                log "  assembly summary file', which looks like an NCBI problem but is a"
+                log "  local firewall blocking the rsync port."
+            fi
+            ;;
+        *) die "--transport must be auto, rsync or ftp (got '${TRANSPORT}')" ;;
+    esac
+}
+
 download_libraries() {
     local lib
+    choose_transport
+    [[ -n "$DL_OPTS" ]] && ensure_working_wget
     for lib in $LIBRARIES; do
         if have_stamp "library_${lib}" && (( FORCE == 0 )); then
             skip "library already downloaded: ${lib}"
             continue
         fi
         log "downloading library '${lib}' (this is the slow part; bacteria alone is hours)"
-        run "$KRAKEN2_BUILD" --db "$DB_DIR" --download-library "$lib" --threads "$THREADS"
+        run "$KRAKEN2_BUILD" --db "$DB_DIR" --download-library "$lib" --threads "$THREADS" ${DL_OPTS}
         set_stamp "library_${lib}"
     done
 }
