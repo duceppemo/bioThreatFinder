@@ -108,6 +108,81 @@ dedicated segment-aware caller, flagging H5/H7 explicitly.
 ### 7. AMR characterisation as stage 3
 CARD, ResFinder and DeepARG databases are already present on this box.
 
+## From the 2025-2026 literature review (not yet implemented)
+
+Ranked by published effect size. Sources in each line.
+
+### A. Mask the reference database before tuning any threshold
+VirMask-style removal of recurrent contaminants (adapters, PCR controls, bacterial
+rRNA/gDNA, CMV enhancers, phage) cut false positives by **up to 89%** with no loss of
+true positives; Conterminator-style cross-contamination screening is described as
+table stakes. Independently, Wright et al. 2026 traced an *H. pylori* false positive
+to **phage sequence inside the reference genome itself**. We currently download
+references and use them unmasked, so some of our FP budget is coming from our own
+database. This is probably the single highest-value item left.
+
+### B. Adopt UKHSA mSCAPE's control vocabulary and spike-in screen
+mSCAPE (the most transparent public-health implementation; pipeline
+`artic-network/scylla`, filters `ukhsa-collaboration/gpha-mscape-orangebox-claspar`)
+carries an explicit metadata enum set:
+  input_type          = community_standard | negative_control | positive_control |
+                        specimen | validation_material
+  control_type_details= NIBSC_11/242, NIBSC_20/170, bacillus_ms2phage,
+                        resp_matrix_mc110, water_extraction_control, zepto_rp2.1,
+                        zymo-mc_D6300
+  spike_in            = ERCC-RNA_4456740, ms2-phage, phix, tobacco_mosaic_virus,
+                        zymo_D6320/D6321, none
+  spike_in_result     = pass | partial | fail
+Our samplesheet has only role=sample|control, which cannot distinguish an extraction
+blank from a no-template control from a mock community - and those fail differently.
+
+### C. Negative-control-derived contaminant watchlist
+Taxa present in >=50% of negative controls at >0.5 CPM go on a per-site watchlist,
+**flagged not deleted** (decontam; Ibanez-Lligona et al. 2026, Front Microbiol,
+doi:10.3389/fmicb.2026.1786985). decontam guidance is 5-6 negative controls. mSCAPE
+ships an entire repo (`gpha-mscape-contamination`) just for aggregating negative
+controls per site. We subtract against controls in the same run only.
+
+### D. Machine-readable watchlist fetchers - only three sources are automatable
+  ePATHogen  JSON/CSV API, refreshed nightly  -> the LEGAL source of Canadian Risk Groups
+  EPPO       categorization.csv + v2 REST API, annual September revision
+  eCFR API   US select agents
+Everything else (Canada's notifiable list, CFIA animal and plant pest lists, WOAH
+Chapter 1.3, WHO priority lists) is scrape-and-diff with no API.
+
+**CORRECTION carried into the docs: HPTA Schedules 2-5 were REPEALED on 2026-03-26.**
+The ePATHogen registry, not the Act's schedules, is now the legal source of Risk Group
+assignments. Any text citing HPTA schedules as a watchlist source is out of date.
+
+### E. HCID gate schema and mandatory human hand-off
+mSCAPE's `hcid.json` uses `min_count`, `required_refs`, `min_coverage`,
+`additional_refs`, `alt_taxon_id`, version-controlled with CI schema validation, and
+their gate emits **reads plus per-reference `accession:reads:fraction_covered` rather
+than a result**, with human hand-off mandatory. Our tiering is close in spirit; the
+per-reference evidence emission and the explicit hand-off step are missing.
+
+### F. Validation route for an UNTARGETED assay
+  * WOAH Terrestrial Manual ch. 1.1.6 states the traditional validation pathway does
+    not apply to untargeted assays and gives a QC-metric regime instead - the clearest
+    official statement available for animal health.
+  * EPPO has the most mature untargeted-method guidance of any body (plant health).
+  * ENNGS/ESCV multi-site design: low-biomass-mimicking mock panel, multiple
+    protocols, one central pipeline, LoD per organism, exclusivity testing against
+    near neighbours AND organisms causing similar syndromes.
+  * There is NO CLSI standard for metagenomic/untargeted sequencing (verified by
+    enumeration of the MM series; MM24 2nd ed. 2021 covers targeted infectious-organism
+    sequencing). No accredited mNGS EQA/proficiency scheme was found.
+  * Precedent exists for an in-silico proficiency test of the dry lab alone
+    (Front Microbiol 2020;11:575377) - directly applicable to our harness.
+
+### G. Gaps where no published method exists
+No general framework for vaccine-vs-wild-type calling from metagenomic data. No
+published *Y. pestis* vs *Y. pseudotuberculosis* or *F. tularensis* subspecies
+discrimination from metagenomes. No published reporting thresholds for select-agent
+calls from metagenomes. No contamination-control guidance written for biothreat
+metagenomics. Our marker tier is addressing real gaps, which also means it is
+unvalidated and must not be presented as established practice.
+
 ## Watchlist provenance (do before operational use)
 The seed watchlist is derived from published notifiable/high-consequence lists but is
 NOT authoritative. Reconcile against, and record the version of:
