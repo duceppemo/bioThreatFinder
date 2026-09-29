@@ -79,6 +79,104 @@ def stream(cmd: list[str]):
         sys.exit(f"ERROR: command failed ({rc}): {' '.join(cmd)}\n{err}")
 
 
+def load_mask(path: Path | None) -> dict[str, list[tuple[int, int]]]:
+    """contig -> merged, sorted masked intervals, from a BED file or a directory of them.
+
+    WHY MASKED REGIONS ARE HANDLED HERE RATHER THAN BY DELETING SEQUENCE
+
+    scripts/mask_pack_refs.py soft-masks: it records intervals that are vector,
+    host-derived, low-complexity, or shared near-identically with a phylogenetically
+    distant reference (assembly cross-contamination). Hard-masking those to N would
+    make the failure mode invisible - the reads would simply stop aligning and the
+    taxon would quietly vanish with no record of why.
+
+    Handling it here instead gives the auditable version:
+
+      * masked bases are excluded from the breadth and occupancy DENOMINATORS, so a
+        genome is judged on the portion of it we trust;
+      * reads lying ENTIRELY inside a masked interval do not count toward
+        unique_reads, because that is untrustworthy evidence;
+      * but they are reported as reads_in_masked_regions, so the situation is visible.
+
+    That combination is what catches the Wright et al. 2026 case directly: an
+    H. pylori call whose support turned out to be contaminating phage sequence inside
+    the reference genome now shows unique_reads near zero AND a high
+    reads_in_masked_regions, instead of a confident false positive.
+    """
+    if not path:
+        return {}
+    beds: list[Path] = []
+    if path.is_dir():
+        beds = sorted(path.glob("*.mask.bed"))
+        if not beds:
+            sys.stderr.write(f"[coverage] WARNING: no *.mask.bed under {path}\n")
+    elif path.exists():
+        beds = [path]
+    else:
+        sys.stderr.write(f"[coverage] WARNING: mask path {path} not found; "
+                         "proceeding UNMASKED\n")
+        return {}
+
+    raw: dict[str, list[tuple[int, int]]] = defaultdict(list)
+    for bed in beds:
+        with bed.open() as fh:
+            for line in fh:
+                if not line.strip() or line.startswith(("#", "track", "browser")):
+                    continue
+                f = line.rstrip("\n").split("\t")
+                if len(f) < 3:
+                    continue
+                try:
+                    raw[f[0]].append((int(f[1]), int(f[2])))
+                except ValueError:
+                    continue
+    out: dict[str, list[tuple[int, int]]] = {}
+    for contig, ivs in raw.items():
+        ivs.sort()
+        merged: list[list[int]] = []
+        for a, b in ivs:
+            if merged and a <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], b)
+            else:
+                merged.append([a, b])
+        out[contig] = [(a, b) for a, b in merged]
+    return out
+
+
+def contig_key(refname: str) -> str:
+    """`taxid|632|NZ_CP009973.1` -> `NZ_CP009973.1`.
+
+    Competitive bundles prefix every reference with its taxid, but mask BEDs are
+    written against the original contig names, so the prefix has to come off before
+    lookup. Silently failing to match would leave everything unmasked while
+    appearing to work.
+    """
+    if refname.startswith("taxid|"):
+        parts = refname.split("|", 2)
+        if len(parts) >= 3:
+            return parts[2].split()[0]
+    return refname.split()[0]
+
+
+def in_masked(ivs: list[tuple[int, int]], start: int, end: int) -> bool:
+    """True if [start, end) lies entirely within one masked interval."""
+    lo, hi = 0, len(ivs) - 1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        a, b = ivs[mid]
+        if start < a:
+            hi = mid - 1
+        elif start >= b:
+            lo = mid + 1
+        else:
+            return end <= b
+    return False
+
+
+def masked_len_within(ivs: list[tuple[int, int]], length: int) -> int:
+    return sum(min(b, length) - a for a, b in ivs if a < length)
+
+
 def taxid_of(refname: str) -> str | None:
     """`taxid|632|NZ_CP009973.1 Yersinia...` -> '632'."""
     if not refname.startswith("taxid|"):
@@ -128,7 +226,7 @@ def cigar_spans(cigar: str) -> tuple[int, int]:
     return ref_span, aln_len
 
 
-def collect_alignments(bam: Path, mapq_min: int):
+def collect_alignments(bam: Path, mapq_min: int, mask=None):
     """Primary, non-supplementary, mapped alignments grouped by taxid.
 
     The extra counters here mirror the per-alignment metric set UKHSA's mSCAPE
@@ -146,9 +244,10 @@ def collect_alignments(bam: Path, mapq_min: int):
                             for genuinely deep, narrow coverage too. Interpret it
                             with breadth, not alone.
     """
+    mask = mask or {}
     per_taxid = defaultdict(lambda: {"reads": 0, "nm": 0, "aln": 0, "bases": 0,
                                      "mapped_any_mapq": 0, "forward": 0,
-                                     "starts": None})
+                                     "masked_reads": 0, "starts": None})
     # 0x904 = unmapped + secondary + supplementary. Excluding these leaves one
     # record per read at its best locus, which is the competitive assignment.
     # No -q here: we want BOTH the MAPQ-filtered count (evidence) and the raw mapped
@@ -174,10 +273,26 @@ def collect_alignments(bam: Path, mapq_min: int):
             rec0["starts"] = defaultdict(int)
         if mapq < mapq_min:
             continue
+        ref_span, aln_len = cigar_spans(f[5])
+
+        # A read lying ENTIRELY inside a masked interval is not evidence. It is
+        # counted and reported, but excluded from unique_reads - otherwise a
+        # reference contaminated with phage or vector sequence collects reads and
+        # manufactures a confident false positive, which is exactly the documented
+        # Wright et al. failure.
+        ivs = mask.get(contig_key(f[2]))
+        if ivs:
+            try:
+                start0 = int(f[3]) - 1
+            except ValueError:
+                start0 = -1
+            if start0 >= 0 and in_masked(ivs, start0, start0 + ref_span):
+                rec0["masked_reads"] += 1
+                continue
+
         rec0["starts"][(f[2], f[3], flag & 0x10)] += 1
         if not (flag & 0x10):
             rec0["forward"] += 1
-        ref_span, aln_len = cigar_spans(f[5])
         nm = 0
         for tag in f[11:]:
             if tag.startswith("NM:i:"):
@@ -194,16 +309,19 @@ def collect_alignments(bam: Path, mapq_min: int):
     return per_taxid
 
 
-def depth_profile(bam: Path, mapq_min: int, target_refs: set[str], window: int):
+def depth_profile(bam: Path, mapq_min: int, target_refs: set[str], window: int,
+                  mask=None):
     """Per-base depth for the target's references only.
 
     ``samtools depth -a`` over the whole competitive bundle would emit a row per
     base of every neighbour genome too - tens of millions of lines for no
     benefit. Only the target needs a depth profile.
     """
+    mask = mask or {}
     covered = 0
     covered10 = 0
     total = 0
+    masked_positions = 0
     depths: list[int] = []
     window_hits: dict[tuple[str, int], bool] = {}
 
@@ -212,6 +330,12 @@ def depth_profile(bam: Path, mapq_min: int, target_refs: set[str], window: int):
         f = line.rstrip("\n").split("\t")
         if len(f) < 3 or f[0] not in target_refs:
             continue
+        ivs = mask.get(contig_key(f[0]))
+        if ivs:
+            pos0 = int(f[1]) - 1
+            if in_masked(ivs, pos0, pos0 + 1):
+                masked_positions += 1
+                continue
         d = int(f[2])
         total += 1
         depths.append(d)
@@ -221,7 +345,7 @@ def depth_profile(bam: Path, mapq_min: int, target_refs: set[str], window: int):
         if d >= 10:
             covered10 += 1
 
-    return covered, total, depths, len(window_hits), covered10
+    return covered, total, depths, len(window_hits), covered10, masked_positions
 
 
 def main() -> int:
@@ -244,11 +368,21 @@ def main() -> int:
                          "classifier attributed to a taxon do not survive alignment, the "
                          "k-mer evidence did not hold up (Wright et al. 2026, "
                          "doi:10.1099/mgen.0.001739)")
+    ap.add_argument("--mask-bed", type=Path, default=None,
+                    help="BED file, or directory of *.mask.bed, from "
+                         "scripts/mask_pack_refs.py. Masked bases are excluded from "
+                         "the breadth/occupancy denominators and reads lying entirely "
+                         "within masked intervals are reported separately instead of "
+                         "counting as evidence")
     ap.add_argument("--out", required=True, type=Path)
     args = ap.parse_args()
 
     if not args.bam.exists():
         sys.exit(f"ERROR: {args.bam} not found")
+
+    mask = load_mask(args.mask_bed)
+    if mask:
+        sys.stderr.write(f"[coverage] mask loaded for {len(mask)} contig(s)\n")
 
     lengths, by_taxid = read_header(args.bam)
 
@@ -259,16 +393,19 @@ def main() -> int:
         )
 
     target_refs = set(by_taxid[args.taxid])
-    target_len = sum(lengths[r] for r in target_refs)
+    target_len_raw = sum(lengths[r] for r in target_refs)
+    masked_bp = sum(masked_len_within(mask.get(contig_key(r), []), lengths[r])
+                    for r in target_refs) if mask else 0
+    # Judge the genome on the portion we trust.
+    target_len = max(1, target_len_raw - masked_bp)
 
     # Windows must not be larger than the genome, or occupancy is always 1/1.
     # Small viral genomes need a proportionally smaller window.
     window = min(args.window, max(100, target_len // 50)) if target_len else args.window
 
-    per_taxid = collect_alignments(args.bam, args.mapq_min)
-    covered, total_bases, depths, occupied_windows, covered10 = depth_profile(
-        args.bam, args.mapq_min, target_refs, window
-    )
+    per_taxid = collect_alignments(args.bam, args.mapq_min, mask)
+    covered, total_bases, depths, occupied_windows, covered10, masked_positions = \
+        depth_profile(args.bam, args.mapq_min, target_refs, window, mask)
 
     tgt = per_taxid.get(args.taxid, {"reads": 0, "nm": 0, "aln": 0, "bases": 0})
     unique_reads = tgt["reads"]
@@ -312,6 +449,11 @@ def main() -> int:
         "taxon": args.taxon,
         "group": args.group,
         "reference_bp": target_len,
+        "reference_bp_raw": target_len_raw,
+        "masked_bp": masked_bp,
+        "masked_fraction_of_reference": (f"{masked_bp / target_len_raw:.6f}"
+                                        if target_len_raw else "0"),
+        "reads_in_masked_regions": tgt.get("masked_reads", 0),
         "reference_contigs": len(target_refs),
         "unique_reads": unique_reads,
         "reads_per_million": f"{rpm:.4f}",
@@ -345,6 +487,12 @@ def main() -> int:
         fh.write("\t".join(row) + "\n")
         fh.write("\t".join(str(v) for v in row.values()) + "\n")
 
+    if masked_bp:
+        sys.stderr.write(
+            f"[coverage] {args.sample} taxid={args.taxid}: {masked_bp}/{target_len_raw} bp "
+            f"({masked_bp / target_len_raw:.2%}) of the reference is masked; "
+            f"{tgt.get('masked_reads', 0)} read(s) fell entirely within masked "
+            "intervals and are NOT counted as evidence\n")
     sys.stderr.write(
         f"[coverage] {args.sample} taxid={args.taxid} ({args.taxon}): "
         f"{unique_reads} reads, breadth={breadth:.4f}, occupancy={occupancy:.4f}, "

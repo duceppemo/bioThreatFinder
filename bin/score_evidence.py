@@ -321,6 +321,33 @@ def main() -> int:
                         f"({rpm / ctrl:.1f}x)"
                     )
 
+        # ---- masked-region support ------------------------------------
+        # A finding whose support sits in masked regions is the documented Wright
+        # et al. failure: contaminating phage or vector sequence inside a reference
+        # collecting reads and manufacturing a confident call. It usually fails the
+        # read floor on its own once masked reads are excluded, but it must say so
+        # rather than just quietly scoring low.
+        masked_reads = as_float(row.get("reads_in_masked_regions"), 0.0)
+        masked_frac_ref = as_float(row.get("masked_fraction_of_reference"), 0.0)
+        if masked_reads > 0:
+            if masked_reads >= max(1.0, unique_reads):
+                reasons.append(
+                    f"CAVEAT: {masked_reads:.0f} read(s) fell entirely inside MASKED "
+                    f"reference regions vs {unique_reads:.0f} trustworthy read(s) - "
+                    "support is dominated by vector, host, low-complexity or "
+                    "cross-contaminated sequence in the reference itself")
+                if tier == "confirmed_in_silico":
+                    tier = "supported"
+            else:
+                reasons.append(
+                    f"{masked_reads:.0f} read(s) in masked reference regions "
+                    "(excluded from the read count)")
+        if masked_frac_ref >= 0.20:
+            reasons.append(
+                f"CAVEAT: {masked_frac_ref:.0%} of this reference is masked, so breadth "
+                "is computed over a small trusted fraction - treat the reference as "
+                "suspect and consider recuration")
+
         # ---- marker gating -------------------------------------------
         marker_summary = ""
         spec = marker_rules.get(row.get("taxon") or meta.get("name", ""))
@@ -440,6 +467,8 @@ def main() -> int:
             "mean_identity": row.get("mean_identity", "0"),
             "neighbour_ratio": row.get("neighbour_ratio", ""),
             "mapped_fraction_of_assigned": row.get("mapped_fraction_of_assigned", ""),
+            "reads_in_masked_regions": row.get("reads_in_masked_regions", ""),
+            "masked_fraction_of_reference": row.get("masked_fraction_of_reference", ""),
             "best_neighbour_taxid": row.get("best_neighbour_taxid", ""),
             "screen_reads": scr.get("assigned_reads", ""),
             "n_classifiers": n_clf or "",
@@ -470,7 +499,8 @@ def main() -> int:
                 "unique_reads": "", "reads_per_million": "", "breadth": "",
                 "window_occupancy": "", "mean_depth": "", "depth_cv": "",
                 "mean_identity": "", "neighbour_ratio": "",
-                "mapped_fraction_of_assigned": "", "best_neighbour_taxid": "",
+                "mapped_fraction_of_assigned": "", "reads_in_masked_regions": "",
+                "masked_fraction_of_reference": "", "best_neighbour_taxid": "",
                 "screen_reads": screen.get((sample, taxid), {}).get("assigned_reads", ""),
                 "n_classifiers": "", "classifiers": "", "distinct_kmers": "",
                 "screen_flags": "",

@@ -60,6 +60,13 @@ confirm:
   competitive_mapping: true
   # Marker tier (stage 2b). Built by scripts/build_marker_db.py --pack human.
   markers_dir: "${btf_db}/packs/human/markers"
+  # Soft-mask intervals from scripts/mask_pack_refs.py. Masked bases are excluded
+  # from the breadth denominator and reads lying entirely inside them are reported
+  # rather than counted as evidence. Two independent 2025-2026 reviews put reference
+  # curation ahead of assembly as a specificity lever (40-94% fewer false detections
+  # with 100% true-positive preservation), and Wright et al. traced a false positive
+  # to phage sequence inside a reference genome.
+  masked_dir: "${btf_db}/packs/human/refs/masked"
 
 # ---------------------------------------------------------------------------
 # Default confirmation thresholds (per-taxon overrides live in watchlist.tsv)

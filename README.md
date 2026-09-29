@@ -233,6 +233,71 @@ Coverage: 163 markers, 58 rule sets over 89 watchlist taxa. **Every
 regions, which presence markers cannot express, so it correctly caps at
 `supported` rather than producing an unsupportable call.
 
+## Reference masking (the specificity lever)
+
+Two independent 2025–2026 reviews reached the same conclusion: **curating and masking
+the reference database buys more specificity than anything available downstream,
+including assembly**, at almost no sensitivity cost — 40–94% fewer false detections
+with 100% true-positive preservation (*J Clin Microbiol* 2026).
+
+The concrete failure mode, from Wright et al. 2026: an *H. pylori* call had **zero**
+reads mapping to its reference once checked, traced to contaminating **phage sequence
+inside the reference genome**. An unmasked reference doesn't merely fail to help — it
+manufactures false positives that no downstream threshold can catch, because the
+reads genuinely do align.
+
+`scripts/mask_pack_refs.py` identifies four categories:
+
+| Source | Why |
+|---|---|
+| `lowcomplexity` | Homopolymers, tandem repeats, low-linguistic-complexity windows — the classic spurious-mapping substrate |
+| `vector` | NCBI UniVec_Core. Cloning-vector and adapter sequence left in assemblies is pure artifact |
+| `host` | The pack's own host genome. A host-derived region in a pathogen reference collects the host reads that survived depletion |
+| `crossgroup` | Regions also present near-identically in a **phylogenetically distant** reference in the same pack (the Conterminator insight). Same-group hits are deliberately *not* masked — shared sequence between close relatives is real biology, and resolving it is what competitive mapping is for |
+
+### Soft-mask, not hard-mask
+
+This is the central design decision. Masking records **BED intervals with a reason**;
+it does not overwrite sequence with Ns. Downstream, `coverage_stats.py --mask-bed`:
+
+- excludes masked bases from the breadth and occupancy **denominators**, so a genome
+  is judged on the portion we trust;
+- **excludes reads lying entirely inside masked intervals** from the read count,
+  because that is untrustworthy evidence;
+- but reports them as `reads_in_masked_regions`, so the situation is visible.
+
+Hard-masking would make the Wright case *invisible* — the reads would stop aligning
+and the taxon would quietly drop out with no record of why. Soft-masking makes it
+auditable, and auditable matters more than tidy here. Verified on a controlled BAM:
+
+```
+metric                          unmasked    masked   (140 bp of 1000 masked)
+unique_reads                           6         5
+reads_in_masked_regions                -         1
+reference_bp                        1000       860
+breadth                         0.500000  0.465116
+```
+
+A finding whose support is dominated by masked-region reads is capped at `supported`
+with an explicit caveat naming the cause.
+
+### A guard, because this step can destroy a reference
+
+If masking would exceed `--max-masked-fraction` (default 20%), the genome is written
+but flagged `OVER_MASKED` rather than applied silently. A reference that is 60% masked
+is not curated, it is misconfigured — most likely a genuinely mobile-element-rich
+genome being masked against something it legitimately resembles.
+
+### Honest expectation
+
+Most of this pack's references are RefSeq **reference-grade complete** assemblies
+(281 of 363), and those are already well curated — the first *Y. pestis* run found
+**0 bp** of cross-group contamination, which is the correct answer. The payoff
+concentrates in the 40 scaffold- and contig-level assemblies we had to relax to for
+several fungi and parasites. Don't expect the headline 40–94% figure on a
+reference-grade set; do expect it to matter for the ragged tail, which is exactly
+where an unnoticed false positive would come from.
+
 ## Comparing tools rather than arguing about them
 
 Which classifier is best for this job is an empirical question, so the harness

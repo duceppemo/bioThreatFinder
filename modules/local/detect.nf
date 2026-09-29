@@ -365,11 +365,13 @@ process COVERAGE_STATS {
 
     input:
     tuple val(meta), path(bam), path(bai), path(nreads)
+    path masked_dir
 
     output:
     tuple val(meta), path("${meta.id}.${meta.taxid}.coverage.tsv"), emit: stats
 
     script:
+    def mask_arg = masked_dir.name != 'NO_FILE' ? "--mask-bed ${masked_dir}" : ''
     """
     coverage_stats.py \\
         --bam ${bam} \\
@@ -381,6 +383,7 @@ process COVERAGE_STATS {
         --mapq-min ${params.mapq_min} \\
         --total-reads \$(cat ${nreads}) \\
         --assigned-reads ${meta.assigned_reads ?: 0} \\
+        ${mask_arg} \\
         --out ${meta.id}.${meta.taxid}.coverage.tsv
     """
 }
