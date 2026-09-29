@@ -680,8 +680,15 @@ notes:
                    help="pack name, e.g. human (must exist under --packs-dir)")
     p.add_argument("--packs-dir", type=Path, default=repo_root / "packs",
                    help="directory containing pack definitions (default: %(default)s)")
+    p.add_argument("--btf-db", type=Path, default=None,
+                   help="explicit base for project-owned artifacts, e.g. "
+                        "/media/8tb/bioThreatFinder. Preferred over --db-root, and "
+                        "checked against refs_dir in the pack's pack.yaml - a "
+                        "mismatch makes the pipeline report no_reference for every "
+                        "taxon, which reads as 'checked and clear'.")
     p.add_argument("--db-root", type=Path, default=DEFAULT_DB_ROOT,
-                   help="shared database root (default: %(default)s)")
+                   help="shared database root; retains the implicit "
+                        "/bioThreatFinder suffix (default: %(default)s)")
     p.add_argument("--taxdump", type=Path, default=DEFAULT_TAXDUMP,
                    help="unpacked NCBI taxdump, used to name neighbour taxids and to "
                         "expand subtrees for the FTP fallback (default: %(default)s)")
@@ -761,12 +768,77 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     pack_dir = args.packs_dir / args.pack
     watchlist_path = pack_dir / "watchlist.resolved.tsv"
-    refs_dir = args.db_root / "bioThreatFinder" / "packs" / args.pack / "refs"
+    # Project artifacts now live on NVMe under an explicit --btf-db base. --db-root
+    # is retained for back-compat and keeps its implicit /bioThreatFinder suffix.
+    # Getting this wrong is not a cosmetic error: refs built under the wrong base
+    # make the pipeline report no_reference for every watchlist taxon, which reads
+    # as "checked and clear" rather than "never built".
+    btf_base = args.btf_db if args.btf_db else (args.db_root / "bioThreatFinder")
+    refs_dir = btf_base / "packs" / args.pack / "refs"
     comp_dir = refs_dir / "competitive"
     manifest_path = refs_dir / "manifest.tsv"
-    cache_dir = args.db_root / "bioThreatFinder" / "cache"
+    cache_dir = btf_base / "cache"
 
-    LOG.info("pack=%s db_root=%s threads=%d", args.pack, args.db_root, args.threads)
+    LOG.info("pack=%s btf_db=%s threads=%d", args.pack, btf_base, args.threads)
+
+    # Cross-check where the PIPELINE will look, before hours of downloading.
+    #
+    # An earlier version of this check substituted the base we were given into
+    # pack.yaml's ${btf_db} template and compared - which is tautological and always
+    # passes. The invariant that actually matters is different: this script must
+    # write where the pipeline READS, and the pipeline's base is params.btf_db in
+    # nextflow.config. Getting it wrong makes every watchlist taxon come back
+    # no_reference, which an analyst reads as "checked and clear" rather than
+    # "never built".
+    pack_yaml = args.packs_dir / args.pack / "pack.yaml"
+    nf_config = args.packs_dir.parent / "nextflow.config"
+
+    refs_template = None
+    if pack_yaml.exists():
+        for line in pack_yaml.read_text().splitlines():
+            t = line.strip()
+            if t.startswith("refs_dir:"):
+                refs_template = t.split(":", 1)[1].strip().strip('"\'')
+                break
+
+    pipeline_base = None
+    if nf_config.exists():
+        for line in nf_config.read_text().splitlines():
+            t = line.strip()
+            if t.startswith("btf_db") and "=" in t:
+                val = t.split("=", 1)[1].split("//")[0].strip().strip('"\'')
+                if val and not val.startswith("$") and val != "null":
+                    pipeline_base = Path(val)
+                break
+
+    if refs_template is None:
+        LOG.warning("no refs_dir in %s; cannot verify the pipeline will look here",
+                    pack_yaml)
+    elif "${btf_db}" in refs_template:
+        if pipeline_base is None:
+            LOG.warning("could not read params.btf_db from %s; cannot verify that the "
+                        "pipeline will look in %s", nf_config, refs_dir)
+        elif pipeline_base != btf_base:
+            LOG.error("BASE MISMATCH - refusing to download")
+            LOG.error("  this script would write to : %s", refs_dir)
+            LOG.error("  the pipeline reads from    : %s",
+                      pipeline_base / "packs" / args.pack / "refs")
+            LOG.error("pack.yaml resolves refs_dir from params.btf_db in "
+                      "nextflow.config, so genomes written here would never be found. "
+                      "Every watchlist taxon would report no_reference, which reads "
+                      "as 'checked and clear' rather than 'never built'.")
+            LOG.error("Pass --btf-db %s, or change params.btf_db in nextflow.config.",
+                      pipeline_base)
+            return 2
+        else:
+            LOG.info("base agrees with params.btf_db in nextflow.config: %s", btf_base)
+    else:
+        if Path(refs_template) != refs_dir:
+            LOG.error("BASE MISMATCH - refusing to download")
+            LOG.error("  this script would write to : %s", refs_dir)
+            LOG.error("  pack.yaml refs_dir is      : %s", refs_template)
+            return 2
+        LOG.info("refs_dir matches the absolute path in pack.yaml: %s", refs_dir)
     LOG.info("refs dir:  %s", refs_dir)
     LOG.info("manifest:  %s", manifest_path)
 
@@ -857,7 +929,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         LOG.info("[dry-run] nothing downloaded")
         return 0
 
-    check_free_space(args.db_root, args.min_free_gib)
+    check_free_space(btf_base.parent if btf_base.parent.exists() else args.db_root,
+                     args.min_free_gib)
     refs_dir.mkdir(parents=True, exist_ok=True)
     comp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1083,7 +1156,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                  _human(sum(f.stat().st_size for f in refs_dir.rglob("*") if f.is_file())))
     except OSError:
         pass
-    LOG.info("free space remaining: %s", _human(shutil.disk_usage(args.db_root).free))
+    LOG.info("free space remaining: %s", _human(shutil.disk_usage(btf_base).free))
     LOG.info("===============================================================")
 
     # Non-zero if any target cannot be confirmed at all: that is a pack-level
