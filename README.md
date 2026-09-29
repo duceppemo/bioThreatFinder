@@ -10,6 +10,21 @@ across human, animal and plant health.
 
 ---
 
+## Documentation
+
+| Document | What it is for |
+|---|---|
+| [`docs/decisions.md`](docs/decisions.md) | **Why each tool was chosen**, the evidence behind it, and what would reverse it. Evidence is tagged independent / tool-paper / read-from-source / measured-here / reasoned, so judgement is distinguishable from measurement. Includes two decisions that were reversed. |
+| [`docs/verification.md`](docs/verification.md) | What has actually been checked, how to re-run it, and an explicit list of what has **not** been checked. |
+| [`docs/benchmarking.md`](docs/benchmarking.md) | Benchmark design, the tool bake-off, and what simulation cannot tell you. |
+| [`docs/validation.md`](docs/validation.md) | The route to a defensible result: normative standards, reference materials, EQA, regulatory position. |
+| [`docs/roadmap.md`](docs/roadmap.md) | What is not built, ranked by published effect size. |
+| [`docs/STATUS.md`](docs/STATUS.md) | Session handoff: what is running, environment traps, unresolved questions. |
+
+```bash
+python3 tests/test_pipeline.py     # 50 fixture-driven checks, ~10 s, no databases
+```
+
 ## Why two stages
 
 Stage-1 metagenomic classifiers (Kraken2, sylph, Centrifuge) are built for
@@ -60,17 +75,18 @@ gate decided it. Nothing is a bare verdict.
 | `control_background` | What the control itself contains (QC, not a finding) |
 | `screened_only` | Stage-1 lead that failed stage-2 — the expected fate of classifier noise |
 
-## Stage 1: four classifier arms
+## Stage 1: classifier arms
 
 One classifier is not good enough for an "is organism X present" question, and the
-arms fail in different directions:
+arms fail in different directions. **Three run by default; KrakenUniq is a fourth,
+opt-in.**
 
-| Arm | What it contributes |
-|---|---|
-| **KrakenUniq** *(primary)* | **Distinct k-mer cardinality** per taxon (HyperLogLog), plus duplication ratio and estimated coverage |
-| **Metabuli** | Joint DNA + amino-acid k-mers — sees divergent and novel agents |
-| Kraken2 + Bracken | Abundance estimation, continuity with existing runs |
-| sylph | ANI/containment; very low FP for bacteria and fungi |
+| Arm | Default | What it contributes |
+|---|---|---|
+| **Kraken2 + Bracken** *(primary)* | on | Distinct **minimizer** count and duplicity via `--report-minimizer-data`, plus Bracken abundance |
+| **Metabuli** | on | Joint DNA + amino-acid k-mers — sees divergent and novel agents |
+| sylph | on | ANI/containment; very low FP for bacteria and fungi |
+| KrakenUniq | **off** (`--skip_krakenuniq` defaults true) | Distinct **k-mer** cardinality. A second opinion, not a dependency — see below |
 
 **Kraken2 is primary; KrakenUniq is opt-in.** An earlier version of this design made
 KrakenUniq primary on the grounds that "Kraken2 only counts reads." That was wrong.
@@ -93,8 +109,10 @@ call; and upstream issue #445 (column 5 exceeding `kraken2-inspect`'s count) is
 still open, so treat column 5 as a monotone evidence score to calibrate empirically,
 not as a literal breadth measurement.
 
-Demonstrated on fixtures — comparable read counts, opposite k-mer evidence
-(thresholds shown are pre-calibration illustrations):
+Demonstrated on fixtures — comparable read counts, opposite k-mer evidence. The
+current flag threshold is `min_distinct_kmers = 2000`, taken from Oskolkov's measured
+Kraken2 optimum rather than reasoned; it still needs recalibrating on your own panel
+and depth, which is what the benchmark is for:
 
 | Taxon | Reads | Distinct k-mers | Dup | Arms | Outcome |
 |---|---|---|---|---|---|
@@ -288,15 +306,33 @@ but flagged `OVER_MASKED` rather than applied silently. A reference that is 60% 
 is not curated, it is misconfigured — most likely a genuinely mobile-element-rich
 genome being masked against something it legitimately resembles.
 
-### Honest expectation
+### What it actually found
 
-Most of this pack's references are RefSeq **reference-grade complete** assemblies
-(281 of 363), and those are already well curated — the first *Y. pestis* run found
-**0 bp** of cross-group contamination, which is the correct answer. The payoff
-concentrates in the 40 scaffold- and contig-level assemblies we had to relax to for
-several fungi and parasites. Don't expect the headline 40–94% figure on a
-reference-grade set; do expect it to matter for the ragged tail, which is exactly
-where an unnoticed false positive would come from.
+Measured over the built human pack — 359 genomes, 5.3 Gbp:
+
+| Source | Masked | Spread |
+|---|---|---|
+| low complexity | 19,864,087 bp | the bulk, as expected |
+| **vector** | **93,882 bp** | **44 contigs** |
+| crossgroup | 79,730 bp | 49 contigs (bacteria 6, fungus 12, parasite 31, virus 0) |
+| host | 2,737 bp | 5 contigs |
+| **total** | **20,028,976 bp (0.349%)** | no genome tripped `OVER_MASKED` |
+
+Read that honestly. 0.349% is nowhere near the headline 40–94% false-detection
+reduction from the literature, and it should not be: 281 of 363 references here are
+RefSeq **reference-grade complete** assemblies, which are already well curated — the
+*Y. pestis* cross-group run correctly found **0 bp**.
+
+The part that matters is the 93.9 kb of cloning-vector sequence sitting in **44
+reference contigs**, and 79.7 kb of cross-kingdom sequence in 49 more. That is exactly
+the mechanism behind the Wright *H. pylori* false positive, and it is now excluded from
+every breadth denominator with the reads reported rather than silently counted. Expect
+the payoff to concentrate in the 40 scaffold- and contig-level assemblies we had to
+relax to for several fungi and parasites — the ragged tail is where an unnoticed false
+positive would come from.
+
+Virus cross-group masking found 0 bp, which is the right answer: human viruses should
+not share 95%-identity sequence with bacteria, fungi or parasites.
 
 ## Comparing tools rather than arguing about them
 
@@ -390,17 +426,33 @@ dangerous:
 ## Quick start
 
 ```bash
-# 1. Resolve the watchlist (fast, and validates your taxonomy)
+# 0. Tool environments. kraken2 MUST be in its own env - see Requirements.
+mamba create -n btf-refs    -c conda-forge -c bioconda \
+      ncbi-datasets-cli minimap2 seqkit samtools mmseqs2 hmmer mafft
+mamba create -n btf-kraken2 -c conda-forge -c bioconda kraken2=2.17.2 bracken
+
+# 1. Pin a taxonomy snapshot, then resolve the watchlist against it.
+#    resolve_watchlist.py refuses a snapshot older than 90 days with
+#    --require-fresh-taxdump, because a stale one silently loses clade coverage.
+TAX=/media/8tb/bioThreatFinder/taxdump/$(date -u +%Y-%m-%d)
+mkdir -p "$TAX" && curl -sSo - \
+  https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/new_taxdump/new_taxdump.tar.gz \
+  | tar xz -C "$TAX"
 python3 scripts/resolve_watchlist.py \
     --watchlist packs/human/watchlist.tsv \
-    --taxdump /media/36tb/db/taxdump \
+    --taxdump "$TAX" --require-fresh-taxdump \
     --out packs/human/watchlist.resolved.tsv \
     --descendants-out packs/human/watchlist.descendants.tsv
 
-# 2. Build databases (hours; see scripts/ for space requirements)
-bash   scripts/fetch_host_genome.sh human
-python3 scripts/build_pack_refs.py --pack human --threads 32
-bash   scripts/build_kraken2_db.sh --threads 48
+# 2. Build databases. --btf-db / --taxdump must match nextflow.config, and the
+#    scripts refuse to run if they do not.
+conda activate btf-refs
+bash    scripts/fetch_host_genome.sh human --db-root /media/8tb --threads 24
+python3 scripts/build_pack_refs.py  --pack human --btf-db /media/8tb/bioThreatFinder --threads 24
+python3 scripts/mask_pack_refs.py   --pack human --btf-db /media/8tb/bioThreatFinder --threads 24
+python3 scripts/build_marker_db.py  --pack human --db-root /media/8tb --taxdump "$TAX" --threads 24
+conda activate btf-kraken2
+bash    scripts/build_kraken2_db.sh --db-root /media/8tb --taxdump "$TAX" --threads 40
 
 # 3. Run
 nextflow run . -profile conda,workstation \
@@ -470,8 +522,19 @@ Design targets, set deliberately rather than by what happened to be installed:
 
 ## Requirements
 
-- **Nextflow >= 23.10** — the version on this box is 21.10.4 and needs upgrading
-- Containers (Apptainer/Singularity on HPC); conda specs exist for development
+- **Nextflow >= 23.10.** Installed here: **26.04.6**, which enforces strict
+  config/DSL syntax — `check_max()` helpers, top-level `def` in config and top-level
+  `workflow.onComplete` are all rejected. Any pre-24 pipeline on the same machine will
+  stop parsing.
+- **Kraken2 >= 2.1.0, and install it in its OWN conda environment.** `--report-minimizer-data`
+  arrived in 2.1.0 and is what the whole stage-1 design rests on. Installing kraken2
+  alongside mmseqs2/hmmer/mafft made the solver resolve **2.0.8-beta (2019)**, which
+  lacks the flag — producing an index that works and carries none of the evidence the
+  pipeline scores on. `build_kraken2_db.sh` now refuses below 2.1.0 and verifies the flag
+  is actually advertised.
+- Containers (Apptainer/Singularity on HPC); conda specs exist for development. **The
+  conda pins in `modules/local/*.nf` have not been run yet** — several are major-version
+  jumps and should be validated by the benchmark, not assumed drop-in.
 - ~200 GB RAM for a PlusPF-scale Kraken2 index; MMseqs2 sensitivity settings
   dominate CPU time
 - Analysis scripts in `bin/` are **stdlib-only Python 3** plus `samtools`, so
@@ -479,10 +542,13 @@ Design targets, set deliberately rather than by what happened to be installed:
 
 ## Benchmarking
 
-25 scenarios, 23 machine-checkable expectations, weighted deliberately towards
+30 scenarios, 28 machine-checkable expectations, weighted deliberately towards
 failure modes rather than easy positives — near neighbours with the target
 genuinely absent, target chromosomes stripped of their virulence plasmids,
-vaccine strains, index hopping, and a 99.9%-host low-biomass case.
+vaccine strains, index hopping, a 99.9%-host low-biomass case, and a plumbing positive
+control whose only job is to fail loudly on misconfiguration. Limit-of-detection design
+follows NY State DOH CLEP (March 2023) — all seven of its pathogen categories, decade
+dilutions with one to extinction, and four-agent co-infection. See `docs/validation.md`.
 
 `no_reference` observations are excluded from every rate, so adding watchlist taxa
 without building their references cannot fake an improvement in specificity.
@@ -494,28 +560,47 @@ homology-based detection cannot see a wholly novel agent.
 
 ## Status
 
-v0.1.0 — scaffold complete and internally validated:
+Scaffold complete, databases largely built, **nothing measured**.
 
-- Watchlist resolution tested against the live taxdump: 89/89 resolved
-- Evidence tiering validated against synthetic fixtures covering every decision
-  path (true positive, conserved-repeat artifact, neighbour attribution, control
-  suppression, database gap, weak lead)
-- Marker rule engine: three-valued logic self-test passes, including
-  present/absent/untested separation, operator precedence, parser rejection of
-  malformed input, and no code execution
-- Marker gating validated end to end: 6/6 synthetic cases, including anthrax held
-  back for missing plasmids and BCG identified as vaccine strain
-- All 58 rule sets compile, reference only catalogue markers, and name only real
-  watchlist taxa
-- Nextflow config and workflow graph parse
+`tests/test_pipeline.py` holds 50 fixture-driven checks covering every decision path in
+the tiering, marker-gating, confirmation-gate, coverage-metric and screen-parsing logic.
+It caught a real bug on its first run: a broken `elif` chain meant a BCG vaccine strain
+was being reported as `supported` — a possible TB detection — instead of `vaccine_strain`.
+See `docs/verification.md`, which also lists what is **not** verified.
 
-Not yet run on real sequencing data, and no databases built yet.
+**Databases built** (on NVMe at `/media/8tb/bioThreatFinder`):
+
+| Artifact | State |
+|---|---|
+| Taxonomy snapshot | pinned + md5-verified, 3,016,439 nodes, `PROVENANCE.txt` |
+| Reference genomes | 89/89 targets, 359 genomes, 43 GB |
+| Competitive bundles | 89 + 178 minimap2 indexes, all verified free of duplicated sequence |
+| Reference masking | complete — 20.0 Mbp masked across 359 genomes |
+| Host genome | T2T-CHM13v2.0 + both presets, 17 GB |
+| Marker DB | 132 built / 13 partial / 9 motif_todo / 5 failed / 4 curation_required |
+| Kraken2 PlusPF | building |
+| KrakenUniq, Metabuli | not built (KrakenUniq opt-in by design; Metabuli pending the bake-off) |
+
+**What has NOT happened:** no simulated datasets generated, no pipeline run end to end,
+no thresholds measured. Every number in `packs/*/pack.yaml` is a literature default or a
+reasoned guess.
 
 ### Known gaps
 
-- **Nothing is measured YET.** The harness exists and is self-tested, but no
-  datasets have been generated and no pipeline run has happened, so every
-  threshold is still a reasoned guess. See `docs/benchmarking.md`.
+- **Nothing is measured YET.** The harness exists and is self-tested, but no datasets
+  have been generated and no pipeline run has happened, so every threshold is a
+  literature default or a reasoned guess. See `docs/benchmarking.md`.
+- ***F. tularensis* vs *F. novicida* cannot currently be discriminated.** Both resolved
+  to the same assembly (`GCF_000833355.1`), so the duplicate was dropped from the
+  competitive bundle. Needs a curated distinct *F. novicida* assembly. This is the
+  organism pair where that discrimination matters most.
+- Four near-neighbour genomes do not exist anywhere (*Giardia ardeae*, *Entamoeba coli*,
+  Sandfly fever Naples phlebovirus, rat hepatitis E virus). Recorded in the manifest with
+  empty paths so the weakened discrimination is visible, not silent.
+- Marker tier is partially live: 5 markers failed retrieval, 13 are missing a tier
+  (mostly `hmm`, where fewer than 3 sequences were available for a profile), 9 are motifs
+  needing manual specification, 4 are flagged `curation_required`. Any rule depending on
+  those evaluates UNKNOWN and holds findings at `supported` by design.
 - Calling is fixed-threshold; the intended design is an empirical null built from
   a background panel, giving calibrated FDR instead of guessed cutoffs
 - No assembly tier. A contig spanning pPCP1 is far stronger evidence than 50
