@@ -52,7 +52,7 @@ Classifiers assign many reads to internal nodes - a read consistent with several
 species in a genus is placed at the genus. Matching only the species taxid misses
 most of the signal, which is the difference between a screen that works and one
 that quietly reports nothing. Every watchlist taxon is therefore expanded to all
-its descendants (precomputed by scripts/resolve_watchlist.py), and ancestor-level
+its descendants (precomputed by bin/resolve_watchlist.py), and ancestor-level
 assignment is recorded separately as `ancestor_only` rather than dropped: a
 genus-level pile-up with no species-level reads is exactly what a divergent or
 under-represented strain produces.

@@ -528,7 +528,7 @@ def test_coverage_metrics(tmp: Path) -> None:
 
 def test_screen(tmp: Path) -> None:
     desc = tmp / "desc.tsv"
-    p = run([sys.executable, SCRIPTS / "resolve_watchlist.py",
+    p = run([sys.executable, BIN / "resolve_watchlist.py",
              "--watchlist", PACK / "watchlist.tsv",
              "--taxdump", os.environ.get("BTF_TAXDUMP", "/media/8tb/bioThreatFinder/taxdump/2026-09-29"),
              "--out", tmp / "wl.tsv", "--descendants-out", desc])
@@ -754,6 +754,40 @@ def test_evaluator(tmp: Path) -> None:
            sids == {"a", "b"}, f"scenario ids in output: {sorted(sids)}")
 
 
+def test_workflow_scripts(tmp: Path) -> None:
+    """Every script the WORKFLOW invokes must be in bin/ and executable.
+
+    Nextflow puts only `bin/` on the task PATH. `resolve_watchlist.py` lived in
+    `scripts/`, so RESOLVE_WATCHLIST died with exit 127 (command not found) on the very
+    first end-to-end run - which means the pipeline had never been runnable at all. It
+    failed loudly, which is the good case, but it cost a full launch to discover and
+    nothing in the suite would have caught it.
+    """
+    import re
+    nf_text = "\n".join(
+        f.read_text(encoding="utf-8")
+        for f in [REPO / "main.nf", *sorted((REPO / "modules").rglob("*.nf"))])
+
+    # Script invocations: a .py at the start of a command line inside a script block.
+    invoked = sorted(set(re.findall(r"^\s{4,}([a-z_][a-z0-9_]*\.py)\s", nf_text,
+                                    re.MULTILINE)))
+    record("workflow:at least one script invocation was found to check",
+           len(invoked) >= 5, f"found {invoked}")
+
+    missing, not_exec = [], []
+    for name in invoked:
+        target = BIN / name
+        if not target.is_file():
+            missing.append(name)
+        elif not os.access(target, os.X_OK):
+            not_exec.append(name)
+    record("workflow:every invoked script is in bin/ (Nextflow's task PATH)",
+           not missing,
+           f"not in bin/: {missing} - these would fail with exit 127")
+    record("workflow:every invoked script is executable",
+           not not_exec, f"not executable: {not_exec}")
+
+
 CASES = {
     "selftests": test_selftests,
     "tiering": test_tiering,
@@ -763,6 +797,7 @@ CASES = {
     "screen": test_screen,
     "pack": test_pack_integrity,
     "eval": test_evaluator,
+    "workflow": test_workflow_scripts,
 }
 
 

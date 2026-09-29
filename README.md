@@ -383,7 +383,7 @@ nodes constantly. A hardcoded taxid rots silently, and a rotted taxid means an
 organism stops being screened for with **no error** — the worst possible failure
 mode here.
 
-So watchlists carry names, and `scripts/resolve_watchlist.py` reconciles them
+So watchlists carry names, and `bin/resolve_watchlist.py` reconciles them
 against a pinned local taxdump at build time. Anything that does not resolve to
 exactly one node is a **hard error** with candidates printed. The pipeline
 refuses to run on an unresolved watchlist.
@@ -443,7 +443,7 @@ TAX=/media/8tb/bioThreatFinder/taxdump/$(date -u +%Y-%m-%d)
 mkdir -p "$TAX" && curl -sSo - \
   https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/new_taxdump/new_taxdump.tar.gz \
   | tar xz -C "$TAX"
-python3 scripts/resolve_watchlist.py \
+python3 bin/resolve_watchlist.py \
     --watchlist packs/human/watchlist.tsv \
     --taxdump "$TAX" --require-fresh-taxdump \
     --out packs/human/watchlist.resolved.tsv \

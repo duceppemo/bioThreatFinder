@@ -288,7 +288,7 @@ def read_resolved_watchlist(path: Path) -> List[dict]:
     if not path.is_file():
         raise SystemExit(
             f"ERROR: resolved watchlist not found: {path}\n"
-            f"       Run scripts/resolve_watchlist.py first - this script deliberately "
+            f"       Run bin/resolve_watchlist.py first - this script deliberately "
             f"does not resolve names itself."
         )
     with path.open(encoding="utf-8") as fh:

@@ -147,7 +147,7 @@ WATCHLIST="${REPO_DIR}/packs/${PACK}/watchlist.resolved.tsv"
 [[ -s "$SAMPLESHEET" ]] || die "no samplesheet at ${SAMPLESHEET}. Generate the batch first with scripts/simulate_benchmark.py --batch ${BATCH}"
 [[ -s "$MANIFEST" ]]    || die "no manifest at ${MANIFEST} - the evaluator needs it for ground truth"
 [[ -s "$SCENARIOS" ]]   || die "no scenario file at ${SCENARIOS}"
-[[ -s "$WATCHLIST" ]]   || die "no resolved watchlist at ${WATCHLIST}. Run scripts/resolve_watchlist.py first."
+[[ -s "$WATCHLIST" ]]   || die "no resolved watchlist at ${WATCHLIST}. Run bin/resolve_watchlist.py first."
 [[ -x "$NEXTFLOW" ]] || command -v "$NEXTFLOW" >/dev/null 2>&1 || die "nextflow not found (set \$NEXTFLOW)"
 
 selected=()
