@@ -2097,6 +2097,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     rows = read_marker_catalogue(catalogue_path)
     LOG.info("catalogue: %d marker row(s)", len(rows))
 
+    # MERGE, never truncate, when this is a subset run.
+    #
+    # write_manifest() rewrites the whole file. With --only-marker that replaced a
+    # 163-row manifest with the 19 rows just processed, destroying the record of
+    # everything built earlier - and because marker_evidence.py treats the manifest as
+    # AUTHORITATIVE for tested-vs-untested, every absent row silently becomes UNKNOWN.
+    # A subset rebuild would therefore have taken the entire marker tier offline while
+    # the sequence files sat intact on disk.
+    existing_manifest: dict = {}
+    if args.only_marker or args.only_taxon:
+        mpath = markers_dir / "markers.manifest.tsv"
+        if mpath.exists():
+            try:
+                with mpath.open(encoding="utf-8") as fh:
+                    for r in csv.DictReader(fh, delimiter="\t"):
+                        if r.get("marker_id"):
+                            existing_manifest[r["marker_id"]] = r
+                LOG.info("subset run: carrying forward %d existing manifest row(s)",
+                         len(existing_manifest))
+            except OSError as exc:
+                LOG.warning("could not read %s to merge (%s); a subset run would "
+                            "otherwise truncate it, so refusing to continue", mpath, exc)
+                return 2
+
     selected = rows
     if args.only_marker:
         keep = set(args.only_marker)
@@ -2180,7 +2204,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         LOG.info("MSA tool for hmmbuild: %s (%s)", ctx.aligner_name, ctx.aligner)
 
     prior = load_manifest(manifest_path)
-    manifest_rows: List[dict] = []
+    # Seed with the carried-forward rows so a subset run updates the manifest instead
+    # of replacing it. Rows for markers processed in THIS run are overwritten below.
+    manifest_rows: List[dict] = [existing_manifest[k] for k in existing_manifest
+                                 if k not in {r["marker_id"] for r in selected}]
+    if manifest_rows:
+        LOG.info("manifest seeded with %d row(s) from the previous build",
+                 len(manifest_rows))
 
     # ---- per-marker loop ------------------------------------------------
     for i, row in enumerate(selected, start=1):

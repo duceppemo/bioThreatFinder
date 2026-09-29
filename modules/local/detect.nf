@@ -34,7 +34,7 @@ process RESOLVE_WATCHLIST {
 process KRAKEN2 {
     tag   "${meta.id}"
     label 'process_hugemem'
-    conda "bioconda::kraken2=2.1.3"
+    conda "bioconda::kraken2=2.17.2"
 
     input:
     tuple val(meta), path(reads)
@@ -69,7 +69,7 @@ process KRAKEN2 {
 process BRACKEN {
     tag   "${meta.id}"
     label 'process_low'
-    conda "bioconda::bracken=2.9"
+    conda "bioconda::bracken=3.1p1"
 
     // Bracken fails outright when a report has no reads at the requested level.
     // That is a legitimate outcome for a clean negative control, so it must not
@@ -108,7 +108,7 @@ process BRACKEN {
 process SYLPH_PROFILE {
     tag   "${meta.id}"
     label 'process_high'
-    conda "bioconda::sylph=0.6.1"
+    conda "bioconda::sylph=1.0.0"
 
     errorStrategy 'ignore'
 
@@ -223,7 +223,7 @@ process KRAKENUNIQ {
 process METABULI {
     tag   "${meta.id}"
     label 'process_metabuli'
-    conda "bioconda::metabuli=1.0.6"
+    conda "bioconda::metabuli=1.2.0"
 
     // A Metabuli failure must not sink the run: KrakenUniq remains primary and the
     // screen parser records which classifiers actually produced output, so a
@@ -318,7 +318,7 @@ process PARSE_SCREEN {
 process MINIMAP2_COMPETITIVE {
     tag   "${meta.id}:${meta.taxid}"
     label 'process_medium'
-    conda "bioconda::minimap2=2.28 bioconda::samtools=1.20"
+    conda "bioconda::minimap2=2.31 bioconda::samtools=1.24"
 
     input:
     tuple val(meta), path(reads), path(ref)
@@ -360,7 +360,7 @@ process MINIMAP2_COMPETITIVE {
 process COVERAGE_STATS {
     tag   "${meta.id}:${meta.taxid}"
     label 'process_low'
-    conda "bioconda::samtools=1.20 conda-forge::python=3.11"
+    conda "bioconda::samtools=1.24 conda-forge::python=3.11"
     publishDir "${params.outdir}/confirm", mode: params.publish_dir_mode
 
     input:
@@ -475,7 +475,7 @@ process MAKE_REPORT {
 process MARKER_ALIGN_NT {
     tag   "${meta.id}"
     label 'process_medium'
-    conda "bioconda::minimap2=2.28 bioconda::samtools=1.20"
+    conda "bioconda::minimap2=2.31 bioconda::samtools=1.24"
 
     input:
     tuple val(meta), path(reads)
@@ -499,7 +499,7 @@ process MARKER_ALIGN_NT {
 process MARKER_SEARCH_AA {
     tag   "${meta.id}"
     label 'process_high'
-    conda "bioconda::mmseqs2=15.6f452 bioconda::seqkit=2.8.2"
+    conda "bioconda::mmseqs2=18.8cc5c bioconda::seqkit=2.14.0"
 
     input:
     tuple val(meta), path(reads)
@@ -542,7 +542,7 @@ process MARKER_SEARCH_AA {
 process MARKER_SEARCH_HMM {
     tag   "${meta.id}"
     label 'process_medium'
-    conda "bioconda::hmmer=3.4 bioconda::seqkit=2.8.2"
+    conda "bioconda::hmmer=3.4 bioconda::seqkit=2.14.0"
 
     // An empty hit set is a legitimate outcome, not a failure.
     errorStrategy 'ignore'
@@ -574,7 +574,7 @@ process MARKER_SEARCH_HMM {
 process MARKER_EVIDENCE {
     tag   "${meta.id}"
     label 'process_low'
-    conda "bioconda::samtools=1.20 conda-forge::python=3.11"
+    conda "bioconda::samtools=1.24 conda-forge::python=3.11"
     publishDir "${params.outdir}/markers", mode: params.publish_dir_mode
 
     input:
