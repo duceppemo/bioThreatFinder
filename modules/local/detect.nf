@@ -295,26 +295,21 @@ process PARSE_SCREEN {
     conda "conda-forge::python=3.11"
     publishDir "${params.outdir}/screen", mode: params.publish_dir_mode
 
-    // EACH ARM STAGES INTO ITS OWN DIRECTORY.
+    // AN ABSENT ARM IS AN EMPTY LIST, SO NOTHING IS STAGED FOR IT.
     //
-    // fillMissing() pads every absent arm with the SAME assets/NO_FILE placeholder, and
-    // Nextflow stages inputs by basename - so with two or more arms skipped the task got
-    // several inputs called NO_FILE and died with "input file name collision". Running
-    // with --skip_kraken2 --skip_metabuli (krakenuniq off by default) makes four of
-    // these NO_FILE at once. It stayed latent under the default configuration, where
-    // only krakenuniq is absent on Illumina, which is exactly why no review caught it:
-    // the padding mechanism that exists to stop a sample being silently dropped broke
-    // the moment more than one arm was missing.
+    // fillMissing() used to pad every absent arm with one shared assets/NO_FILE file.
+    // Nextflow stages inputs by basename, so a task receiving two or more of them died
+    // with "input file name collision" - which is what happened here the moment two
+    // stage-1 arms were skipped (--skip_kraken2 --skip_metabuli, with krakenuniq off by
+    // default, makes four of these absent at once). It stayed latent under the default
+    // configuration, where only krakenuniq is missing on Illumina.
     //
-    // stageAs also protects against two REAL reports sharing a basename, which the
-    // per-arm filenames do not currently guarantee.
+    // Passing `[]` removes the cause rather than working around it: no file is staged,
+    // so there is no basename that can collide, and the script tests truthiness instead
+    // of comparing a filename against a magic string.
     input:
-    tuple val(meta),
-          path(ku_report, stageAs: 'arm_krakenuniq/*'),
-          path(k2_report, stageAs: 'arm_kraken2/*'),
-          path(bracken,   stageAs: 'arm_bracken/*'),
-          path(metabuli,  stageAs: 'arm_metabuli/*'),
-          path(sylph,     stageAs: 'arm_sylph/*')
+    tuple val(meta), path(ku_report), path(k2_report), path(bracken),
+          path(metabuli), path(sylph)
     path watchlist
     path descendants
 
@@ -324,11 +319,11 @@ process PARSE_SCREEN {
     path "${meta.id}.screen.log"                      , emit: log
 
     script:
-    def ku_arg      = ku_report.name != 'NO_FILE' ? "--krakenuniq-report ${ku_report}" : ''
-    def k2_arg      = k2_report.name != 'NO_FILE' ? "--kraken2-report ${k2_report}"    : ''
-    def bracken_arg = bracken.name   != 'NO_FILE' ? "--bracken-report ${bracken}"      : ''
-    def mb_arg      = metabuli.name  != 'NO_FILE' ? "--metabuli-report ${metabuli}"     : ''
-    def sylph_arg   = sylph.name     != 'NO_FILE' ? "--sylph-profile ${sylph}"          : ''
+    def ku_arg      = ku_report ? "--krakenuniq-report ${ku_report}" : ''
+    def k2_arg      = k2_report ? "--kraken2-report ${k2_report}"    : ''
+    def bracken_arg = bracken   ? "--bracken-report ${bracken}"      : ''
+    def mb_arg      = metabuli  ? "--metabuli-report ${metabuli}"    : ''
+    def sylph_arg   = sylph     ? "--sylph-profile ${sylph}"         : ''
     """
     parse_screen.py \\
         ${ku_arg} \\
@@ -407,7 +402,7 @@ process COVERAGE_STATS {
     tuple val(meta), path("${meta.id}.${meta.taxid}.coverage.tsv"), emit: stats
 
     script:
-    def mask_arg = masked_dir.name != 'NO_FILE' ? "--mask-bed ${masked_dir}" : ''
+    def mask_arg = masked_dir ? "--mask-bed ${masked_dir}" : ''
     """
     coverage_stats.py \\
         --bam ${bam} \\
@@ -430,17 +425,16 @@ process SCORE_EVIDENCE {
     conda "conda-forge::python=3.11"
     publishDir "${params.outdir}/score_evidence", mode: params.publish_dir_mode
 
-    // Same collision hazard as PARSE_SCREEN: missing_refs and marker_rules are both
-    // NO_FILE when there are no database gaps AND marker gating is off, which would
-    // stage two files called NO_FILE into one directory.
+    // missing_refs and marker_rules are both absent when there are no database gaps AND
+    // marker gating is off. As empty lists they stage nothing, so they cannot collide.
     input:
     path coverage
     path candidates
-    path missing_refs, stageAs: 'missing_refs/*'
+    path missing_refs
     path watchlist
     path pack_yaml
     path marker_states
-    path marker_rules, stageAs: 'marker_rules/*' 
+    path marker_rules
 
     output:
     path "findings.tsv", emit: findings
@@ -449,9 +443,9 @@ process SCORE_EVIDENCE {
     script:
     def cov_arg  = coverage   ? "--coverage ${coverage.join(' ')}"     : ''
     def cand_arg = candidates ? "--candidates ${candidates.join(' ')}" : ''
-    def miss_arg = missing_refs.name != 'NO_FILE' ? "--missing-refs ${missing_refs}" : ''
+    def miss_arg = missing_refs ? "--missing-refs ${missing_refs}" : ''
     def mk_arg   = marker_states ? "--marker-evidence ${marker_states.join(' ')}" : ''
-    def mr_arg   = marker_rules.name != 'NO_FILE' ? "--marker-rules ${marker_rules}" : ''
+    def mr_arg   = marker_rules ? "--marker-rules ${marker_rules}" : ''
     // pack.yaml is the source of truth for thresholds; these params exist so a
     // profile can relax a gate without editing the pack. They were DECLARED in
     // nextflow.config and passed to nothing, so `-profile test` asserted relaxed
@@ -652,14 +646,12 @@ process MARKER_EVIDENCE {
     conda "bioconda::samtools=1.22 conda-forge::python=3.11"
     publishDir "${params.outdir}/markers", mode: params.publish_dir_mode
 
-    // aa_hits and hmm_hits are both NO_FILE when the protein and HMM tiers are skipped
-    // or their (errorStrategy 'ignore') processes failed - two inputs, one basename.
+    // nt_bam, aa_hits and hmm_hits are all optional - the protein and HMM tiers can be
+    // skipped, and their errorStrategy 'ignore' processes can fail. As empty lists they
+    // stage nothing and cannot collide. nt_bai must accompany nt_bam: samtools needs the
+    // index beside the BAM, which plain staging gives for free.
     input:
-    tuple val(meta),
-          path(nt_bam,   stageAs: 'tier_nt/*'),
-          path(nt_bai,   stageAs: 'tier_nt/*'),
-          path(aa_hits,  stageAs: 'tier_aa/*'),
-          path(hmm_hits, stageAs: 'tier_hmm/*')
+    tuple val(meta), path(nt_bam), path(nt_bai), path(aa_hits), path(hmm_hits)
     path markers_catalogue
     path markers_dir
 
@@ -668,9 +660,9 @@ process MARKER_EVIDENCE {
     path "${meta.id}.marker.log"                         , emit: log
 
     script:
-    def nt_arg  = nt_bam.name   != 'NO_FILE' ? "--nt-bam ${nt_bam}"     : ''
-    def aa_arg  = aa_hits.name  != 'NO_FILE' ? "--aa-hits ${aa_hits} --aa-fasta ${markers_dir}/markers.aa.faa" : ''
-    def hmm_arg = hmm_hits.name != 'NO_FILE' ? "--hmm-hits ${hmm_hits}" : ''
+    def nt_arg  = nt_bam   ? "--nt-bam ${nt_bam}" : ''
+    def aa_arg  = aa_hits  ? "--aa-hits ${aa_hits} --aa-fasta ${markers_dir}/markers.aa.faa" : ''
+    def hmm_arg = hmm_hits ? "--hmm-hits ${hmm_hits}" : ''
     """
     marker_evidence.py \\
         --markers ${markers_catalogue} \\

@@ -343,7 +343,15 @@ workflow {
     //   krakenuniq  HyperLogLog cardinality      -> OPT-IN second opinion
     // Any arm raises a candidate; consensus is recorded, not required. Requiring
     // consensus would discard the sensitivity that running four arms buys.
-    def no_file = file("${projectDir}/assets/NO_FILE")
+    // AN ABSENT OPTIONAL PATH IS AN EMPTY LIST, NOT A PLACEHOLDER FILE.
+    //
+    // This used to be `def no_file = file("assets/NO_FILE")`, and every padded arm got
+    // that same file. Nextflow stages inputs by basename, so a process receiving two or
+    // more of them died with "input file name collision" - which is what PARSE_SCREEN did
+    // the moment two stage-1 arms were skipped. stageAs papered over it by giving each a
+    // private directory; passing `[]` removes the cause, because nothing is staged at all
+    // and there is no basename to collide. It is also the nf-core idiom, and the script
+    // side becomes `x ? ... : ''` instead of comparing a filename to a magic string.
 
     // pack.yaml supplies the database paths; a CLI --*_db overrides it.
     def ku_db_path = params.krakenuniq_db ?: pack.screen.krakenuniq_db
@@ -353,17 +361,17 @@ workflow {
 
     // Every arm is padded out to all samples by fillMissing(), so a skipped or
     // failed classifier never silently drops a sample from the join below.
-    ch_arm_base = ch_clean.map { meta, _r -> tuple(meta, no_file) }
+    ch_arm_base = ch_clean.map { meta, _r -> tuple(meta, []) }
 
     if (params.skip_krakenuniq) {
-        ch_ku = ch_clean.map { meta, _r -> tuple(meta, no_file) }
+        ch_ku = ch_clean.map { meta, _r -> tuple(meta, []) }
     } else {
         KRAKENUNIQ(ch_clean, file(ku_db_path, checkIfExists: true))
         ch_ku = fillMissing(ch_arm_base, KRAKENUNIQ.out.report)
     }
 
     if (params.skip_metabuli) {
-        ch_mb = ch_clean.map { meta, _r -> tuple(meta, no_file) }
+        ch_mb = ch_clean.map { meta, _r -> tuple(meta, []) }
     } else {
         def mb_db = file(mb_db_path, checkIfExists: true)
         // Refuses a GTDB-namespaced index outright - see assertNcbiTaxonomy().
@@ -373,8 +381,8 @@ workflow {
     }
 
     if (params.skip_kraken2) {
-        ch_k2      = ch_clean.map { meta, _r -> tuple(meta, no_file) }
-        ch_bracken = ch_clean.map { meta, _r -> tuple(meta, no_file) }
+        ch_k2      = ch_clean.map { meta, _r -> tuple(meta, []) }
+        ch_bracken = ch_clean.map { meta, _r -> tuple(meta, []) }
     } else {
         KRAKEN2(ch_clean, file(k2_db_path, checkIfExists: true))
         ch_k2 = fillMissing(ch_arm_base, KRAKEN2.out.report)
@@ -386,7 +394,7 @@ workflow {
     }
 
     if (params.skip_sylph) {
-        ch_sylph = ch_clean.map { meta, _r -> tuple(meta, no_file) }
+        ch_sylph = ch_clean.map { meta, _r -> tuple(meta, []) }
     } else {
         SYLPH_PROFILE(ch_clean, file(sy_db_path, checkIfExists: true))
         ch_sylph = fillMissing(ch_arm_base, SYLPH_PROFILE.out.profile)
@@ -459,13 +467,13 @@ workflow {
     // Soft-mask intervals, when the pack has been masked. Absent is tolerated and
     // reported rather than assumed clean - an unmasked reference set is a known
     // false-positive source, not a neutral default.
-    def masked_dir = file(pack.confirm.masked_dir ?: "${projectDir}/assets/NO_FILE")
-    if (!masked_dir.exists()) {
+    def masked_dir = pack.confirm.masked_dir ? file(pack.confirm.masked_dir) : []
+    if (!masked_dir || !masked_dir.exists()) {
         log.warn "No masked reference intervals at ${pack.confirm.masked_dir}. " +
                  "References are UNMASKED, and vector, host, low-complexity or " +
                  "cross-contaminated sequence inside a reference will collect reads " +
                  "and inflate breadth. Run scripts/mask_pack_refs.py --pack ${pack.name}."
-        masked_dir = no_file
+        masked_dir = []
     }
     COVERAGE_STATS(MINIMAP2_COMPETITIVE.out.bam, masked_dir)
 
@@ -482,7 +490,7 @@ workflow {
         MARKER_SEARCH_AA(ch_clean, ch_markers_dir)
 
         if (params.skip_marker_hmm) {
-            ch_hmm = ch_clean.map { meta, _r -> tuple(meta, no_file) }
+            ch_hmm = ch_clean.map { meta, _r -> tuple(meta, []) }
         } else {
             MARKER_SEARCH_HMM(MARKER_SEARCH_AA.out.hit_reads, ch_markers_dir)
             ch_hmm = MARKER_SEARCH_HMM.out.hits
@@ -492,8 +500,7 @@ workflow {
             .join(MARKER_SEARCH_AA.out.hits, remainder: true)
             .join(ch_hmm, remainder: true)
             .map { meta, bam, bai, aa, hmm ->
-                tuple(meta, bam ?: no_file, bai ?: no_file,
-                      aa ?: no_file, hmm ?: no_file)
+                tuple(meta, bam ?: [], bai ?: [], aa ?: [], hmm ?: [])
             }
 
         MARKER_EVIDENCE(ch_marker_in, ch_marker_cat, ch_markers_dir)
@@ -505,11 +512,11 @@ workflow {
         COVERAGE_STATS.out.stats.map { meta, tsv -> tsv }.collect().ifEmpty([]),
         PARSE_SCREEN.out.candidates.map { meta, tsv -> tsv }.collect().ifEmpty([]),
         ch_missing_ref.map { meta, row -> "${meta.id}\t${meta.taxid}\t${meta.taxon}\tno_reference" }
-            .collectFile(name: 'missing_refs.tsv', newLine: true).ifEmpty(file("${projectDir}/assets/NO_FILE")),
+            .collectFile(name: 'missing_refs.tsv', newLine: true).ifEmpty([]),
         ch_watchlist.first(),
         file("${pack.dir}/pack.yaml"),
         ch_marker_states.map { meta, tsv -> tsv }.collect().ifEmpty([]),
-        params.skip_markers ? no_file : file("${pack.dir}/marker_rules.yaml", checkIfExists: true)
+        params.skip_markers ? [] : file("${pack.dir}/marker_rules.yaml", checkIfExists: true)
     )
 
     MAKE_REPORT(
