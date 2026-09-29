@@ -295,8 +295,26 @@ process PARSE_SCREEN {
     conda "conda-forge::python=3.11"
     publishDir "${params.outdir}/screen", mode: params.publish_dir_mode
 
+    // EACH ARM STAGES INTO ITS OWN DIRECTORY.
+    //
+    // fillMissing() pads every absent arm with the SAME assets/NO_FILE placeholder, and
+    // Nextflow stages inputs by basename - so with two or more arms skipped the task got
+    // several inputs called NO_FILE and died with "input file name collision". Running
+    // with --skip_kraken2 --skip_metabuli (krakenuniq off by default) makes four of
+    // these NO_FILE at once. It stayed latent under the default configuration, where
+    // only krakenuniq is absent on Illumina, which is exactly why no review caught it:
+    // the padding mechanism that exists to stop a sample being silently dropped broke
+    // the moment more than one arm was missing.
+    //
+    // stageAs also protects against two REAL reports sharing a basename, which the
+    // per-arm filenames do not currently guarantee.
     input:
-    tuple val(meta), path(ku_report), path(k2_report), path(bracken), path(metabuli), path(sylph)
+    tuple val(meta),
+          path(ku_report, stageAs: 'arm_krakenuniq/*'),
+          path(k2_report, stageAs: 'arm_kraken2/*'),
+          path(bracken,   stageAs: 'arm_bracken/*'),
+          path(metabuli,  stageAs: 'arm_metabuli/*'),
+          path(sylph,     stageAs: 'arm_sylph/*')
     path watchlist
     path descendants
 
@@ -412,14 +430,17 @@ process SCORE_EVIDENCE {
     conda "conda-forge::python=3.11"
     publishDir "${params.outdir}/score_evidence", mode: params.publish_dir_mode
 
+    // Same collision hazard as PARSE_SCREEN: missing_refs and marker_rules are both
+    // NO_FILE when there are no database gaps AND marker gating is off, which would
+    // stage two files called NO_FILE into one directory.
     input:
     path coverage
     path candidates
-    path missing_refs
+    path missing_refs, stageAs: 'missing_refs/*'
     path watchlist
     path pack_yaml
     path marker_states
-    path marker_rules
+    path marker_rules, stageAs: 'marker_rules/*' 
 
     output:
     path "findings.tsv", emit: findings
@@ -631,8 +652,14 @@ process MARKER_EVIDENCE {
     conda "bioconda::samtools=1.24 conda-forge::python=3.11"
     publishDir "${params.outdir}/markers", mode: params.publish_dir_mode
 
+    // aa_hits and hmm_hits are both NO_FILE when the protein and HMM tiers are skipped
+    // or their (errorStrategy 'ignore') processes failed - two inputs, one basename.
     input:
-    tuple val(meta), path(nt_bam), path(nt_bai), path(aa_hits), path(hmm_hits)
+    tuple val(meta),
+          path(nt_bam,   stageAs: 'tier_nt/*'),
+          path(nt_bai,   stageAs: 'tier_nt/*'),
+          path(aa_hits,  stageAs: 'tier_aa/*'),
+          path(hmm_hits, stageAs: 'tier_hmm/*')
     path markers_catalogue
     path markers_dir
 

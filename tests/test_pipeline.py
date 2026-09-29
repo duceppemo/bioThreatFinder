@@ -787,6 +787,35 @@ def test_workflow_scripts(tmp: Path) -> None:
     record("workflow:every invoked script is executable",
            not not_exec, f"not executable: {not_exec}")
 
+    # ---- optional inputs must not collide on the shared NO_FILE placeholder ----
+    #
+    # fillMissing() pads every absent stage-1 arm with the SAME assets/NO_FILE, and
+    # Nextflow stages inputs by basename. A process taking two or more optional paths
+    # therefore gets several inputs called NO_FILE and dies with "input file name
+    # collision" - which is what PARSE_SCREEN did the moment two arms were skipped.
+    # It stayed latent under the default configuration, where only krakenuniq is
+    # absent on Illumina. The fix is stageAs, giving each its own directory.
+    for nf_file in sorted((REPO / "modules").rglob("*.nf")):
+        text = nf_file.read_text(encoding="utf-8")
+        for m in re.finditer(r"^process\s+(\w+)\s*\{", text, re.MULTILINE):
+            name = m.group(1)
+            body = text[m.end():]
+            nxt = re.search(r"^process\s+\w+\s*\{", body, re.MULTILINE)
+            if nxt:
+                body = body[:nxt.start()]
+            optional = sorted(set(re.findall(r"(\w+)\.name\s*!=\s*'NO_FILE'", body)))
+            if len(optional) < 2:
+                continue
+            inp = re.search(r"\n\s*input:(.*?)\n\s*output:", body, re.S)
+            inp_text = inp.group(1) if inp else ""
+            unstaged = [v for v in optional
+                        if re.search(rf"path\(\s*{v}\s*\)", inp_text)
+                        or (re.search(rf"path\s+{v}\s*$", inp_text, re.MULTILINE))]
+            record(f"workflow:{name} stages its optional inputs separately",
+                   not unstaged,
+                   f"{len(optional)} optional inputs share the NO_FILE basename; "
+                   f"declared without stageAs: {unstaged}")
+
 
 CASES = {
     "selftests": test_selftests,
