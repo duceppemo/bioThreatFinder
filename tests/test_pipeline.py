@@ -655,6 +655,41 @@ def test_pack_integrity(tmp: Path) -> None:
         _, nosrc = se.resolve_identity_floor(th, "bacteria", "")
         record("pack:a missing platform is named in the reason string",
                "no platform" in nosrc, nosrc)
+
+        # ---- read/breadth gate coherence, PINNED ----
+        #
+        # The two stage-2 gates are ANDed, and breadth is bounded by read count
+        # (best case N*L/G), so whenever min_breadth*G/L > min_unique_reads the read
+        # floor cannot bind and the watchlist's stated LoD understates the real one by
+        # that ratio - 243x for Schistosoma mansoni as shipped. These numbers are due
+        # to be set from the benchmark, so rather than recalibrate on a made-up spread
+        # factor, the counts are pinned here: a pack edit then shows up as coherence
+        # improving or regressing instead of silently staying broken.
+        import subprocess
+        refs_manifest = Path(os.environ.get(
+            "BTF_REFS_MANIFEST",
+            "/media/8tb/bioThreatFinder/packs/human/refs/manifest.tsv"))
+        if not refs_manifest.is_file():
+            skip("pack:read/breadth gate coherence is tracked",
+                 "no built refs manifest (set BTF_REFS_MANIFEST)")
+        else:
+            cp = subprocess.run(
+                [sys.executable, str(SCRIPTS / "check_threshold_coherence.py"),
+                 "--refs-manifest", str(refs_manifest)],
+                capture_output=True, text=True)
+            out = cp.stdout
+            def _num(label: str) -> int:
+                for ln in out.splitlines():
+                    if ln.startswith(label):
+                        return int(ln.split(":", 1)[1].strip().split()[0])
+                return -1
+            assessed, breadth_binds = _num("taxa assessed"), _num("breadth is the real gate")
+            # KNOWN DEBT, recorded so it cannot drift unnoticed. Lowering this number is
+            # an improvement; raising it means a pack edit made the mismatch worse.
+            record("pack:read/breadth gate coherence is tracked",
+                   assessed == 89 and breadth_binds == 75,
+                   f"{breadth_binds} of {assessed} taxa have a decorative read floor "
+                   f"(baseline 75 of 89). See docs/decisions.md D11.")
     except Exception as exc:
         record("pack:scenario file parses", False, f"{type(exc).__name__}: {exc}")
 

@@ -15,7 +15,7 @@ Needs `samtools` for the coverage cases (skipped with a message if absent) and a
 for the screen cases (`BTF_TAXDUMP=/path/to/taxdump`, skipped otherwise). Everything else
 is fixture-driven.
 
-Current state: **50 checks, all passing.**
+Current state: **76 checks, all passing.**
 
 ## What the tests assert
 
