@@ -935,7 +935,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     comp_dir.mkdir(parents=True, exist_ok=True)
 
     prior = load_manifest(manifest_path)
+    # MERGE, never truncate, on a subset run.
+    #
+    # write_manifest() rewrites the whole file, so `--only-taxid 263` replaced a
+    # 363-row manifest with the 4 rows it had just touched. The genome files stayed on
+    # disk, so nothing looked broken - but the manifest is what simulate_benchmark.py
+    # resolves spike genomes from and what mask_pack_refs.py iterates, so both would
+    # have silently seen a 4-genome pack. Same failure this project keeps producing:
+    # an empty result indistinguishable from a correct one.
     manifest_rows: List[dict] = []
+    if args.only_taxid and manifest_path.exists():
+        try:
+            with manifest_path.open() as _fh:
+                carried = [r for r in csv.DictReader(_fh, delimiter="\t")
+                           if r.get("taxid") and r["taxid"].strip() not in
+                           {t.strip() for t in args.only_taxid}]
+            manifest_rows.extend(carried)
+            LOG.info("subset run: carrying forward %d existing manifest row(s)",
+                     len(carried))
+        except OSError as exc:
+            LOG.error("cannot read %s to merge (%s). Refusing to continue: a subset "
+                      "run would otherwise truncate the manifest to just the taxa "
+                      "processed here.", manifest_path, exc)
+            return 2
     # taxid -> list of local FASTA paths successfully present
     genomes_by_taxid: Dict[int, List[Path]] = {}
     failed_taxa: List[dict] = []

@@ -383,7 +383,17 @@ def main() -> int:
                     f"({spec.get('vaccine_if')}) - a vaccine strain CANNOT be excluded "
                     "for this finding")
 
-            if tier == "confirmed_in_silico" or verdict["confirm"] is not None:
+            # Only evaluate confirm_requires if veto/vaccine/support has not already
+            # decided the tier. Without this guard the confirm branch OVERWRITES a
+            # vaccine_strain determination: BCG (rpoB present, RD9 absent) sets
+            # vaccine_strain, then confirm_requires = rpoB AND RD9 evaluates FALSE and
+            # drops it back to `supported` - reporting a vaccine strain as a possible
+            # tuberculosis detection, which is precisely the wrong direction. Introduced
+            # when the veto/vaccine CAVEAT disclosures broke the original elif chain;
+            # caught by tests/test_pipeline.py::marker:BCG.
+            already_decided = tier in ("marker_veto", "vaccine_strain", "screened_only")
+            if not already_decided and (tier == "confirmed_in_silico"
+                                        or verdict["confirm"] is not None):
                 if verdict["confirm"] == mr.TRUE:
                     reasons.append(f"marker rule satisfied: {spec.get('confirm_requires')}")
                 elif verdict["confirm"] == mr.FALSE:
