@@ -120,8 +120,17 @@ def unclassified_fraction(table: dict[str, dict]) -> tuple[int, int]:
     unc = table.get("0")
     unclassified = unc["clade_reads"] if unc else 0
     root = table.get("1")
+    # THE FALLBACK USED TO COUNT UNCLASSIFIED READS TWICE.
+    #
+    # Summing direct_reads over every row includes taxid 0's own direct_reads, so the
+    # unclassified reads landed in BOTH terms: 600 unclassified against 400
+    # classified reported 600/1600 = 0.375 instead of 0.600, and the
+    # HIGH_UNCLASSIFIED flag (0.40) did not fire. That flag guards the Perseus
+    # mislabelling failure mode this function's docstring calls "the only signal that
+    # survives", so under-reporting it is the one direction that must not happen.
+    # Kraken2 emits a root row and takes the safe path; a report without one did not.
     classified = root["clade_reads"] if root else sum(
-        v["direct_reads"] for v in table.values())
+        v["direct_reads"] for tid, v in table.items() if tid != "0")
     return unclassified, unclassified + classified
 
 

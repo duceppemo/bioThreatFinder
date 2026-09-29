@@ -412,6 +412,41 @@ def test_coverage_metrics(tmp: Path) -> None:
     }.items():
         record(f"coverage:masked:{key}", m.get(key) == want, f"got {m.get(key)}, want {want}")
 
+    # ---- occupancy must be a FRACTION on a segmented reference ----
+    #
+    # window_hits is keyed per contig over raw coordinates, while the denominator was
+    # ceil(mask-subtracted total / window) across ALL contigs. Each contig contributes
+    # ceil(len_i/window) windows and their sum exceeds the pooled ceiling, so a fully
+    # covered 8-segment influenza-shaped reference scored occupancy 1.12 - loosening
+    # the occupancy gate in the false-positive direction on exactly the segmented
+    # viruses and fragmented drafts where it should bite hardest.
+    seg_len, n_seg = 1400, 8
+    seg_refs = [f"taxid|11320|SEG{i}.1 Influenza A segment {i}" for i in range(n_seg)]
+    slines = ["@HD\tVN:1.6\tSO:coordinate"]
+    slines += [f"@SQ\tSN:{r}\tLN:{seg_len}" for r in seg_refs]
+    # One full-length read per segment: every window of every segment is covered.
+    slines += [rd(f"seg{i}", r, 1, 60, ln=seg_len) for i, r in enumerate(seg_refs)]
+    ssam = tmp / "seg.sam"
+    ssam.write_text("\n".join(slines) + "\n")
+    sbam = tmp / "seg.bam"
+    if run(["samtools", "sort", "-o", sbam, ssam]).returncode == 0:
+        run(["samtools", "index", sbam])
+        sout = tmp / "seg.tsv"
+        run([sys.executable, BIN / "coverage_stats.py", "--bam", sbam, "--sample", "T",
+             "--taxid", "11320", "--taxon", "Influenza A virus", "--group", "virus",
+             "--platform", "illumina", "--mapq-min", "10", "--total-reads", "1000000",
+             "--assigned-reads", "8", "--out", sout])
+        if sout.exists():
+            with sout.open() as fh:
+                sr = next(csv.DictReader(fh, delimiter="\t"))
+            occ = float(sr.get("window_occupancy") or 0)
+            record("coverage:occupancy never exceeds 1.0 on a segmented reference",
+                   occ <= 1.0, f"occupancy={occ} across {n_seg} segments")
+            record("coverage:a fully covered segmented reference is fully occupied",
+                   abs(occ - 1.0) < 1e-6, f"occupancy={occ}, want 1.0")
+            record("coverage:platform is recorded for the identity floor",
+                   sr.get("platform") == "illumina", f"got {sr.get('platform')!r}")
+
 
 # ---------------------------------------------------------------------------
 # 6. Multi-classifier screen parsing and the unclassified fraction
@@ -550,6 +585,66 @@ def test_pack_integrity(tmp: Path) -> None:
         record("pack:scenario file parses", False, f"{type(exc).__name__}: {exc}")
 
 
+# ---------------------------------------------------------------------------
+# 8. Benchmark evaluator: the assertions that gate CI must be able to fail
+# ---------------------------------------------------------------------------
+
+def test_evaluator(tmp: Path) -> None:
+    sys.path.insert(0, str(BIN))
+    try:
+        import evaluate_benchmark as eb
+    except Exception as exc:
+        record("eval:importable", False, f"{type(exc).__name__}: {exc}")
+        return
+
+    def ob(tier, truth="present", sid="s1", taxon="T", sample="x"):
+        return {"sample": sample, "scenario_id": sid, "taxon": taxon,
+                "platform": "illumina", "level_rpm": "100", "truth": truth,
+                "tier": tier, "role": "sample", "outcome": eb.outcome_of(tier)}
+
+    def result_of(exp, obs):
+        rs = eb.check_expectations({"s1": {"expect": [dict(taxon="T", **exp)]}}, obs)
+        return rs[0]["result"] if rs else "NONE"
+
+    # tier_rank() returns -1 for anything unrecognised and nothing ranks below -1, so
+    # a misspelled floor could never fail - it removed the gate it was written to be.
+    record("eval:a misspelled min_tier FAILS rather than passing silently",
+           result_of({"min_tier": "vaccine_strainX"}, [ob("no_reference")]) == "FAIL")
+    record("eval:a misspelled max_tier FAILS rather than passing silently",
+           result_of({"max_tier": "supportedX"}, [ob("confirmed_in_silico")]) == "FAIL")
+
+    # A missing reference is a database gap, not a threshold regression.
+    record("eval:a NOT_ASSESSED observation SKIPs a min_tier check",
+           result_of({"min_tier": "supported"}, [ob("no_reference")]) == "SKIP")
+    record("eval:a real shortfall still FAILs a min_tier check",
+           result_of({"min_tier": "confirmed_in_silico"}, [ob("supported")]) == "FAIL")
+    record("eval:a met min_tier still PASSes",
+           result_of({"min_tier": "supported"}, [ob("confirmed_in_silico")]) == "PASS")
+
+    # vaccine_table was the one table that counted NOT_ASSESSED in its denominator,
+    # so a database gap reported vaccine discrimination as totally broken.
+    vt = eb.vaccine_table([ob("no_reference", truth="vaccine")])[0]
+    record("eval:vaccine accuracy is blank, not 0.000, when nothing is assessable",
+           vt["n_assessable"] == 0 and vt["vaccine_accuracy"] == "",
+           f"{vt['n_assessable']=} {vt['vaccine_accuracy']=}")
+
+    # On a taxon the truth says is absent, "vaccine strain of X is present" is a
+    # false positive; counting only POSITIVE let it improve the specificity figure.
+    sp = eb.specificity_table([ob("vaccine_strain", truth="absent")])[0]
+    record("eval:a vaccine call on an absent taxon counts as a false positive",
+           sp["n_false_positive"] == 1, f"got {sp['n_false_positive']}")
+    vs = eb.variant_stats([ob("vaccine_strain", truth="absent")])
+    record("eval:variant_stats counts it too", vs["false_positive"] == 1,
+           f"got {vs['false_positive']}")
+
+    # Two scenarios measuring one taxon must not collapse into one row.
+    rows = eb.bakeoff_per_taxon(
+        {"v1": [ob("supported", sid="a"), ob("supported", sid="b")]})
+    sids = {r["scenario_id"] for r in rows}
+    record("eval:bake-off rows keep scenario_id so same-taxon scenarios do not collide",
+           sids == {"a", "b"}, f"scenario ids in output: {sorted(sids)}")
+
+
 CASES = {
     "selftests": test_selftests,
     "tiering": test_tiering,
@@ -558,6 +653,7 @@ CASES = {
     "coverage": test_coverage_metrics,
     "screen": test_screen,
     "pack": test_pack_integrity,
+    "eval": test_evaluator,
 }
 
 

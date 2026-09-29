@@ -324,8 +324,16 @@ def depth_profile(bam: Path, mapq_min: int, target_refs: set[str], window: int,
     masked_positions = 0
     depths: list[int] = []
     window_hits: dict[tuple[str, int], bool] = {}
+    # Windows that COULD be occupied: per contig, mask-aware. See below.
+    window_possible: dict[tuple[str, int], bool] = {}
 
-    cmd = ["samtools", "depth", "-a", "-Q", str(mapq_min), str(bam)]
+    # -G 0x800 excludes SUPPLEMENTARY alignments, matching collect_alignments()'s
+    # `view -F 0x904`. samtools depth's default filter drops UNMAP/SECONDARY/QCFAIL/DUP
+    # but KEEPS supplementary, so a chimeric ONT read's extra segments were counted
+    # toward breadth, coverage_10x and occupancy while contributing nothing to
+    # unique_reads - inflating exactly the metrics the confirmation gates rest on, on
+    # the platform where split alignments are common.
+    cmd = ["samtools", "depth", "-a", "-Q", str(mapq_min), "-G", "0x800", str(bam)]
     for line in stream(cmd):
         f = line.rstrip("\n").split("\t")
         if len(f) < 3 or f[0] not in target_refs:
@@ -339,13 +347,17 @@ def depth_profile(bam: Path, mapq_min: int, target_refs: set[str], window: int,
         d = int(f[2])
         total += 1
         depths.append(d)
+        pos0 = int(f[1]) - 1
+        win = (f[0], pos0 // window)
+        window_possible[win] = True
         if d > 0:
             covered += 1
-            window_hits[(f[0], int(f[1]) // window)] = True
+            window_hits[win] = True
         if d >= 10:
             covered10 += 1
 
-    return covered, total, depths, len(window_hits), covered10, masked_positions
+    return (covered, total, depths, len(window_hits), covered10, masked_positions,
+            len(window_possible))
 
 
 def main() -> int:
@@ -406,8 +418,9 @@ def main() -> int:
     window = min(args.window, max(100, target_len // 50)) if target_len else args.window
 
     per_taxid = collect_alignments(args.bam, args.mapq_min, mask)
-    covered, total_bases, depths, occupied_windows, covered10, masked_positions = \
-        depth_profile(args.bam, args.mapq_min, target_refs, window, mask)
+    (covered, total_bases, depths, occupied_windows, covered10, masked_positions,
+     possible_windows) = depth_profile(args.bam, args.mapq_min, target_refs,
+                                       window, mask)
 
     tgt = per_taxid.get(args.taxid, {"reads": 0, "nm": 0, "aln": 0, "bases": 0})
     unique_reads = tgt["reads"]
@@ -424,7 +437,24 @@ def main() -> int:
     # CV over the whole reference (zeros included) - an organism present at low
     # depth everywhere has a lower CV than one stacked on a single locus.
     depth_cv = (statistics.pstdev(depths) / mean_depth) if depths and mean_depth > 0 else 0.0
-    expected_windows = max(1, -(-target_len // window))  # ceil
+    # OCCUPANCY IS A FRACTION, AND IT USED TO BE ABLE TO EXCEED 1.0.
+    #
+    # window_hits is keyed (contig, position // window) - PER CONTIG, over raw
+    # coordinates. The denominator was ceil(target_len / window) where target_len is
+    # the mask-SUBTRACTED sum over ALL contigs. Two independent inflations followed.
+    # Multi-contig: each contig contributes ceil(len_i/window) windows, and their sum
+    # exceeds ceil(sum(len_i)/window) - eight influenza segments of 1,400 bp gave 56
+    # real windows against an expected 50, so a fully covered reference scored 1.12.
+    # Masking: a 5 Mb genome with 1.5 Mb masked expected 3,500 windows while raw
+    # coordinates span 5,000 indices, capping occupancy at 1.43. Both loosened the
+    # `occupancy >= 0.15` gate in the false-positive direction, worst on segmented
+    # viruses, fragmented drafts, and the heavily masked references D5 says to
+    # distrust most.
+    #
+    # possible_windows counts, in the same pass and on the same key, the windows that
+    # hold at least one unmasked base - so numerator and denominator are now the same
+    # kind of thing and occupancy cannot exceed 1.0.
+    expected_windows = max(1, possible_windows)
     occupancy = occupied_windows / expected_windows if expected_windows else 0.0
     mean_identity = (1.0 - tgt["nm"] / tgt["aln"]) if tgt["aln"] else 0.0
     # Reads per million host-depleted reads - comparable across samples and

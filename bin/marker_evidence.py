@@ -404,7 +404,17 @@ def main() -> int:
                 rec.update({k: (f"{v:.4f}" if isinstance(v, float) else v)
                             for k, v in e.items() if k != "nt_length"})
                 tried.append("dna")
-                if e["nt_breadth"] >= min_cov and e["nt_identity"] >= min_id:
+                # AT LEAST ONE READ, WHATEVER THE THRESHOLDS SAY.
+                #
+                # nt_evidence() emits a record for every marker in the BAM header,
+                # including those with no alignments at all (nt_breadth 0.0,
+                # nt_identity 0.0). With min_coverage and min_identity both 0.00 -
+                # which bmallei_deletions carries - the gate passed on zero evidence
+                # and the marker was reported PRESENT. Any marker with a 0 floor
+                # became a permanent free PRESENT the moment a rule referenced it.
+                if (e["nt_reads"] >= 1
+                        and e["nt_breadth"] >= min_cov
+                        and e["nt_identity"] >= min_id):
                     passed.append(
                         f"dna(breadth={e['nt_breadth']:.3f}>={min_cov:g}, "
                         f"id={e['nt_identity']:.3f}>={min_id:g}, reads={e['nt_reads']})")
@@ -453,6 +463,26 @@ def main() -> int:
             rec["state"] = PRESENT
             rec["tier_used"] = ",".join(p.split("(")[0] for p in passed)
             rec["reason"] = "; ".join(passed)
+        elif not args.manifest:
+            # THE WARNING ABOVE PROMISED THIS AND THE CODE DID THE OPPOSITE.
+            #
+            # Gate 1 is `if args.manifest and mstat not in BUILT_STATUSES`, so with no
+            # manifest it was skipped entirely and a marker that was never built fell
+            # through to ABSENT - while the warning printed at startup asserted such
+            # markers "will be reported UNKNOWN rather than ABSENT. This is the safe
+            # direction." The unsafe direction has teeth: genuine M. tuberculosis
+            # reads make mtb_rpoB PRESENT, mtb_RD1 was never retrieved into the
+            # database, so `vaccine_if: absent(mtb_RD1) and mtb_rpoB` evaluates TRUE
+            # and a real TB detection is reported as a BCG stand-down - verbatim the
+            # failure this module exists to prevent.
+            rec["state"] = UNKNOWN
+            rec["tier_used"] = ",".join(sorted(set(tried)))
+            rec["reason"] = (
+                f"searched via {rec['tier_used'] or 'none'} and not found, but no "
+                f"--manifest was supplied, so 'never built' cannot be distinguished "
+                f"from 'absent from sample'. Reported UNKNOWN, which cannot promote "
+                f"or veto a finding."
+            )
         else:
             rec["state"] = ABSENT
             rec["tier_used"] = ",".join(sorted(set(tried)))
