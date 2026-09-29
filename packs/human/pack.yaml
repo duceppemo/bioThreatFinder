@@ -118,6 +118,37 @@ thresholds:
   min_read_identity_by_group:
     virus: 0.88
     parasite: 0.95
+  # PLATFORM MATTERS AS MUCH AS GROUP, AND LEAVING IT OUT BROKE ONT ENTIRELY.
+  #
+  # A 0.98 read-identity floor is a statement about SEQUENCING ERROR as much as about
+  # phylogenetic distance. Illumina substitution error is ~0.1-1%, so 0.98 leaves room
+  # to discriminate species. ONT does not: R10.4.1 simplex reads mean ~97-98% identity
+  # with recent basecallers and worse with fast models, and the badread defaults the
+  # benchmark simulates with produce a 95% mean. Applying 0.98 to ONT therefore made
+  # every bacterial and fungal confirmation IMPOSSIBLE on that platform - the gate
+  # failed on sequencing error alone, at every spike level, and the result was
+  # indistinguishable from weak evidence. The plumbing positive control, whose whole
+  # purpose is to fail loudly on misconfiguration, would have failed permanently on
+  # its ONT arm for this reason.
+  #
+  # The consequence is a real shift in what discriminates near neighbours. On ONT,
+  # read identity CANNOT do that job; competitive mapping (attributed_to_neighbour)
+  # and the marker tier have to, and the identity gate degrades to a genus-level
+  # sanity check. That is a weaker guarantee, and it is stated here rather than hidden
+  # in a threshold.
+  #
+  # PROVISIONAL. These numbers are reasoned from platform error rates, not measured
+  # on this pipeline. They are the first thing to set from the benchmark once it has
+  # run - see docs/decisions.md D10.
+  min_read_identity_by_platform:
+    illumina:
+      default: 0.98
+      virus: 0.88
+      parasite: 0.95
+    ont:
+      default: 0.90
+      virus: 0.80
+      parasite: 0.88
   # Wright et al. (ii): if most of the reads a classifier assigned do not survive
   # alignment, the k-mer evidence did not hold up.
   min_mapped_fraction_of_assigned: 0.50

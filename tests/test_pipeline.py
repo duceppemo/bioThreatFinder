@@ -521,6 +521,31 @@ def test_pack_integrity(tmp: Path) -> None:
         record("pack:viruses get a lower identity floor than bacteria",
                float((th.get("min_read_identity_by_group") or {}).get("virus", 1.0))
                < float(th.get("min_read_identity", 0)))
+
+        # A THRESHOLD MUST BE REACHABLE, NOT MERELY STRICT.
+        #
+        # The two checks above assert the floor is high, which is what let the ONT
+        # defect hide: 0.98 applied to ONT reads, whose mean identity is ~0.95-0.98,
+        # made every bacterial and fungal ONT confirmation impossible while the suite
+        # stayed green. These assert the floor can actually be met on each platform.
+        import score_evidence as se
+        # badread's default simulated identity, i.e. what the ONT benchmark delivers.
+        ONT_SIMULATED_MEAN = 0.95
+        for grp in ("bacteria", "fungus", "virus", "parasite"):
+            floor, src = se.resolve_identity_floor(th, grp, "ont")
+            record(f"pack:ONT {grp} identity floor is reachable (< {ONT_SIMULATED_MEAN})",
+                   floor < ONT_SIMULATED_MEAN,
+                   f"floor={floor} via {src}; ONT reads cannot exceed ~"
+                   f"{ONT_SIMULATED_MEAN} as simulated")
+        il, il_src = se.resolve_identity_floor(th, "bacteria", "illumina")
+        record("pack:Illumina keeps the strict near-neighbour floor (>=0.98)",
+               il >= 0.98, f"floor={il} via {il_src}")
+        ont_b, _ = se.resolve_identity_floor(th, "bacteria", "ont")
+        record("pack:ONT floor is looser than Illumina for the same group",
+               ont_b < il, f"ont={ont_b} illumina={il}")
+        _, nosrc = se.resolve_identity_floor(th, "bacteria", "")
+        record("pack:a missing platform is named in the reason string",
+               "no platform" in nosrc, nosrc)
     except Exception as exc:
         record("pack:scenario file parses", False, f"{type(exc).__name__}: {exc}")
 

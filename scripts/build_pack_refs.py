@@ -943,21 +943,43 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # resolves spike genomes from and what mask_pack_refs.py iterates, so both would
     # have silently seen a 4-genome pack. Same failure this project keeps producing:
     # an empty result indistinguishable from a correct one.
+    # THE FIRST FIX HERE WAS HALF A FIX.
+    #
+    # It seeded the carried rows only when --only-taxid was given, which left two
+    # holes. (a) A FULL run interrupted after 20 of 89 taxa still truncated the
+    # manifest to 20 rows, because write_manifest() rewrites the whole file from the
+    # rows processed so far - and an interrupted long build is precisely the state
+    # this project keeps ending up in. (b) Under --only-taxid the carried rows were
+    # merged into the same list the run appends to, so a NEIGHBOUR of a selected
+    # target - which is processed but is not itself in --only-taxid - got its old row
+    # carried AND a fresh row appended, silently duplicating it and quietly breaking
+    # the 363-row sanity check.
+    #
+    # So: carry EVERYTHING, always; keep fresh rows separate; and let taxid decide
+    # which wins at write time.
     manifest_rows: List[dict] = []
-    if args.only_taxid and manifest_path.exists():
+    carried_rows: List[dict] = []
+    if manifest_path.exists():
         try:
             with manifest_path.open() as _fh:
-                carried = [r for r in csv.DictReader(_fh, delimiter="\t")
-                           if r.get("taxid") and r["taxid"].strip() not in
-                           {t.strip() for t in args.only_taxid}]
-            manifest_rows.extend(carried)
-            LOG.info("subset run: carrying forward %d existing manifest row(s)",
-                     len(carried))
+                carried_rows = list(csv.DictReader(_fh, delimiter="\t"))
+            LOG.info("carrying forward %d existing manifest row(s); rows for taxa "
+                     "processed in this run are replaced, the rest are preserved",
+                     len(carried_rows))
         except OSError as exc:
-            LOG.error("cannot read %s to merge (%s). Refusing to continue: a subset "
-                      "run would otherwise truncate the manifest to just the taxa "
-                      "processed here.", manifest_path, exc)
+            LOG.error("cannot read %s to merge (%s). Refusing to continue: writing it "
+                      "from this run alone would truncate it to just the taxa "
+                      "processed here, leaving the genomes on disk but invisible to "
+                      "mask_pack_refs.py and simulate_benchmark.py.",
+                      manifest_path, exc)
             return 2
+
+    def merged_manifest() -> List[dict]:
+        """Fresh rows, plus every carried row for a taxon this run did not touch."""
+        fresh_taxids = {str(r.get("taxid", "")).strip() for r in manifest_rows}
+        keep = [r for r in carried_rows
+                if str(r.get("taxid", "")).strip() not in fresh_taxids]
+        return manifest_rows + keep
     # taxid -> list of local FASTA paths successfully present
     genomes_by_taxid: Dict[int, List[Path]] = {}
     failed_taxa: List[dict] = []
@@ -1073,8 +1095,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "n_contigs": "0", "path": "", "md5": "", "downloaded_utc": utc_now(),
             })
 
-        # Rewrite after each taxon so an interrupted run resumes cleanly.
-        write_manifest(manifest_path, manifest_rows)
+        # Rewrite after each taxon so an interrupted run resumes cleanly. Merged,
+        # so "resumes cleanly" applies to the record and not only to the downloads.
+        write_manifest(manifest_path, merged_manifest())
 
     # ---- competitive FASTAs + indexes -----------------------------------
     fully_built, partially_built, unbuildable = [], [], []
@@ -1091,7 +1114,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # by re-reading the written bundle - which is why the post-write check below now
     # exists.
     accession_by_path: dict[str, str] = {}
-    for mrow in manifest_rows:
+    for mrow in merged_manifest():
         mp = (mrow.get("path") or "").strip()
         acc = (mrow.get("accession") or "").strip()
         if mp and acc:
@@ -1232,14 +1255,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         else:
             fully_built.append(t)
 
-    write_manifest(manifest_path, manifest_rows)
+    final_rows = merged_manifest()
+    write_manifest(manifest_path, final_rows)
 
     # ---- summary --------------------------------------------------------
     print("", file=sys.stderr)
     LOG.info("=========================== SUMMARY ===========================")
     LOG.info("pack:                 %s", args.pack)
     LOG.info("refs dir:             %s", refs_dir)
-    LOG.info("manifest:             %s (%d rows)", manifest_path, len(manifest_rows))
+    LOG.info("manifest:             %s (%d rows: %d this run, %d carried)",
+             manifest_path, len(final_rows), len(manifest_rows),
+             len(final_rows) - len(manifest_rows))
     LOG.info("unique taxa attempted: %d (%d targets, %d neighbours)",
              len(tasks), n_targets, n_neighbours)
     LOG.info("genomes on disk:      %d", sum(len(v) for v in genomes_by_taxid.values()))

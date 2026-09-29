@@ -221,11 +221,13 @@ def minimap2_mask_intervals(mm2: str, subject_fa: Path, query_fa: Path, reason: 
     mask the contaminant database instead, which would look like it worked.
     """
     if not subject_fa.exists() or subject_fa.stat().st_size == 0:
-        return {}
+        die(f"masking subject {subject_fa} is missing or empty, so source '{reason}' "
+            f"would contribute 0 bp to every BED and then be cached as complete. "
+            f"Refusing: fix the subject, or drop the source with --sources.")
     cmd = [mm2, "-x", preset, "-t", str(threads), "--secondary=no",
            str(subject_fa), str(query_fa)]
     per_seq: dict[str, list[tuple[int, int, str]]] = defaultdict(list)
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, bufsize=1 << 20)
     assert proc.stdout is not None
     for line in proc.stdout:
@@ -243,8 +245,54 @@ def minimap2_mask_intervals(mm2: str, subject_fa: Path, query_fa: Path, reason: 
             continue
         per_seq[qname].append((qstart, qend, reason))
     proc.stdout.close()
-    proc.wait()
+    rc = proc.wait()
+    err = ""
+    if proc.stderr is not None:
+        try:
+            err = proc.stderr.read()
+        except (OSError, ValueError):
+            # Reading the diagnostic must never replace the real failure below.
+            err = ""
+        proc.stderr.close()
+    # A FAILED ALIGNMENT PASS MUST NOT LOOK LIKE A CLEAN GENOME.
+    #
+    # This previously ignored the return code, with stderr sent to DEVNULL. When
+    # minimap2 died - OOM on the 3.1 Gbp host index, killed, a missing shared
+    # library - the function returned {} and the caller logged
+    # "host: 0 bp across 0 contig(s)". Every BED was then written without host
+    # intervals, every manifest row said host_bp=0, and because the skip decision is
+    # "does the BED exist", no later run would redo it. The masking step D5 calls the
+    # highest-value step in the pipeline would have been silently off, leaving an
+    # artifact that reads as "checked, none found".
+    if rc != 0:
+        tail = "\n    ".join((err or "").strip().splitlines()[-5:]) or "(no stderr)"
+        die(f"minimap2 failed (exit {rc}) masking against {subject_fa.name} for "
+            f"source '{reason}'. Refusing to write BEDs that would record 0 bp for "
+            f"this source and then be cached as complete.\n"
+            f"  minimap2 stderr:\n    {tail}")
     return {k: merge_intervals(v) for k, v in per_seq.items()}
+
+
+def bed_sources(path: Path) -> set[str]:
+    """The sources recorded in an existing BED's header.
+
+    The skip decision used to be "does the BED file exist", which cannot tell a BED
+    built from all four sources from one built by `--sources lowcomplexity` during a
+    smoke test. The later full run then logged SKIP for every genome and exited 0
+    with host and crossgroup masking never done - and the manifest's host_bp column
+    read 0, indistinguishable from "checked, none found".
+    """
+    try:
+        with path.open() as fh:
+            for line in fh:
+                if not line.startswith("#"):
+                    break
+                if "sources=" in line:
+                    tok = line.split("sources=", 1)[1].split()[0]
+                    return {x for x in tok.split(",") if x}
+    except OSError:
+        return set()
+    return set()
 
 
 def fetch_univec(dest: Path) -> Path:
@@ -400,6 +448,8 @@ def main() -> int:
     stem_meta: dict[str, dict] = {}
     group_query: dict[str, Path] = {}
     todo = []
+    # stem -> owner stem, for genomes that ARE the same sequence under another taxid.
+    alias_of: dict[str, str] = {}
 
     for r in rows:
         gpath = Path(r["path"])
@@ -409,25 +459,62 @@ def main() -> int:
         stem = gpath.name.replace(".fna.gz", "").replace(".fna", "")
         bed_path = mask_dir / f"{stem}.mask.bed"
         if bed_path.exists() and not args.force:
-            log(f"SKIP {r['taxid']} {r['name']} (bed present)")
-            continue
+            have = bed_sources(bed_path)
+            missing = [x for x in sources if x not in have]
+            if not missing:
+                log(f"SKIP {r['taxid']} {r['name']} (bed present, sources complete)")
+                continue
+            log(f"REDO {r['taxid']} {r['name']}: existing bed was built from "
+                f"{','.join(sorted(have)) or 'unknown'}, missing "
+                f"{','.join(missing)}")
         seqs = dict(read_fasta(gpath))
         if not seqs:
             warn(f"{r['taxid']} {r['name']}: empty genome, skipping")
             continue
+        # TWO TAXIDS, ONE ASSEMBLY.
+        #
+        # F. tularensis (263) / F. novicida (264) and S. dysenteriae (622) /
+        # Shigella (620) each resolve to a single NCBI assembly, so their FASTAs
+        # carry identical contig names. The old code warned, skipped the second
+        # genome's contigs, and then computed genome_bp as a sum filtered to
+        # contigs this stem owns - which is zero. The result was a manifest row
+        # reading genome_bp=0 masked_bp=0 flag= and an intervals-free BED: byte
+        # identical in meaning to "examined and found clean". Both shipped BEDs
+        # were in that state. Since the sequence is the SAME sequence, the honest
+        # answer is the owner's intervals, recorded as shared.
+        shared = [c for c in seqs if c in contig_owner]
+        if shared:
+            owners = {contig_owner[c] for c in shared}
+            same = (len(shared) == len(seqs) and len(owners) == 1)
+            owner = next(iter(owners)) if len(owners) == 1 else ""
+            if same and all(seqs[c] == genome_seqs[owner].get(c) for c in seqs):
+                alias_of[stem] = owner
+                genome_seqs[stem] = seqs
+                stem_meta[stem] = r
+                todo.append((stem, r))
+                log(f"SHARED SEQUENCE {r['taxid']} {r['name']}: identical to "
+                    f"{owner}; masking it once and writing both BEDs from that "
+                    f"result (flagged SHARED_SEQUENCE in the manifest)")
+                continue
+            die(f"{r['taxid']} {r['name']} ({gpath.name}) shares contig name(s) "
+                f"{', '.join(shared[:3])} with {owner or 'several genomes'} but the "
+                f"sequence differs. Masking cannot be attributed, and attributing it "
+                f"to the first genome would silently leave this one unmasked. "
+                f"Rename the contigs or drop one reference.")
         genome_seqs[stem] = seqs
         stem_meta[stem] = r
         for cname, seq in seqs.items():
-            if cname in contig_owner:
-                warn(f"duplicate contig name {cname} in {stem} and "
-                     f"{contig_owner[cname]}; masking will be attributed to the first")
-                continue
             contig_owner[cname] = stem
             contig_len[cname] = len(seq)
         todo.append((stem, r))
 
     if not todo:
-        log("nothing to do (all BEDs present; use --force to redo)")
+        log("nothing to do (all BEDs present and built from the requested sources; "
+            "use --force to redo)")
+        if not (mask_dir / "mask_manifest.tsv").exists():
+            warn("mask_manifest.tsv is missing and cannot be rebuilt without "
+                 "re-masking. The BEDs are the operative artifact, but the manifest "
+                 "is the auditable record D5 cites - re-run with --force to restore it.")
         shutil.rmtree(tmpdir, ignore_errors=True)
         return 0
 
@@ -517,10 +604,12 @@ def main() -> int:
         taxid, name = r["taxid"], r["name"]
         group = (r.get("group") or "unknown").strip().lower()
         seqs = genome_seqs[stem]
-        genome_bp = sum(len(v) for k, v in seqs.items() if contig_owner.get(k) == stem)
+        # For a shared-sequence alias the intervals live under the owner's name.
+        owner = alias_of.get(stem, stem)
+        genome_bp = sum(len(v) for k, v in seqs.items() if contig_owner.get(k) == owner)
         merged = {}
         for cname in seqs:
-            if contig_owner.get(cname) != stem:
+            if contig_owner.get(cname) != owner:
                 continue
             ivs = per_contig.get(cname)
             if ivs:
@@ -528,15 +617,32 @@ def main() -> int:
 
         masked_bp = sum(total_len(v) for v in merged.values())
         frac = masked_bp / genome_bp if genome_bp else 0.0
+
+        # PER-SOURCE FOOTPRINTS, NOT A PARTITION OF masked_bp.
+        #
+        # The old accounting walked the MERGED intervals and charged every base of a
+        # merged span in full to each contributing reason, so an interval tagged
+        # "lowcomplexity+vector" added its whole length to both columns. A 0-100
+        # lowcomplexity and a 50-150 vector hit merged to 150 bp and reported 150 +
+        # 150 = 300. Recomputing from the raw per-source intervals gives each source
+        # its true footprint. The columns still need not sum to masked_bp, because
+        # sources genuinely overlap - that is a fact about the data, not an error.
         by_reason: dict[str, int] = defaultdict(int)
-        for ivs in merged.values():
-            for a, b, reason in ivs:
-                for part in reason.split("+"):
-                    by_reason[part] += b - a
+        for cname in seqs:
+            if contig_owner.get(cname) != owner:
+                continue
+            raw = per_contig.get(cname) or []
+            for src in ALL_SOURCES:
+                own = [(a, b, src) for a, b, reason in raw
+                       if src in reason.split("+")]
+                if own:
+                    by_reason[src] += total_len(merge_intervals(own))
 
         flag = ""
+        if stem in alias_of:
+            flag = f"SHARED_SEQUENCE:{alias_of[stem]}"
         if frac > args.max_masked_fraction:
-            flag = "OVER_MASKED"
+            flag = f"OVER_MASKED,{flag}" if flag else "OVER_MASKED"
             over_masked.append((taxid, name, frac))
             warn(f"{taxid} {name}: {frac:.1%} of the genome would be masked, above "
                  f"--max-masked-fraction {args.max_masked_fraction:.0%}. BED is written "
@@ -561,7 +667,7 @@ def main() -> int:
             hm = mask_dir / f"{stem}.masked.fna.gz"
             with gzip.open(hm, "wt") as out:
                 for cname, seq in seqs.items():
-                    if contig_owner.get(cname) != stem:
+                    if contig_owner.get(cname) != owner:
                         continue
                     lst = list(seq)
                     for a, b, _ in merged.get(cname, []):
@@ -586,22 +692,54 @@ def main() -> int:
 
     if summary:
         mpath = mask_dir / "mask_manifest.tsv"
-        with mpath.open("w", newline="") as fh:
-            w = csv.DictWriter(fh, fieldnames=list(summary[0]), delimiter="\t")
-            w.writeheader()
-            for s in summary:
-                w.writerow(s)
-        log(f"wrote {mpath}")
 
-        tot_g = sum(s["genome_bp"] for s in summary)
-        tot_m = sum(s["masked_bp"] for s in summary)
+        # MERGE, DO NOT REWRITE.
+        #
+        # `summary` holds only the genomes masked in THIS invocation, and `todo`
+        # excludes every genome whose BED already exists. So a run interrupted at
+        # genome 300 of 363 and then restarted rewrote the manifest with the 63
+        # remaining rows, destroying the record of the 296 already masked - with all
+        # 363 BEDs still on disk and exit code 0. `--only-taxid 263` cut it to one
+        # row. This is the same truncation already fixed in build_pack_refs.py and
+        # build_marker_db.py; it was never fixed here.
+        fresh = {str(row["taxid"]) for row in summary}
+        carried: list[dict] = []
+        if mpath.exists():
+            try:
+                with mpath.open() as fh:
+                    for old in csv.DictReader(fh, delimiter="\t"):
+                        if str(old.get("taxid", "")).strip() not in fresh:
+                            carried.append(old)
+            except OSError as exc:
+                die(f"cannot read {mpath} to merge ({exc}). Refusing to continue: "
+                    f"rewriting it from this run alone would drop "
+                    f"{'the other genomes' if fresh else 'everything'} masked earlier.")
+        if carried:
+            log(f"carrying forward {len(carried)} manifest row(s) from earlier runs")
+
+        cols = list(summary[0])
+        allrows = summary + [{c: old.get(c, "") for c in cols} for old in carried]
+        allrows.sort(key=lambda row: str(row.get("name", "")))
+        with mpath.open("w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=cols, delimiter="\t")
+            w.writeheader()
+            for row in allrows:
+                w.writerow(row)
+        log(f"wrote {mpath} ({len(allrows)} row(s): {len(summary)} this run, "
+            f"{len(carried)} carried)")
+
+        tot_g = sum(int(row["genome_bp"] or 0) for row in allrows)
+        tot_m = sum(int(row["masked_bp"] or 0) for row in allrows)
         log("")
-        log(f"SUMMARY: {len(summary)} genome(s), {human(tot_g)} total, "
-            f"{tot_m} bp masked ({tot_m / tot_g:.3%} overall)")
+        pct = f"{tot_m / tot_g:.3%} overall" if tot_g else "no bases"
+        log(f"SUMMARY: {len(allrows)} genome(s), {human(tot_g)} total, "
+            f"{tot_m} bp masked ({pct})")
         for src in ALL_SOURCES:
             if src in sources:
-                v = sum(s[f"{src}_bp"] for s in summary)
+                v = sum(int(row.get(f"{src}_bp") or 0) for row in allrows)
                 log(f"  {src:<14} {v} bp")
+        log("  (per-source figures are FOOTPRINTS and may overlap, so they need not")
+        log("   sum to the masked total; only masked_bp is a partition of the genome)")
         if over_masked:
             log("")
             warn(f"{len(over_masked)} genome(s) flagged OVER_MASKED - review before use:")
