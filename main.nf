@@ -399,10 +399,31 @@ workflow {
     // -- Stage 2: targeted confirmation -----------------------------------
     // Fan out one alignment job per (sample, candidate taxon). Candidates are
     // few by construction, so this stays cheap even on large runs.
+    // NO SECOND READ-COUNT GATE HERE. THIS ONE SILENTLY DISCARDED EVERY SYLPH HIT.
+    //
+    // There used to be a
+    //     .filter { (row.assigned_reads as Integer) >= params.min_screen_reads }
+    // which looks like a harmless echo of the stage-1 threshold and is neither
+    // harmless nor an echo. `assigned_reads` is a READ COUNT, and only the read-based
+    // arms (kraken2, krakenuniq, metabuli) produce one; sylph reports ANI containment
+    // and abundance, so a sylph-raised candidate carries assigned_reads=0 BY
+    // CONSTRUCTION. With min_screen_reads=10, `0 >= 10` is false and the candidate was
+    // dropped before stage 2 ever saw it.
+    //
+    // Measured on the first end-to-end run: Y. pestis at sylph abundance 6.46 and
+    // E. coli at 22.17 were both raised correctly by PARSE_SCREEN, both filtered out
+    // here, MINIMAP2_COMPETITIVE received nothing, and the run exited 0 with a
+    // header-only findings.tsv - on a positive control whose scenario file says "any
+    // outcome other than confirmed is a configuration fault". A clean negative for the
+    // entire watchlist, reported as success.
+    //
+    // bin/parse_screen.py is the single place candidacy is decided: it applies
+    // --min-reads to each read-based classifier, requires non-empty support, and
+    // documents "Permissive OR: any classifier raises the candidate. Stage 2 decides."
+    // Re-filtering on a read count here overrode that and contradicted it.
     ch_candidates = PARSE_SCREEN.out.candidates
         .splitCsv(header: true, sep: '\t', elem: 1)
         .map { meta, row -> tuple(meta, row) }
-        .filter { _meta, row -> (row.assigned_reads as Integer) >= params.min_screen_reads }
 
     ch_confirm_in = ch_candidates
         .combine(ch_clean, by: 0)

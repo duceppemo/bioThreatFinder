@@ -816,6 +816,31 @@ def test_workflow_scripts(tmp: Path) -> None:
                    f"{len(optional)} optional inputs share the NO_FILE basename; "
                    f"declared without stageAs: {unstaged}")
 
+    # ---- stage 2 must not re-gate candidates on a read count ----
+    #
+    # main.nf carried a
+    #     .filter { (row.assigned_reads as Integer) >= params.min_screen_reads }
+    # between PARSE_SCREEN and stage 2. `assigned_reads` is a READ COUNT and only the
+    # read-based arms produce one; sylph reports ANI containment, so a sylph-raised
+    # candidate has assigned_reads=0 by construction and was silently dropped. On the
+    # first end-to-end run that discarded Y. pestis (sylph abundance 6.46) and E. coli
+    # (22.17) and the run exited 0 with a header-only findings.tsv - a clean negative
+    # for the whole watchlist, reported as success, on a positive control.
+    #
+    # bin/parse_screen.py is the single place candidacy is decided and it already
+    # applies --min-reads per classifier.
+    # Strip // comments first: the comment explaining this defect quotes the removed
+    # filter verbatim, and matching that would make the test fail on its own docs.
+    main_text = "\n".join(
+        re.sub(r"//.*$", "", ln)
+        for ln in (REPO / "main.nf").read_text(encoding="utf-8").splitlines())
+    gate = re.search(r"\.filter\s*\{[^}]*assigned_reads[^}]*\}", main_text)
+    record("workflow:stage 2 does not re-filter candidates on assigned_reads",
+           gate is None,
+           f"found a read-count gate after PARSE_SCREEN: "
+           f"{gate.group(0)[:90] if gate else ''} - this drops every candidate raised "
+           f"by a classifier that reports containment rather than reads")
+
 
 CASES = {
     "selftests": test_selftests,
