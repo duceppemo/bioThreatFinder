@@ -357,6 +357,8 @@ def main() -> int:
     ap.add_argument("--taxon", default="", help="target taxon name, for the report")
     ap.add_argument("--group", default="", help="bacteria|virus|parasite|fungus")
     ap.add_argument("--role", default="sample", help="sample|control")
+    ap.add_argument("--platform", default="",
+                    help="illumina|ont. Recorded so score_evidence.py can apply a\nplatform-appropriate read-identity floor; a 0.98 floor built for Illumina cannot\nbe met by ONT reads at all.")
     ap.add_argument("--mapq-min", type=int, default=10)
     ap.add_argument("--window", type=int, default=1000,
                     help="window size in bp for occupancy [1000]")
@@ -448,6 +450,7 @@ def main() -> int:
         "taxid": args.taxid,
         "taxon": args.taxon,
         "group": args.group,
+        "platform": (args.platform or "").strip().lower(),
         "reference_bp": target_len,
         "reference_bp_raw": target_len_raw,
         "masked_bp": masked_bp,

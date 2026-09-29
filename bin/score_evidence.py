@@ -86,6 +86,42 @@ def read_tsv(path: Path) -> list[dict]:
     return list(csv.DictReader(lines, delimiter="\t"))
 
 
+def resolve_identity_floor(thresholds: dict, group: str,
+                           platform: str) -> tuple[float, str]:
+    """The read-identity floor for this group ON THIS PLATFORM, and why.
+
+    Resolution order, most specific first:
+        platform + group  ->  platform default  ->  group  ->  global default
+
+    WHY PLATFORM IS IN HERE AT ALL. The floor was group-only, and `platform` did not
+    appear anywhere in this file. The pack's default is 0.98, which is a statement
+    about Illumina substitution error as much as about phylogenetic distance. ONT
+    reads do not reach it: R10.4.1 simplex means ~97-98%, and the badread defaults
+    the benchmark simulates with produce 95%. So every bacterial and fungal ONT
+    finding failed the identity gate on sequencing error alone and capped at
+    `supported`, at every spike level, with a reason string that reads exactly like
+    genuinely weak evidence. Returning the reason alongside the number is deliberate:
+    the findings row now says which rule was applied, so a floor that is too strict
+    is visible in the output instead of having to be inferred.
+    """
+    by_plat = (thresholds.get("min_read_identity_by_platform") or {}).get(platform)
+    if isinstance(by_plat, dict):
+        if group and group in by_plat:
+            return as_float(by_plat[group], thresholds["min_read_identity"]), \
+                f"{platform}/{group}"
+        if "default" in by_plat:
+            return as_float(by_plat["default"], thresholds["min_read_identity"]), \
+                f"{platform}/default"
+    by_group = (thresholds.get("min_read_identity_by_group") or {})
+    if group and group in by_group:
+        return as_float(by_group[group], thresholds["min_read_identity"]), group
+    # No platform recorded at all is worth saying out loud: it means the floor is the
+    # Illumina-shaped global default, which on ONT data is unreachable.
+    return thresholds["min_read_identity"], (
+        f"{group or 'default'}, no platform recorded" if not platform
+        else f"{group or 'default'}")
+
+
 def load_pack_thresholds(pack_yaml: Path) -> dict:
     """Read the pack's thresholds block.
 
@@ -102,6 +138,7 @@ def load_pack_thresholds(pack_yaml: Path) -> dict:
         "min_mapped_fraction_of_assigned": 0.50,
         "min_alignment_length": 100.0,
         "min_read_identity_by_group": {},
+        "min_read_identity_by_platform": {},
     }
     if not pack_yaml or not pack_yaml.exists():
         return defaults
@@ -110,16 +147,32 @@ def load_pack_thresholds(pack_yaml: Path) -> dict:
         import btf_yaml
         doc = btf_yaml.load(pack_yaml)
     except Exception as exc:
+        # FATAL, NOT A FALLBACK.
+        #
+        # This used to warn and return the built-in defaults, whose
+        # min_read_identity_by_group is EMPTY. A single editing slip in pack.yaml -
+        # any construct btf_yaml rejects - therefore silently replaced the pack's
+        # per-group identity floors with the flat 0.98 bacterial floor, downgrading
+        # every virus confirmation in the run from confirmed_in_silico to supported.
+        # The only trace was one stderr line in score.log, while the findings TSV
+        # reason string read like a legitimate threshold decision. btf_yaml's own
+        # contract is "fail loudly rather than mis-parse quietly"; honouring that
+        # contract and then discarding the failure defeats it.
         sys.stderr.write(
-            f"[score] WARNING: could not parse {pack_yaml} ({exc}); using built-in "
-            "threshold defaults. Verify the pack file rather than trusting these.\n")
-        return defaults
+            f"[score] FATAL: could not parse {pack_yaml}: {exc}\n"
+            "[score] Refusing to score with built-in defaults: they carry no "
+            "per-group or per-platform identity floors, so every virus and every "
+            "ONT finding would be judged against the Illumina bacterial floor and "
+            "silently downgraded. Fix the pack file.\n")
+        sys.exit(2)
     block = (doc or {}).get("thresholds") or {}
     out = dict(defaults)
     for k, v in block.items():
         out[k] = v
     if not isinstance(out.get("min_read_identity_by_group"), dict):
         out["min_read_identity_by_group"] = {}
+    if not isinstance(out.get("min_read_identity_by_platform"), dict):
+        out["min_read_identity_by_platform"] = {}
     return out
 
 
@@ -239,10 +292,15 @@ def main() -> int:
         taxid = row["taxid"]
         meta = watch.get(taxid, {})
 
-        min_reads = as_float(meta.get("min_unique_reads"), thresholds["min_unique_reads"]) \
-            or thresholds["min_unique_reads"]
-        min_breadth = as_float(meta.get("min_breadth"), thresholds["min_breadth"]) \
-            or thresholds["min_breadth"]
+        # `as_float(x, default)` already falls back when the field is absent or
+        # unparseable. The trailing `or thresholds[...]` that used to be here also
+        # swallowed a LEGITIMATE ZERO: a watchlist row asking for
+        # min_unique_reads: 0 ("report every read for this select agent") had its
+        # request replaced by the pack default, and the reason string then cited a
+        # threshold the operator never set.
+        min_reads = as_float(meta.get("min_unique_reads"),
+                             thresholds["min_unique_reads"])
+        min_breadth = as_float(meta.get("min_breadth"), thresholds["min_breadth"])
 
         unique_reads = as_float(row.get("unique_reads"))
         breadth = as_float(row.get("breadth"))
@@ -278,15 +336,14 @@ def main() -> int:
                 # legitimately far from any available reference and the same floor
                 # would manufacture false negatives where sensitivity matters most.
                 grp = (row.get("group") or meta.get("group") or "").strip().lower()
-                id_floor = as_float(
-                    (thresholds.get("min_read_identity_by_group") or {}).get(grp),
-                    thresholds["min_read_identity"])
+                plat = (row.get("platform") or "").strip().lower()
+                id_floor, floor_src = resolve_identity_floor(thresholds, grp, plat)
 
                 gates = {
                     f"breadth {breadth:.4f} >= {min_breadth:.4f}": breadth >= min_breadth,
                     f"occupancy {occupancy:.4f} >= {args.min_occupancy:.4f}":
                         occupancy >= args.min_occupancy,
-                    f"identity {identity:.4f} >= {id_floor:.4f} ({grp or 'default'})":
+                    f"identity {identity:.4f} >= {id_floor:.4f} ({floor_src})":
                         identity >= id_floor,
                     f"depth_cv {depth_cv:.2f} <= {thresholds['max_depth_cv']:.2f}":
                         depth_cv <= thresholds["max_depth_cv"],

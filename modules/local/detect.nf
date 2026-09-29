@@ -383,6 +383,7 @@ process COVERAGE_STATS {
         --taxon '${meta.taxon}' \\
         --group '${meta.group}' \\
         --role ${meta.role} \\
+        --platform ${meta.platform} \\
         --mapq-min ${params.mapq_min} \\
         --total-reads \$(cat ${nreads}) \\
         --assigned-reads ${meta.assigned_reads ?: 0} \\
