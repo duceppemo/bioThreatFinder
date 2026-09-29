@@ -93,6 +93,32 @@ def as_float(v, default=0.0) -> float:
         return default
 
 
+def unclassified_fraction(table: dict[str, dict]) -> tuple[int, int]:
+    """(unclassified_reads, total_reads) from a kraken-style report.
+
+    WHY THIS IS A FIRST-CLASS OUTPUT, NOT A DIAGNOSTIC
+
+    Perseus (Nguyen & Schatz, Bioinformatics 2026, doi:10.1093/bioinformatics/btag687)
+    measured what Kraken2 does with sequence from a family absent from its database:
+    the false-assignment rate approaches 50% on long reads. Divergent reads are not
+    left unclassified - they are CONFIDENTLY ASSIGNED TO THE WRONG KNOWN TAXON. One
+    family-exclusion scenario produced misclassifications while 89% of k-mers went
+    unclassified, and species assignments were frequently supported by a median of
+    only five k-mers.
+
+    For a surveillance tool the consequence is specific and severe: a novel agent is
+    not missed, it is mislabelled as something familiar and then dismissed as
+    background. The unclassified fraction is the only signal that survives that
+    failure mode, so it is reported on every sample rather than thrown away.
+    """
+    unc = table.get("0")
+    unclassified = unc["clade_reads"] if unc else 0
+    root = table.get("1")
+    classified = root["clade_reads"] if root else sum(
+        v["direct_reads"] for v in table.values())
+    return unclassified, unclassified + classified
+
+
 def parse_kraken_style(path: Path | None, label: str) -> dict[str, dict]:
     """Kraken2 / Bracken / Metabuli report: pct, clade, direct, rank, taxid, name.
 
@@ -238,6 +264,12 @@ def main() -> int:
                     help="reads-per-distinct-k-mer above this is flagged as piled "
                          "up on few k-mers (FLAG ONLY) [25.0]")
     ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--out-summary", type=Path,
+                    help="per-sample screen summary incl. the unclassified fraction")
+    ap.add_argument("--high-unclassified", type=float, default=0.40,
+                    help="warn above this unclassified fraction - in a surveillance "
+                         "context it is the signature of sequence the databases cannot "
+                         "name [0.40]")
     args = ap.parse_args()
 
     watch = read_tsv(args.watchlist)
@@ -389,6 +421,36 @@ def main() -> int:
                 "uses GTDB taxids, which do not join an NCBI-keyed watchlist. This arm "
                 "is contributing nothing. Verify with "
                 "scripts/build_metabuli_db.sh --mode refseq, or pass --skip_metabuli.\n")
+
+    # ---- unclassified fraction, per classifier ----
+    summary = []
+    for label, table in (("krakenuniq", ku), ("kraken2", k2), ("metabuli", mb)):
+        if not table:
+            continue
+        unc, tot = unclassified_fraction(table)
+        frac = (unc / tot) if tot else 0.0
+        summary.append({
+            "sample": args.sample, "role": args.role, "platform": args.platform,
+            "classifier": label, "total_reads": tot, "unclassified_reads": unc,
+            "unclassified_fraction": f"{frac:.6f}",
+            "flag": ("HIGH_UNCLASSIFIED" if frac >= args.high_unclassified else ""),
+        })
+        if frac >= args.high_unclassified:
+            sys.stderr.write(
+                f"[screen] {args.sample}: {label} left {frac:.1%} of reads UNCLASSIFIED "
+                f"({unc}/{tot}). In a surveillance context a high unclassified fraction "
+                "is the signature of sequence the databases cannot name. It is also the "
+                "only signal that survives the failure mode where a divergent agent is "
+                "confidently mislabelled as a known taxon rather than missed - so "
+                "triage this fraction, do not discard it.\n")
+
+    if args.out_summary and summary:
+        args.out_summary.parent.mkdir(parents=True, exist_ok=True)
+        with args.out_summary.open("w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(summary[0]), delimiter="\t")
+            w.writeheader()
+            for r in summary:
+                w.writerow(r)
 
     rows.sort(key=lambda r: (-r["n_classifiers"], -r["assigned_reads"]))
 

@@ -101,86 +101,180 @@ scenarios:
 
     # -----------------------------------------------------------------------
     # SENSITIVITY / LIMIT OF DETECTION
-    # One representative per group, since genome size and composition drive the
-    # detection curve more than taxon identity does.
+    #
+    # Designed against New York State DOH CLEP, "Validation of Next Generation
+    # Sequencing (NGS) Methods for Identification and/or Characterization of
+    # Infectious Agents" (March 2023) - the only document from any regulator with
+    # concrete numeric acceptance criteria that explicitly addresses metagenomic
+    # assays. Four of its requirements shape what follows:
+    #
+    #   1. "For metagenomic sequencing assays, a LOD should be determined for
+    #      representative members of EACH CATEGORY of pathogen that may be reported
+    #      (e.g. DNA virus, RNA virus, gram-positive bacteria, gram-negative
+    #      bacteria, mold, yeast, parasite)." All seven categories are covered below
+    #      and tagged with nysdoh_category so the mapping is auditable.
+    #   2. "6-8 ten-fold dilutions in specimen matrix with at least one dilution to
+    #      extinction." Levels are therefore DECADES, not the arbitrary steps this
+    #      file used before, and start below any plausible detection limit.
+    #   3. Separate LoD per specimen type. We approximate specimen type by host
+    #      fraction, which is the dominant driver; a real dossier needs real
+    #      matrices (CSF, BAL, serum, tissue, stool) and this cannot substitute.
+    #   4. Co-infection studies with up to 4 agents, to show no LoD degradation.
+    #
+    # CAVEAT ON REPLICATE COUNT: 3 replicates establishes the shape of the detection
+    # curve, not a defensible LoD. CLSI EP17-A2E-style confirmation needs ~20
+    # replicates at the candidate LoD to claim 95% detection. Run the curve first,
+    # then a confirmation scenario at the level it indicates.
     # -----------------------------------------------------------------------
 
-    - id: lod_bacteria_ypestis
+    - id: lod_gram_negative
       description: >
-        Y. pestis dilution series with plasmids intact. 4.6 Mb genome, so breadth
-        accumulates at a moderate rate - the reference case for bacteria.
+        Y. pestis decade dilution series. 4.6 Mb gram-negative genome; the reference
+        case, and the taxon whose read floor is taken from UKHSA mSCAPE (min_count 100).
       kind: lod_series
+      nysdoh_category: gram_negative_bacteria
       spikes:
           - taxon: Yersinia pestis
             source: target
-            levels_rpm: [0.1, 0.5, 1, 5, 10, 50, 200]
+            levels_rpm: [0.01, 0.1, 1, 10, 100, 1000]
       truth:
           present: [Yersinia pestis]
       expect:
           - taxon: Yersinia pestis
-            min_tier_at_rpm: {10: supported, 50: confirmed_in_silico}
+            min_tier_at_rpm: {100: supported, 1000: confirmed_in_silico}
 
-    - id: lod_virus_sars2
+    - id: lod_gram_positive
       description: >
-        Small RNA virus, 30 kb. Breadth saturates fast, so detection should reach
-        further down than for a bacterium at equal RPM. Tests the other end of
-        the genome-size range.
+        L. monocytogenes decade series. Gram-positive, 2.9 Mb, and its near
+        neighbour L. innocua is in the standing background - so this measures
+        sensitivity in the presence of the confuser rather than in a clean field.
       kind: lod_series
+      nysdoh_category: gram_positive_bacteria
+      spikes:
+          - taxon: Listeria monocytogenes
+            source: target
+            levels_rpm: [0.01, 0.1, 1, 10, 100, 1000]
+      truth:
+          present: [Listeria monocytogenes]
+      expect:
+          - taxon: Listeria monocytogenes
+            min_tier_at_rpm: {100: supported}
+
+    - id: lod_rna_virus
+      description: >
+        SARS-CoV-2 decade series. 30 kb RNA virus - breadth saturates fast, so
+        detection should reach further down per RPM than for any bacterium.
+      kind: lod_series
+      nysdoh_category: rna_virus
       spikes:
           - taxon: Severe acute respiratory syndrome coronavirus 2
             source: target
-            levels_rpm: [0.1, 0.5, 1, 5, 10, 50]
+            levels_rpm: [0.01, 0.1, 1, 10, 100]
       truth:
           present: [Severe acute respiratory syndrome coronavirus 2]
       expect:
           - taxon: Severe acute respiratory syndrome coronavirus 2
-            min_tier_at_rpm: {5: supported, 10: confirmed_in_silico}
+            min_tier_at_rpm: {10: supported, 100: confirmed_in_silico}
 
-    - id: lod_parasite_pfalciparum
+    - id: lod_dna_virus
       description: >
-        23 Mb AT-rich genome. Breadth accumulates slowly, which is why the
-        watchlist sets min_breadth to 0.05 for this taxon. This scenario is the
-        check on whether that override is right or merely convenient.
+        Mpox decade series. ~197 kb dsDNA orthopoxvirus. A separate category from
+        RNA viruses because library chemistry and genome size both differ, and
+        because orthopoxvirus collinearity makes it the harder call.
       kind: lod_series
+      nysdoh_category: dna_virus
+      spikes:
+          - taxon: Monkeypox virus
+            source: target
+            levels_rpm: [0.01, 0.1, 1, 10, 100]
+      truth:
+          present: [Monkeypox virus]
+      expect:
+          - taxon: Monkeypox virus
+            min_tier_at_rpm: {100: supported}
+
+    - id: lod_parasite
+      description: >
+        P. falciparum decade series. 23 Mb AT-rich genome, so breadth accumulates
+        slowly - this is the scenario that tests whether the 0.005 breadth floor is
+        right or merely convenient.
+      kind: lod_series
+      nysdoh_category: parasite
       spikes:
           - taxon: Plasmodium falciparum
             source: target
-            levels_rpm: [1, 5, 10, 50, 200, 1000]
+            levels_rpm: [0.1, 1, 10, 100, 1000, 10000]
       truth:
           present: [Plasmodium falciparum]
       expect:
           - taxon: Plasmodium falciparum
-            min_tier_at_rpm: {50: supported}
+            min_tier_at_rpm: {1000: supported}
 
-    - id: lod_fungus_cauris
+    - id: lod_yeast
       description: >
-        C. auris dilution series. Eukaryotic, repeat-rich, and poorly served by
-        GTDB-based profiling, so this leans on Kraken2 plus alignment.
+        C. auris decade series. Yeast, repeat-rich, poorly served by GTDB-based
+        profiling so it leans on the nucleotide arm plus alignment.
       kind: lod_series
+      nysdoh_category: yeast
       spikes:
           - taxon: Candida auris
             source: target
-            levels_rpm: [1, 5, 10, 50, 200]
+            levels_rpm: [0.1, 1, 10, 100, 1000]
       truth:
           present: [Candida auris]
       expect:
           - taxon: Candida auris
-            min_tier_at_rpm: {50: supported}
+            min_tier_at_rpm: {1000: supported}
 
-    - id: lod_lowbiomass_ypestis
+    - id: lod_mold
       description: >
-        The same Y. pestis series at 99.9% host. This is the realistic hard case
-        for clinical metagenomics and the number that should be quoted as the
-        practical limit of detection, not the 95% figure.
+        A. fumigatus decade series. Mold - a distinct NYSDOH category from yeast.
+        Also the honest case: it is a ubiquitous airborne contaminant, so a
+        detection means little without cyp51A resistance context.
       kind: lod_series
+      nysdoh_category: mold
+      spikes:
+          - taxon: Aspergillus fumigatus
+            source: target
+            levels_rpm: [0.1, 1, 10, 100, 1000]
+      truth:
+          present: [Aspergillus fumigatus]
+      expect:
+          - taxon: Aspergillus fumigatus
+            min_tier_at_rpm: {1000: supported}
+
+    - id: lod_lowbiomass_gram_negative
+      description: >
+        The same Y. pestis series at 99.9% host. NYSDOH requires a separate LoD per
+        specimen type; host fraction is the dominant axis we can simulate. THIS is
+        the number to quote as the practical limit of detection, not the 95% one.
+      kind: lod_series
+      nysdoh_category: gram_negative_bacteria
       host_fraction: 0.999
       total_reads: 40000000
       spikes:
           - taxon: Yersinia pestis
             source: target
-            levels_rpm: [1, 5, 10, 50, 200, 1000]
+            levels_rpm: [1, 10, 100, 1000, 10000]
       truth:
           present: [Yersinia pestis]
+
+    - id: downsample_accuracy_floor
+      description: >
+        In-silico down-sampling of a comfortably positive library, to find the depth
+        at which the pipeline stops being accurate. NYSDOH CLEP endorses exactly
+        this: "a pipeline's lower limit for accuracy can be assessed with in-silico
+        serial down-sampling of sequencing reads." Cheaper than a dilution series
+        because it re-uses one library, and it isolates the DRY lab.
+      kind: lod_series
+      nysdoh_category: pipeline_floor
+      spikes:
+          - taxon: Yersinia pestis
+            source: target
+            levels_rpm: [100]
+      truth:
+          present: [Yersinia pestis]
+      downsample_total_reads: [40000000, 20000000, 10000000, 5000000, 2000000, 1000000]
 
     # -----------------------------------------------------------------------
     # SPECIFICITY - the near neighbours that actually cause false positives.
@@ -559,12 +653,15 @@ scenarios:
     # CO-INFECTION
     # -----------------------------------------------------------------------
 
-    - id: coinfection_three_targets
+    - id: coinfection_four_targets
       description: >
-        Three unrelated watchlist targets at different abundances plus two
-        confusers. Tests that one strong signal does not mask a weaker one, and
-        that abundance estimation does not cross-talk between taxa.
+        Four unrelated watchlist targets at different abundances plus two confusers.
+        Four because NYSDOH CLEP asks for co-infection studies with up to 4 agents at
+        mixed high and low concentrations, to demonstrate no LoD degradation. Tests
+        that one strong signal does not mask a weaker one and that abundance
+        estimation does not cross-talk between taxa.
       kind: lod_series
+      nysdoh_category: coinfection
       spikes:
           - taxon: Yersinia pestis
             source: target
@@ -575,6 +672,9 @@ scenarios:
           - taxon: Plasmodium falciparum
             source: target
             levels_rpm: [500]
+          - taxon: Candida auris
+            source: target
+            levels_rpm: [50]
           - taxon: Bacillus cereus
             source: neighbour
             levels_rpm: [500]
@@ -582,7 +682,7 @@ scenarios:
             source: neighbour
             levels_rpm: [200]
       truth:
-          present: [Yersinia pestis, Mycobacterium tuberculosis, Plasmodium falciparum, Bacillus cereus, Entamoeba dispar]
+          present: [Yersinia pestis, Mycobacterium tuberculosis, Plasmodium falciparum, Candida auris, Bacillus cereus, Entamoeba dispar]
           absent: [Bacillus anthracis, Entamoeba histolytica]
       expect:
           - taxon: Yersinia pestis
