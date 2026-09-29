@@ -308,8 +308,14 @@ def main() -> int:
         taxid = entry["taxid"]
         family = desc_of.get(taxid) or {taxid}
 
-        def clade_or_sum(table: dict[str, dict]) -> tuple[int, int]:
-            """(reads, direct_reads) for this watchlist clade."""
+        def clade_or_sum(table: dict[str, dict],
+                         taxid: str = taxid, family: set = family) -> tuple[int, int]:
+            """(reads, direct_reads) for this watchlist clade.
+
+            taxid/family are bound as defaults rather than captured: the closure is
+            called inside this iteration so late binding is harmless today, but the
+            pattern fails silently if it ever outlives the loop.
+            """
             self_hit = table.get(taxid)
             direct = sum(table[d]["direct_reads"] for d in family
                          if d in table and table[d]["direct_reads"] > 0)

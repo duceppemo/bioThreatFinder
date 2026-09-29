@@ -1160,7 +1160,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 collisions: set[tuple[str, str]] = set()
                 cur_tax, buf = None, []
 
-                def _flush(cur_tax, buf):
+                def _flush(cur_tax, buf, seen_md5=seen_md5, collisions=collisions):
                     if not cur_tax or not buf:
                         return
                     h = hashlib.md5("".join(buf).encode()).hexdigest()

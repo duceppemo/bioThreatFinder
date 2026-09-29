@@ -358,7 +358,7 @@ def test_coverage_metrics(tmp: Path) -> None:
                 f"\t{'A'*ln}\t{'I'*ln}\tNM:i:{nm}")
 
     sam = tmp / "t.sam"
-    lines = [f"@HD\tVN:1.6\tSO:coordinate", f"@SQ\tSN:{tgt}\tLN:{L}", f"@SQ\tSN:{nb}\tLN:{L}"]
+    lines = ["@HD\tVN:1.6\tSO:coordinate", f"@SQ\tSN:{tgt}\tLN:{L}", f"@SQ\tSN:{nb}\tLN:{L}"]
     lines += [rd(f"f{i}", tgt, p, 60) for i, p in enumerate([1, 201, 401, 601])]
     lines += [rd("r0", tgt, 801, 60, flag=16),      # reverse strand
               rd("dup0", tgt, 1, 60),                # duplicate start position
@@ -418,7 +418,6 @@ def test_coverage_metrics(tmp: Path) -> None:
 # ---------------------------------------------------------------------------
 
 def test_screen(tmp: Path) -> None:
-    resolved = PACK / "watchlist.resolved.tsv"
     desc = tmp / "desc.tsv"
     p = run([sys.executable, SCRIPTS / "resolve_watchlist.py",
              "--watchlist", PACK / "watchlist.tsv",

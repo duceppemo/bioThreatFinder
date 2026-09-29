@@ -155,7 +155,10 @@ for v in "${selected[@]}"; do
   else
     log "RUN  ${name}  ${extra:-<all arms>}"
     log "     ${rationale}"
-    # shellcheck disable=SC2086
+    # Word splitting on $extra is INTENTIONAL: it carries several flags
+    # ("--skip_krakenuniq --skip_metabuli") that must become separate array elements.
+    # Quoting it would pass them to nextflow as one argument.
+    # shellcheck disable=SC2086,SC2206
     cmd=("$NEXTFLOW" run "$REPO_DIR"
          -profile "$PROFILE"
          --input "$SAMPLESHEET"

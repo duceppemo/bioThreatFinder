@@ -115,6 +115,7 @@ DEFAULTS = {
     "host": "human",
     "host_fraction": 0.95,
     "total_reads": 20_000_000,
+    "ont_total_reads": 4_000_000,
     "read_length": 150,
     "ont_mean_length": 5000,
 }
@@ -378,7 +379,7 @@ class Scenario:
     __slots__ = ("sid", "description", "kind", "spikes", "present", "absent",
                  "vaccine", "include_ntc", "index_hop_fraction", "replicates",
                  "platforms", "host", "host_fraction", "total_reads",
-                 "read_length", "ont_mean_length", "background")
+                 "ont_total_reads", "read_length", "ont_mean_length", "background")
 
     def __init__(self, **kw):
         for k in self.__slots__:
@@ -435,6 +436,11 @@ def load_scenarios(path: Path) -> Tuple[Scenario, ...]:
                                   DEFAULTS["host_fraction"]),
         "total_reads": as_int(d.get("total_reads"), "defaults.total_reads",
                               DEFAULTS["total_reads"]),
+        # ONT depth is not the same number as Illumina depth. 20M reads at a 5 kb mean
+        # is ~100 Gbp, which no real flow cell delivers - simulating it would measure a
+        # machine that does not exist and flatter long-read sensitivity accordingly.
+        "ont_total_reads": as_int(d.get("ont_total_reads"), "defaults.ont_total_reads",
+                                  DEFAULTS["ont_total_reads"]),
         "read_length": as_int(d.get("read_length"), "defaults.read_length",
                               DEFAULTS["read_length"]),
         "ont_mean_length": as_int(d.get("ont_mean_length"), "defaults.ont_mean_length",
@@ -568,6 +574,10 @@ def load_scenarios(path: Path) -> Tuple[Scenario, ...]:
                              base["total_reads"])
         if total_reads <= 0:
             raise _bad(f"{where}.total_reads", "must be positive")
+        ont_total_reads = as_int(s.get("ont_total_reads"), f"{where}.ont_total_reads",
+                                 base["ont_total_reads"])
+        if ont_total_reads <= 0:
+            raise _bad(f"{where}.ont_total_reads", "must be positive")
 
         out.append(Scenario(
             sid=sid,
@@ -586,6 +596,7 @@ def load_scenarios(path: Path) -> Tuple[Scenario, ...]:
             host=as_str(s.get("host"), f"{where}.host", base["host"]),
             host_fraction=host_fraction,
             total_reads=total_reads,
+            ont_total_reads=ont_total_reads,
             read_length=as_int(s.get("read_length"), f"{where}.read_length",
                                base["read_length"]),
             ont_mean_length=as_int(s.get("ont_mean_length"),
@@ -627,12 +638,47 @@ class GenomeIndex:
     the wrong organism.
     """
 
-    def __init__(self, manifest_path: Path):
+    def __init__(self, manifest_path: Path, taxdump: Optional[Path] = None):
         self.manifest_path = manifest_path
+        self.taxdump = taxdump
         self.by_name: Dict[str, List[dict]] = {}
         self.by_taxid: Dict[str, List[dict]] = {}
         self.by_accession: Dict[str, dict] = {}
+        self._synonyms: Optional[Dict[str, str]] = None
         self._load()
+
+    def _synonym_taxid(self, taxon: str) -> Optional[str]:
+        """Resolve a name to a taxid through EVERY accepted NCBI name class.
+
+        The manifest stores the CURRENT SCIENTIFIC name that build_pack_refs.py
+        resolved, while scenario files and watchlists use the names people actually
+        write. Those diverge constantly: "Vaccinia virus" is now
+        "Orthopoxvirus vaccinia", "Francisella novicida" is
+        "Francisella tularensis subsp. novicida", "Bundibugyo ebolavirus" is
+        "Bundibugyo virus". An exact-name-only lookup declares all of them missing
+        even though the genome is sitting on disk.
+
+        Loaded lazily: it costs ~3M lines and is only needed when an exact match
+        fails.
+        """
+        if self.taxdump is None:
+            return None
+        if self._synonyms is None:
+            self._synonyms = {}
+            names = Path(self.taxdump) / "names.dmp"
+            if not names.is_file():
+                LOG.warning("no names.dmp under %s; cannot resolve a scenario name that "
+                            "differs from the manifest's scientific name", self.taxdump)
+                return None
+            with names.open(encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    f = [x.strip() for x in line.split("|")]
+                    if len(f) < 2 or not f[0].isdigit():
+                        continue
+                    self._synonyms.setdefault(self._key(f[1]), f[0])
+            LOG.info("loaded %d taxonomy name(s) for synonym resolution",
+                     len(self._synonyms))
+        return self._synonyms.get(self._key(taxon))
 
     @staticmethod
     def _key(name: str) -> str:
@@ -708,6 +754,18 @@ class GenomeIndex:
         hits = self.by_name.get(key)
         if not hits and str(taxon).strip().isdigit():
             hits = self.by_taxid.get(str(taxon).strip())
+        resolved_via = "name"
+        if not hits:
+            # Synonym fallback: resolve the name to a taxid through the taxdump, then
+            # match the manifest on taxid. This is matching the SAME ORGANISM under a
+            # different accepted name, not guessing at a similar one.
+            syn = self._synonym_taxid(taxon)
+            if syn:
+                hits = self.by_taxid.get(syn)
+                if hits:
+                    resolved_via = f"synonym -> taxid {syn}"
+                    LOG.info("spike %r resolved via taxonomy synonym to %r (taxid %s)",
+                             taxon, hits[0].get("name", "?"), syn)
         if not hits:
             # Genus-level fallback is deliberately NOT done. Suggest instead.
             suggestions = self._suggest(taxon)
@@ -718,16 +776,16 @@ class GenomeIndex:
                 f"a detection failure and corrupt every sensitivity number in the "
                 f"batch.\n"
                 + (f"       Did you mean: {', '.join(suggestions)}?\n" if suggestions else "")
-                + f"       Add the organism to the pack watchlist (or its "
-                  f"near_neighbour_taxids) and rerun build_pack_refs.py, or give the "
-                  f"spike an explicit `genome:` path."
+                + "       Add the organism to the pack watchlist (or its "
+                  "near_neighbour_taxids) and rerun build_pack_refs.py, or give the "
+                  "spike an explicit `genome:` path."
             )
         # Prefer the row with the largest recorded genome: for a taxon with both a
         # chromosome-only and a chromosome+plasmid assembly, the complete one is
         # the honest choice, and exclude_loci exists to subtract from it.
         best = max(hits, key=lambda r: int(r.get("genome_size") or 0))
         row = dict(best)
-        row["source"] = "manifest"
+        row["source"] = "manifest" if resolved_via == "name" else f"manifest ({resolved_via})"
         path = Path(row["path"])
         if not path.is_file() or path.stat().st_size == 0:
             raise SystemExit(
@@ -1389,7 +1447,10 @@ def _compose(sc: Scenario, level: Optional[float],
     components: List[Component] = []
     claimed = 0.0
 
-    for sp, ref in zip(sc.spikes, spike_refs):
+    # strict=True on purpose: spike_refs is built as a comprehension over sc.spikes so
+    # the lengths match today, but a silent zip truncation here would DROP A SPIKE while
+    # still writing its truth label - the exact failure this script refuses elsewhere.
+    for sp, ref in zip(sc.spikes, spike_refs, strict=True):
         rpm = level if (primary is not None and sp is primary and level is not None) \
             else sp.levels_rpm[0]
         frac = rpm / 1e6
@@ -1472,8 +1533,12 @@ def build_sample_plan(sc: Scenario, platform: str, rep: int, level: Optional[flo
     sample = "_".join(parts)
     seed = derive_seed(master_seed, sc.sid, rep, platform,
                        "" if level is None else "%g" % level, role)
+    # Per-platform depth. An ONT run at a 5 kb mean does not deliver an Illumina
+    # read count, so using one number for both would simulate a flow cell that does
+    # not exist and overstate long-read sensitivity.
+    depth = sc.ont_total_reads if platform == "ont" else sc.total_reads
     components, host_frac, notes = _compose(
-        sc, level, spike_refs, bg_refs, host_fasta, sc.total_reads,
+        sc, level, spike_refs, bg_refs, host_fasta, depth,
         primary, master_seed, sample)
 
     excluded = []
@@ -1491,7 +1556,7 @@ def build_sample_plan(sc: Scenario, platform: str, rep: int, level: Optional[flo
         fastq_1=reads_dir / (f"{sample}_R1.fastq.gz" if platform == "illumina"
                              else f"{sample}.fastq.gz"),
         fastq_2=(reads_dir / f"{sample}_R2.fastq.gz") if platform == "illumina" else None,
-        host_fraction=host_frac, total_reads=sc.total_reads,
+        host_fraction=host_frac, total_reads=depth,
         truth_present=present, truth_absent=sc.absent, truth_vaccine=sc.vaccine,
         excluded_loci=excluded, notes=notes)
 
@@ -1901,6 +1966,11 @@ notes:
     p.add_argument("--outdir", type=Path, default=None,
                    help="output root (default: <db-root>/bioThreatFinder/simulated). "
                         "Simulated FASTQ is large - keep it off the repo volume.")
+    p.add_argument("--taxdump", type=Path,
+                   default=Path("/media/8tb/bioThreatFinder/taxdump/2026-09-29"),
+                   help="pinned taxonomy snapshot, used ONLY to resolve a scenario "
+                        "taxon name that differs from the manifest's current "
+                        "scientific name (default: %(default)s)")
     p.add_argument("--db-root", type=Path, default=DEFAULT_DB_ROOT,
                    help="shared database root, as used by build_pack_refs.py "
                         "(default: %(default)s)")
@@ -1984,7 +2054,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 f"       Defined: {', '.join(sc.sid for sc in scenarios)}")
         scenarios = tuple(sc for sc in scenarios if sc.sid in wanted)
 
-    genomes = GenomeIndex(refs_manifest)
+    genomes = GenomeIndex(refs_manifest, taxdump=args.taxdump)
     plans, problems = plan_batch(scenarios, genomes, args.db_root, reads_dir,
                                  args.seed, platform_filter, args.replicates)
     if problems:

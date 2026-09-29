@@ -222,11 +222,23 @@ if [[ -z "$BRACKEN_BUILD" && $SKIP_BRACKEN -eq 0 ]]; then
        ${CONDA_BIN}/mamba install -c bioconda bracken"
     if (( DRY_RUN == 1 )); then warn "$msg"; BRACKEN_BUILD="bracken-build"; else die "$msg"; fi
 fi
-# kraken2-build shells out to these; failing here beats failing four hours in.
+# kraken2-build shells out to a downloader; failing here beats failing four hours in.
+#
+# It requires EITHER rsync OR wget, depending on the transport chosen below - and this
+# check used to hard-fail on a missing rsync unconditionally. That is wrong on any host
+# where rsync's port 873 is blocked (this one), because the build then legitimately runs
+# over wget and never touches rsync. Warn about whichever is absent and let
+# choose_transport() decide; ensure_working_wget() enforces the wget side.
 if (( DRY_RUN == 0 )); then
-    for dep in rsync; do
-        command -v "$dep" >/dev/null 2>&1 || die "kraken2-build requires '${dep}' on PATH"
-    done
+    _have_rsync=0; _have_wget=0
+    command -v rsync >/dev/null 2>&1 && _have_rsync=1
+    command -v wget  >/dev/null 2>&1 && _have_wget=1
+    if (( _have_rsync == 0 && _have_wget == 0 )); then
+        die "kraken2-build needs rsync or wget to download libraries and neither is on
+  PATH. Install one:  mamba install -n <env> -c conda-forge wget"
+    fi
+    (( _have_rsync == 0 )) && warn "rsync not found - only the ftp/wget transport is available"
+    (( _have_wget  == 0 )) && warn "wget not found - only the rsync transport is available"
     command -v dustmasker >/dev/null 2>&1 \
         || warn "dustmasker (from blast+) not found; it is only needed if you pass --no-masking's opposite, i.e. default low-complexity masking. Install blast+ if the build complains."
 fi
