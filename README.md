@@ -27,7 +27,7 @@ So the pipeline splits the question:
 
 | Stage | Question | Tooling | Posture |
 |---|---|---|---|
-| 1 | What *might* be here? | Kraken2 (+Bracken), sylph | Deliberately permissive — missing a lead is worse than carrying a false one forward |
+| 1 | What *might* be here? | KrakenUniq, Metabuli, Kraken2/Bracken, sylph | Deliberately permissive — missing a lead is worse than carrying a false one forward |
 | 2 | Does the alignment evidence hold up? | Competitive minimap2 + coverage geometry | Strict — this is what decides |
 
 Stage 2 is where the tool earns its keep. For every watchlist candidate it maps
@@ -59,6 +59,52 @@ gate decided it. Nothing is a bare verdict.
 | `attributed_to_neighbour` | Reads align better to a relative |
 | `control_background` | What the control itself contains (QC, not a finding) |
 | `screened_only` | Stage-1 lead that failed stage-2 — the expected fate of classifier noise |
+
+## Stage 1: four classifier arms
+
+One classifier is not good enough for an "is organism X present" question, and the
+arms fail in different directions:
+
+| Arm | What it contributes |
+|---|---|
+| **KrakenUniq** *(primary)* | **Distinct k-mer cardinality** per taxon (HyperLogLog), plus duplication ratio and estimated coverage |
+| **Metabuli** | Joint DNA + amino-acid k-mers — sees divergent and novel agents |
+| Kraken2 + Bracken | Abundance estimation, continuity with existing runs |
+| sylph | ANI/containment; very low FP for bacteria and fungi |
+
+**Why KrakenUniq is now primary.** Kraken2 counts *reads*. It cannot distinguish
+500 reads spread across a genome from 500 reads piled on one conserved k-mer — and
+the second case is exactly what a near neighbour or a low-complexity repeat
+produces. KrakenUniq additionally reports how many *distinct* k-mers were hit.
+That turns a read count into evidence about breadth **at stage 1, before any
+alignment compute is spent**. It is the same insight as window occupancy in stage 2,
+applied a step earlier.
+
+Demonstrated on fixtures — comparable read counts, opposite k-mer evidence:
+
+| Taxon | Reads | Distinct k-mers | Dup | Arms | Outcome |
+|---|---|---|---|---|---|
+| *Y. pestis* | 800 | 45,000 | 1.2 | 4 | clean |
+| *B. anthracis* | 600 | **78** | **41.2** | 2 | flagged at stage 1 |
+| Zaire ebolavirus | 120 | 3,100 | 1.1 | 2 | clean — and Metabuli found 3× what the nucleotide arm did |
+
+That last row is the divergence arm earning its place: an amino-acid-aware screen
+recovering signal a nucleotide screen under-calls.
+
+**Combining rule: any-classifier OR.** Any arm raises a candidate; stage 2
+discriminates. Requiring consensus would discard the sensitivity that running four
+arms buys. What consensus *does* do is get recorded — `n_classifiers` and the arm
+list travel into scoring and into the report, because a taxon seen by three
+independent methods is much stronger evidence than one seen by a single k-mer
+counter. K-mer quality is likewise **flagged, never enforced** at stage 1: a flag
+that reaches scoring is more useful than a candidate that silently vanished.
+
+One correctness detail worth knowing: **HyperLogLog cardinalities are not
+additive.** Summing the `kmers` column across descendant nodes double-counts shared
+k-mers and inflates the number, sometimes badly. So distinct-k-mer evidence uses
+the watchlist node's own clade estimate, falling back to the *maximum* over
+descendants — never the sum. Read counts, being plain integers over disjoint
+assignments, are summed normally.
 
 ## Marker genes (stage 2b)
 
@@ -274,6 +320,18 @@ results/
   pipeline_info/    timeline, trace, DAG
 ```
 
+## Database layout
+
+Deliberately split across two volumes:
+
+| Root | Volume | Holds |
+|---|---|---|
+| `db_root` = `/media/36tb/db` | 36 TB spinning, 97% full | Shared, pre-existing, **read-only**: `taxdump`, sylph GTDB sketch, `nt` |
+| `btf_db` = `/media/8tb/bioThreatFinder` | 7.3 TB NVMe, 15% used | Project-owned: KrakenUniq, Metabuli, Kraken2 indexes, host genomes, pack refs and markers |
+
+NVMe for the project-owned indexes is not cosmetic — KrakenUniq and Metabuli
+indexes are read-heavy and load time dominates per-sample wall clock.
+
 ## Target platform
 
 Design targets, set deliberately rather than by what happened to be installed:
@@ -341,8 +399,6 @@ Not yet run on real sequencing data, and no databases built yet.
 - Single reference genome per taxon; intraspecies diversity means breadth
   understates a divergent strain. Multi-reference/pangenome bundles are the
   accurate version
-- Stage 1 is Kraken2-based; KrakenUniq or Metabuli would cut species-level false
-  positives at the source instead of leaving it all to stage 2
 - Animal and plant packs are directory stubs — no watchlist or host genomes
 - 31 of 89 watchlist taxa have no marker rule (all `notifiable`, none
   `high_consequence`)

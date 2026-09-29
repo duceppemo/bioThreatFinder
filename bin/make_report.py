@@ -172,7 +172,9 @@ def render_table(rows: list[dict]) -> str:
         ("breadth", "Breadth", "num"), ("window_occupancy", "Occupancy", "num"),
         ("mean_depth", "Depth", "num"), ("depth_cv", "Depth CV", "num"),
         ("mean_identity", "Identity", "num"), ("neighbour_ratio", "Nb ratio", "num"),
-        ("orthogonal_concordance", "Sylph", ""),
+        ("n_classifiers", "Clf", "num"),
+        ("classifiers", "Stage-1 arms", ""),
+        ("distinct_kmers", "Distinct k-mers", "num"),
         ("marker_verdict", "Marker rules", "why"),
         ("reasons", "Why this tier", "why"),
         ("taxon_notes", "Taxon caveats", "note"),
@@ -296,7 +298,8 @@ data alone - read the taxon caveats column.</p>
 
     summary_cols = ["sample", "role", "tier", "taxid", "taxon", "group", "category",
                     "unique_reads", "reads_per_million", "breadth", "window_occupancy",
-                    "mean_identity", "neighbour_ratio", "orthogonal_concordance", "reasons"]
+                    "mean_identity", "neighbour_ratio", "n_classifiers", "classifiers",
+                    "distinct_kmers", "screen_flags", "orthogonal_concordance", "reasons"]
     with args.summary.open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=summary_cols, delimiter="\t", extrasaction="ignore")
         w.writeheader()
