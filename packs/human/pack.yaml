@@ -99,6 +99,9 @@ thresholds:
   # Wright et al. (ii): if most of the reads a classifier assigned do not survive
   # alignment, the k-mer evidence did not hold up.
   min_mapped_fraction_of_assigned: 0.50
+  # Short alignments are a documented false-positive source on ONT, where a 50 bp
+  # match inside a 10 kb read says almost nothing about where that read came from.
+  min_alignment_length: 100
   mapq_min: 10
 
 # ---------------------------------------------------------------------------

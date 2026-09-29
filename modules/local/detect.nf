@@ -284,6 +284,7 @@ process PARSE_SCREEN {
 
     output:
     tuple val(meta), path("${meta.id}.candidates.tsv"), emit: candidates
+    tuple val(meta), path("${meta.id}.screen_summary.tsv"), optional: true, emit: summary
     path "${meta.id}.screen.log"                      , emit: log
 
     script:
@@ -308,6 +309,7 @@ process PARSE_SCREEN {
         --platform ${meta.platform} \\
         --min-reads ${params.min_screen_reads} \\
         --out ${meta.id}.candidates.tsv \\
+        --out-summary ${meta.id}.screen_summary.tsv \\
         2> ${meta.id}.screen.log
     cat ${meta.id}.screen.log >&2
     """

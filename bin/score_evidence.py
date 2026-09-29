@@ -100,6 +100,7 @@ def load_pack_thresholds(pack_yaml: Path) -> dict:
         "max_depth_cv": 2.5,
         "min_read_identity": 0.98,
         "min_mapped_fraction_of_assigned": 0.50,
+        "min_alignment_length": 100.0,
         "min_read_identity_by_group": {},
     }
     if not pack_yaml or not pack_yaml.exists():
@@ -290,6 +291,16 @@ def main() -> int:
                     f"depth_cv {depth_cv:.2f} <= {thresholds['max_depth_cv']:.2f}":
                         depth_cv <= thresholds["max_depth_cv"],
                 }
+                # Minimum alignment length. Short alignments are a documented
+                # false-positive source on ONT data specifically, where a 50 bp
+                # match inside a 10 kb read says almost nothing about the read's
+                # origin. Only applied when the metric is present.
+                mean_aln = as_float(row.get("mean_alignment_length"), -1.0)
+                if mean_aln >= 0:
+                    aln_floor = as_float(thresholds.get("min_alignment_length"), 100.0)
+                    gates[f"mean_alignment_length {mean_aln:.0f} >= {aln_floor:.0f}"] = \
+                        mean_aln >= aln_floor
+
                 # Wright et al. criterion (ii). Only applied when the denominator is
                 # known - absent stage-1 counts must not fabricate a failed gate.
                 mapped_frac = as_float(row.get("mapped_fraction_of_assigned"), -1.0)

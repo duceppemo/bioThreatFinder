@@ -112,10 +112,56 @@ CARD, ResFinder and DeepARG databases are already present on this box.
 
 Ranked by published effect size. Sources in each line.
 
+### 0. CORRECTION to earlier advice in this file and in conversation
+I previously told the user target enrichment was the single biggest sensitivity lever,
+"orders of magnitude" ahead of software. **For a mission that must catch DIVERGENT
+agents that is wrong, and measurably so.** Yamaguchi et al. 2025 measured it:
+
+  * Capture needs **>65% nucleotide identity over >=1 kb contiguous** to enrich at all.
+  * Off-panel agents get WORSE: simian haemorrhagic fever virus read abundance fell
+    **25-fold** after capture; Nodamura virus segment 1 fell 33-fold, segment 2 50-fold.
+  * A divergent bunyavirus that assembled readily from shotgun reads was "orders of
+    magnitude lower" in the capture library.
+  * Panels also age: probes designed on 2017-2018 influenza gave 40-86% coverage for
+    H5N1 clade 2.3.4.4b vs >98.5% for a 2024-designed panel.
+
+So enrichment is a large lever for ON-PANEL targets in low-biomass matrices and an
+actively NEGATIVE one for the novel agent this tool exists to catch. The published
+answer if both are wanted is **teamNGS**: pool enriched and unenriched libraries
+90:10 or 80:20 in one run, which beat mNGS alone (p=0.0001 viral) and capture alone
+(p=0.02). **Always keep an unenriched arm.**
+
+Adaptive sampling is likewise not the lever I implied: 1.2-5x realised enrichment,
+50-80% yield cost, 400 bp fragment floor. Treat it as free polishing, not strategy.
+
+### 0b. THE novel-agent failure mode - act on this first
+Perseus (Bioinformatics 2026, doi:10.1093/bioinformatics/btag687) measured what
+Kraken2 does with sequence whose family is absent from the database: **the
+false-assignment rate approaches 50% on long reads.** Divergent reads are not left
+unclassified, they are CONFIDENTLY ASSIGNED TO THE WRONG KNOWN TAXON. Species
+assignments were frequently supported by a median of only five k-mers.
+
+For surveillance this is the worst possible shape of error: the novel agent is not
+missed, it is mislabelled as something familiar and dismissed as background. No
+amount of stage-2 confirmation on the WRONG taxon recovers it.
+
+Partially addressed: the unclassified fraction is now a first-class per-sample output
+with a HIGH_UNCLASSIFIED flag, because it is the only signal that survives this
+failure mode. Still to do:
+  * a Perseus-style abstention/rank-back-off layer, so the honest answer "genus
+    Bacillus, insufficient evidence for anthracis" can be emitted
+  * triage of the unclassified fraction (assemble it, protein-search it) rather than
+    only counting it
+  * keep Metabuli despite its poor independent precision - its role here is RECALL on
+    divergent sequence, and stage 2 supplies the precision. The two reports appear to
+    conflict on Metabuli; they do not, once its role is stated correctly.
+
 ### A. Mask the reference database before tuning any threshold
-VirMask-style removal of recurrent contaminants (adapters, PCR controls, bacterial
-rRNA/gDNA, CMV enhancers, phage) cut false positives by **up to 89%** with no loss of
-true positives; Conterminator-style cross-contamination screening is described as
+Now confirmed by two independent reviews. VirMask-style removal of recurrent
+contaminants (adapters, PCR controls, bacterial rRNA/gDNA, CMV enhancers, phage) cut
+false detections **40-94% with 100% true-positive preservation** (J Clin Microbiol
+2026) - described in the second review as a better specificity trade than anything
+available downstream, including assembly; Conterminator-style cross-contamination screening is described as
 table stakes. Independently, Wright et al. 2026 traced an *H. pylori* false positive
 to **phage sequence inside the reference genome itself**. We currently download
 references and use them unmasked, so some of our FP budget is coming from our own
@@ -174,6 +220,40 @@ per-reference evidence emission and the explicit hand-off step are missing.
     sequencing). No accredited mNGS EQA/proficiency scheme was found.
   * Precedent exists for an in-silico proficiency test of the dry lab alone
     (Front Microbiol 2020;11:575377) - directly applicable to our harness.
+
+### F2. Divergent-detection layers, in the order the evidence supports
+Run each as a RECALL-adding filter and push precision downstream into triage:
+  1. Assemble, but **do not gate detection on assembly** - call at read level and
+     assemble candidate reads for characterisation.
+  2. Contig level: geNomad (sensitive) + Cenote-Taker 3, shown complementary. Do NOT
+     take the union of five or six tools - measurably worse (mSystems 2024).
+  3. Protein: DIAMOND --very-sensitive against RVDB-prot/NR, **plus an iterative
+     MMseqs2 profile pass** (2-3 iterations): ROC1 0.41 -> 0.67 for remote homologs.
+  4. RNA viruses: replace any Pfam-only RdRp screen with a **multi-database pHMM
+     sweep at E <= 1e-5** (RdRpCATCH): F1 0.72 -> 0.996.
+  5. Residual dark matter: ESMFold + Foldseek triage.
+  6. Quality gate: CheckV 1.1.1.
+Protein language models (LucaProt, Rider, LucaVirus) are competitive on RNA-virus
+recall but **every published figure is the developers' own and no independent
+head-to-head exists**; a 2026 preprint also shows pLM embedding space models viral
+proteins worse than its general benchmarks imply. Not a standalone decision-maker.
+
+### F3. ONT specifics
+  * Require **>= 100 bp alignment length** for a taxonomic call (implemented).
+  * Basecalling: sup@v5.2.0; never `fast`. There is no DNA sup v6.
+  * Assemblers: myloasm or nanoMDBG over Flye for metagenomes.
+  * Adopt **post-ligation pooling** if multiplexing low-biomass samples (barcode
+    crosstalk).
+  * Note: no 2025-2026 independent benchmark of ONT shotgun classifiers on real
+    R10.4.1 data exists. sylph, KrakenUniq, Centrifuger and MetaPhlAn have
+    essentially no independent ONT evidence.
+
+### F4. Host depletion - reorder to protect-then-scrub
+Move from single-reference Hostile to a pangenome or two-reference cascade. This is
+the only published mitigation for losing integrated or host-homologous virus reads
+(HPV, HBV, EBV, HERVs), and multi-reference filtering also blocks re-identification.
+GRCh38 vs T2T-CHM13 for depletion is **contested** in the 2025 literature - Forbes
+says T2T wins, the detaxizer benchmark says GRCh38. Unresolved, so do not assert it.
 
 ### G. Gaps where no published method exists
 No general framework for vaccine-vs-wild-type calling from metagenomic data. No
