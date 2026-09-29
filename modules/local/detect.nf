@@ -625,6 +625,7 @@ process MARKER_EVIDENCE {
         --sample ${meta.id} \\
         ${nt_arg} ${aa_arg} ${hmm_arg} \\
         --mapq-min ${params.mapq_min} \\
+        --platform ${meta.platform} \\
         --hmm-min-bits ${params.hmm_min_bits} \\
         --out ${meta.id}.marker_states.tsv \\
         2> ${meta.id}.marker.log

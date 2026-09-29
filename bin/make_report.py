@@ -297,11 +297,18 @@ data alone - read the taxon caveats column.</p>
     args.html.parent.mkdir(parents=True, exist_ok=True)
     args.html.write_text("\n".join(parts))
 
-    summary_cols = ["sample", "role", "tier", "taxid", "taxon", "group", "category",
-                    "unique_reads", "reads_per_million", "breadth", "window_occupancy",
-                    "mean_identity", "neighbour_ratio", "n_classifiers", "classifiers",
-                    "distinct_kmers", "screen_flags", "reads_in_masked_regions",
-                    "masked_fraction_of_reference", "orthogonal_concordance", "reasons"]
+    # marker_verdict and taxon_notes were omitted here while extrasaction="ignore"
+    # hid the omission, so a downstream consumer of the summary TSV could not see WHY a
+    # finding was vetoed or held - and could not see the report_always markers
+    # (V. cholerae serogroup, A. fumigatus cyp51A resistance) that ride in
+    # marker_verdict. The HTML showed both; the machine-readable output did not.
+    # platform is included because it decides which identity floor was applied.
+    summary_cols = ["sample", "role", "platform", "tier", "taxid", "taxon", "group",
+                    "category", "unique_reads", "reads_per_million", "breadth",
+                    "window_occupancy", "mean_identity", "neighbour_ratio",
+                    "n_classifiers", "classifiers", "distinct_kmers", "screen_flags",
+                    "reads_in_masked_regions", "masked_fraction_of_reference",
+                    "orthogonal_concordance", "marker_verdict", "taxon_notes", "reasons"]
     with args.summary.open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=summary_cols, delimiter="\t", extrasaction="ignore")
         w.writeheader()

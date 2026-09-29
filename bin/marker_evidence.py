@@ -297,6 +297,18 @@ def main() -> int:
                     help="markers.aa.faa, for marker protein lengths (needed with --aa-hits)")
     ap.add_argument("--hmm-hits", type=Path, help="hmmsearch --domtblout output")
     ap.add_argument("--mapq-min", type=int, default=10)
+    ap.add_argument("--platform", default="",
+                    help="illumina|ont. The catalogue's per-marker min_identity is an "
+                         "Illumina number (76 markers sit at 0.95 and 21 at 0.97); ONT "
+                         "reads cannot meet those on sequencing error alone, so a "
+                         "genuine marker would read ABSENT on that platform - positive "
+                         "evidence against a real finding. See --ont-identity-slack.")
+    ap.add_argument("--ont-identity-slack", type=float, default=0.05,
+                    help="Subtracted from each marker's nucleotide min_identity when "
+                         "--platform ont, floored at 0.70. PROVISIONAL: reasoned from "
+                         "R10.4.1 read accuracy (~97-98%%) and badread's simulated 95%%, "
+                         "not measured on this pipeline. Set from the benchmark once it "
+                         "has run. [0.05]")
     ap.add_argument("--hmm-min-bits", type=float, default=25.0,
                     help="minimum domain bitscore for the HMM tier [25]")
     ap.add_argument("--out", required=True, type=Path)
@@ -363,6 +375,19 @@ def main() -> int:
             min_id = float(row.get("min_identity") or 0.0)
         except ValueError:
             min_id = 0.0
+        # PLATFORM, for the same reason score_evidence.py needs it. A 0.95 or 0.97
+        # nucleotide floor is a statement about Illumina error as much as about
+        # sequence divergence, and ONT reads do not reach it; applying it unchanged
+        # made a present marker read ABSENT, which is not a missing call but positive
+        # evidence against a real finding. Only the nucleotide tier is adjusted - the
+        # protein floor is already derived from min_id with its own allowance, and
+        # translated identity is far less sensitive to basecalling error.
+        id_note = ""
+        if (args.platform or "").strip().lower() == "ont" and min_id > 0:
+            relaxed = max(0.70, min_id - max(0.0, args.ont_identity_slack))
+            if relaxed < min_id:
+                id_note = f" [ont: floor {min_id:g} -> {relaxed:g}]"
+                min_id = relaxed
 
         rec = {
             "sample": args.sample, "marker_id": mid,
@@ -417,7 +442,8 @@ def main() -> int:
                         and e["nt_identity"] >= min_id):
                     passed.append(
                         f"dna(breadth={e['nt_breadth']:.3f}>={min_cov:g}, "
-                        f"id={e['nt_identity']:.3f}>={min_id:g}, reads={e['nt_reads']})")
+                        f"id={e['nt_identity']:.3f}>={min_id:g}, "
+                        f"reads={e['nt_reads']}){id_note}")
             else:
                 tried.append("dna")
 

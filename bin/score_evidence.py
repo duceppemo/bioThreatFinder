@@ -462,21 +462,50 @@ def main() -> int:
                 tier = "screened_only"
                 reasons.append(
                     f"minimum marker evidence not met ({spec.get('support_requires')})")
-            # An untested veto or vaccine check must not block a confirmation that
-            # its own required markers support - but it must be DISCLOSED. A
-            # confirmed finding whose BCG or vaccinia check could not run is
-            # materially different from one where the check ran and passed, and
-            # the analyst is the one who needs to know which they are looking at.
+            # AN UNTESTED VETO OR VACCINE CHECK NOW CAPS THE TIER, NOT JUST THE PROSE.
+            #
+            # Kleene logic is right everywhere else: UNKNOWN in confirm_requires holds a
+            # finding at `supported`, the conservative direction. But UNKNOWN in
+            # veto_if/vaccine_if means NO DOWNGRADE, which is the unsafe direction, and
+            # this used to disclose it in a caveat and confirm anyway. That is not a
+            # hypothetical gap. Cross-checking every rule against the built marker
+            # manifest, 18 referenced markers can only ever be UNKNOWN (5 failed, 4
+            # curation_required, 9 motif_todo), so:
+            #   * 8 of 9 vaccine_if rules can never fire - Variola, Enterovirus C,
+            #     Measles, Yellow fever, Rabies, VEEV, Junin, RVFV. Only BCG and RB51 can.
+            #   * 6 veto_if rules can never fire, including both near-neighbour vetoes
+            #     the README highlights: B. thailandensis -> B. pseudomallei and
+            #     F. novicida -> F. tularensis.
+            # The concrete consequence: a Sabin vaccine strain satisfies Enterovirus C's
+            # confirm_requires (polio_VP1 is built) while polio_sabin is UNKNOWN, so the
+            # finding reached `confirmed_in_silico` - a vaccine strain reported as
+            # confirmed poliovirus, which is the report that starts an outbreak response.
+            #
+            # The asymmetry decides it. "Supported, vaccine status untestable" costs an
+            # analyst a follow-up; "confirmed wild-type poliovirus" costs a public health
+            # investigation. So an unevaluable vaccine or veto check holds the finding at
+            # `supported`. The finding is still reported, and prominently - it simply is
+            # not stamped as confirmed wild type on evidence that was never gathered.
             if verdict["veto"] == mr.UNKNOWN:
                 reasons.append(
                     f"CAVEAT: veto check could not be evaluated ({spec.get('veto_if')}) "
                     "- untested marker(s); an argument against this call may exist "
                     "but was not tested")
+                if tier == "confirmed_in_silico":
+                    tier = "supported"
+                    reasons.append(
+                        "HELD at supported: a near-neighbour veto that could not be "
+                        "evaluated cannot be treated as having passed")
             if verdict["vaccine"] == mr.UNKNOWN:
                 reasons.append(
                     f"CAVEAT: vaccine/attenuated-strain check could not be evaluated "
                     f"({spec.get('vaccine_if')}) - a vaccine strain CANNOT be excluded "
                     "for this finding")
+                if tier == "confirmed_in_silico":
+                    tier = "supported"
+                    reasons.append(
+                        "HELD at supported: confirming wild type requires actually "
+                        "excluding the vaccine strain, not merely failing to test for it")
 
             # Only evaluate confirm_requires if veto/vaccine/support has not already
             # decided the tier. Without this guard the confirm branch OVERWRITES a
@@ -516,8 +545,19 @@ def main() -> int:
         # A control's own content is QC information, not a finding about a
         # specimen. Keeping it in the actionable tiers would inflate the counts an
         # analyst triages on.
-        if row.get("role") == "control" and tier in ("supported", "confirmed_in_silico"):
-            reasons.append(f"negative control background at {rpm:.2f} RPM")
+        # A NEGATIVE CONTROL'S OWN CONTENT IS NEVER AN ACTIONABLE FINDING.
+        #
+        # This only caught `supported` and `confirmed_in_silico`, but marker gating runs
+        # BEFORE it and can set vaccine_strain or marker_veto. A control whose marker
+        # evidence tripped vaccine_if therefore stayed `vaccine_strain` and was rendered
+        # in the report's "Vaccine or attenuated strain" block - presented as an
+        # actionable stand-down about a specimen, when it is the no-template control's
+        # own background. The tier list is meant to be exhaustive for controls, so the
+        # test is now "did anything assert presence", not an enumeration.
+        if row.get("role") == "control" and tier in (
+                "supported", "confirmed_in_silico", "vaccine_strain", "marker_veto"):
+            reasons.append(f"negative control background at {rpm:.2f} RPM "
+                           f"(was {tier} before control reclassification)")
             tier = "control_background"
 
         scr = screen.get((row.get("sample", ""), taxid), {})
@@ -558,6 +598,9 @@ def main() -> int:
         findings.append({
             "sample": row.get("sample", ""),
             "role": row.get("role", "sample"),
+            # Carried through because it decides which read-identity floor was applied,
+            # so a reader can tell an ONT confirmation from an Illumina one.
+            "platform": plat,
             "tier": tier,
             "taxid": taxid,
             "taxon": row.get("taxon") or meta.get("name", ""),
@@ -598,7 +641,12 @@ def main() -> int:
             sample, taxid, taxon = parts[0], parts[1], parts[2]
             meta = watch.get(taxid, {})
             findings.append({
-                "sample": sample, "role": "sample", "tier": "no_reference",
+                # role was hardcoded "sample" here, so a CONTROL's database gap was
+                # reported as a sample's. The screen row knows which it was.
+                "sample": sample,
+                "role": (screen.get((sample, taxid), {}).get("role") or "sample"),
+                "platform": (screen.get((sample, taxid), {}).get("platform") or ""),
+                "tier": "no_reference",
                 "taxid": taxid, "taxon": taxon or meta.get("name", ""),
                 "group": meta.get("group", ""), "category": meta.get("category", ""),
                 "unique_reads": "", "reads_per_million": "", "breadth": "",
@@ -607,8 +655,15 @@ def main() -> int:
                 "mapped_fraction_of_assigned": "", "reads_in_masked_regions": "",
                 "masked_fraction_of_reference": "", "best_neighbour_taxid": "",
                 "screen_reads": screen.get((sample, taxid), {}).get("assigned_reads", ""),
-                "n_classifiers": "", "classifiers": "", "distinct_kmers": "",
-                "screen_flags": "",
+                # These were left empty even though the screen row is available two
+                # lines above (screen_reads uses it), so the report lost which arms had
+                # raised a taxon whose reference is missing - exactly the information
+                # needed to judge whether the database gap matters.
+                "n_classifiers": screen.get((sample, taxid), {}).get("n_classifiers", ""),
+                "classifiers": screen.get((sample, taxid), {}).get("classifiers", ""),
+                "distinct_kmers": screen.get((sample, taxid), {}).get(
+                    "krakenuniq_distinct_kmers", ""),
+                "screen_flags": screen.get((sample, taxid), {}).get("screen_flags", ""),
                 "sylph_abundance": "", "orthogonal_concordance": "",
                 "reference_bp": "", "taxon_notes": meta.get("notes", ""),
                 "marker_verdict": "",
