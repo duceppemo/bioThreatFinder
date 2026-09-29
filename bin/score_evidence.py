@@ -87,34 +87,39 @@ def read_tsv(path: Path) -> list[dict]:
 
 
 def load_pack_thresholds(pack_yaml: Path) -> dict:
-    """Minimal YAML scrape for the thresholds block.
+    """Read the pack's thresholds block.
 
-    Deliberately not a YAML parser: this script is stdlib-only so it runs in any
-    conda env the pipeline happens to hand it, including ones without PyYAML.
+    Uses bin/btf_yaml.py rather than the ad-hoc line scraper this function used to
+    be. The scraper could not read a nested block, and min_read_identity_by_group is
+    nested - a divergent virus needs a far lower identity floor than a bacterium
+    whose near neighbour sits at 96%.
     """
     defaults = {
         "min_unique_reads": 20.0,
-        "min_breadth": 0.10,
+        "min_breadth": 0.005,
         "max_depth_cv": 2.5,
-        "min_read_identity": 0.90,
+        "min_read_identity": 0.98,
+        "min_mapped_fraction_of_assigned": 0.50,
+        "min_read_identity_by_group": {},
     }
     if not pack_yaml or not pack_yaml.exists():
         return defaults
-    in_block = False
-    for raw in pack_yaml.read_text().splitlines():
-        line = raw.split("#", 1)[0].rstrip()
-        if not line.strip():
-            continue
-        if not line.startswith((" ", "\t")):
-            in_block = line.strip().rstrip(":") == "thresholds"
-            continue
-        if in_block and ":" in line:
-            k, v = line.strip().split(":", 1)
-            try:
-                defaults[k.strip()] = float(v.strip())
-            except ValueError:
-                pass
-    return defaults
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import btf_yaml
+        doc = btf_yaml.load(pack_yaml)
+    except Exception as exc:
+        sys.stderr.write(
+            f"[score] WARNING: could not parse {pack_yaml} ({exc}); using built-in "
+            "threshold defaults. Verify the pack file rather than trusting these.\n")
+        return defaults
+    block = (doc or {}).get("thresholds") or {}
+    out = dict(defaults)
+    for k, v in block.items():
+        out[k] = v
+    if not isinstance(out.get("min_read_identity_by_group"), dict):
+        out["min_read_identity_by_group"] = {}
+    return out
 
 
 def rank_order(tier: str) -> int:
@@ -266,15 +271,32 @@ def main() -> int:
                     f"sample {rpm:.2f} RPM does not exceed {args.control_ratio}x"
                 )
             else:
+                # Identity floor is group-aware: 98% is the near-neighbour
+                # discriminator for bacteria (Wright et al. found ~96% meant
+                # genus-correct, species-wrong), but a divergent virus is
+                # legitimately far from any available reference and the same floor
+                # would manufacture false negatives where sensitivity matters most.
+                grp = (row.get("group") or meta.get("group") or "").strip().lower()
+                id_floor = as_float(
+                    (thresholds.get("min_read_identity_by_group") or {}).get(grp),
+                    thresholds["min_read_identity"])
+
                 gates = {
                     f"breadth {breadth:.4f} >= {min_breadth:.4f}": breadth >= min_breadth,
                     f"occupancy {occupancy:.4f} >= {args.min_occupancy:.4f}":
                         occupancy >= args.min_occupancy,
-                    f"identity {identity:.4f} >= {thresholds['min_read_identity']:.4f}":
-                        identity >= thresholds["min_read_identity"],
+                    f"identity {identity:.4f} >= {id_floor:.4f} ({grp or 'default'})":
+                        identity >= id_floor,
                     f"depth_cv {depth_cv:.2f} <= {thresholds['max_depth_cv']:.2f}":
                         depth_cv <= thresholds["max_depth_cv"],
                 }
+                # Wright et al. criterion (ii). Only applied when the denominator is
+                # known - absent stage-1 counts must not fabricate a failed gate.
+                mapped_frac = as_float(row.get("mapped_fraction_of_assigned"), -1.0)
+                if mapped_frac >= 0:
+                    floor = as_float(thresholds.get("min_mapped_fraction_of_assigned"), 0.5)
+                    gates[f"mapped_fraction {mapped_frac:.3f} >= {floor:.2f}"] = \
+                        mapped_frac >= floor
                 failed = [k for k, ok in gates.items() if not ok]
                 if not failed:
                     tier = "confirmed_in_silico"
@@ -406,6 +428,7 @@ def main() -> int:
             "depth_cv": row.get("depth_cv", "0"),
             "mean_identity": row.get("mean_identity", "0"),
             "neighbour_ratio": row.get("neighbour_ratio", ""),
+            "mapped_fraction_of_assigned": row.get("mapped_fraction_of_assigned", ""),
             "best_neighbour_taxid": row.get("best_neighbour_taxid", ""),
             "screen_reads": scr.get("assigned_reads", ""),
             "n_classifiers": n_clf or "",
@@ -435,7 +458,8 @@ def main() -> int:
                 "group": meta.get("group", ""), "category": meta.get("category", ""),
                 "unique_reads": "", "reads_per_million": "", "breadth": "",
                 "window_occupancy": "", "mean_depth": "", "depth_cv": "",
-                "mean_identity": "", "neighbour_ratio": "", "best_neighbour_taxid": "",
+                "mean_identity": "", "neighbour_ratio": "",
+                "mapped_fraction_of_assigned": "", "best_neighbour_taxid": "",
                 "screen_reads": screen.get((sample, taxid), {}).get("assigned_reads", ""),
                 "n_classifiers": "", "classifiers": "", "distinct_kmers": "",
                 "screen_flags": "",

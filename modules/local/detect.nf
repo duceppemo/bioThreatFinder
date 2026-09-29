@@ -378,6 +378,7 @@ process COVERAGE_STATS {
         --role ${meta.role} \\
         --mapq-min ${params.mapq_min} \\
         --total-reads \$(cat ${nreads}) \\
+        --assigned-reads ${meta.assigned_reads ?: 0} \\
         --out ${meta.id}.${meta.taxid}.coverage.tsv
     """
 }

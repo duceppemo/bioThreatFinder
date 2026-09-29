@@ -108,7 +108,13 @@ def parse_kraken_style(path: Path | None, label: str) -> dict[str, dict]:
         for line in fh:
             if not line.strip() or line.startswith("#") or line.startswith("%"):
                 continue
+            # Metabuli emits a TRAILING TAB on unclassified rows (upstream issue
+            # #194, open), which shifts every right-indexed field by one and would
+            # silently mis-read the taxid column. Strip trailing empties before
+            # indexing from the right.
             f = line.rstrip("\n").split("\t")
+            while f and f[-1].strip() == "":
+                f.pop()
             if len(f) < 6:
                 bad += 1
                 continue
