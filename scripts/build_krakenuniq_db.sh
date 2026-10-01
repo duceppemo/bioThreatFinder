@@ -56,7 +56,7 @@
 # plus its own *.map files, so this script keeps its own library/ rather than
 # pointing --library-dir at Kraken2's. Cheaper in engineering risk than in disk.
 #
-set -euo pipefail
+set -eEuo pipefail
 
 # An ERR trap, because `set -e` alone exits SILENTLY.
 #
@@ -65,6 +65,11 @@ set -euo pipefail
 # `set -e` had done its job and aborted, but said nothing. For a job measured in hours
 # that is the difference between "resume from the failing step" and "discover tomorrow
 # that nothing happened".
+#
+# The trap needs `set -E` (errtrace), not just `set -e`: without it a bash ERR trap is
+# NOT inherited by shell functions, and every step here runs inside one. The trap was
+# added without -E, so the build kept dying silently anyway - kraken2-build --build
+# failed, the script exited 1, and it printed nothing of its own.
 _btf_on_err() {
     local rc=$? line=${1:-?}
     printf '[%s] ERROR: aborted at line %s with exit %s: %s\n' \

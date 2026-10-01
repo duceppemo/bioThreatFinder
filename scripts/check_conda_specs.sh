@@ -19,7 +19,7 @@
 # check to run after changing a pin.
 #
 # Usage: bash scripts/check_conda_specs.sh [--solver mamba|conda]
-set -euo pipefail
+set -eEuo pipefail
 
 _on_err() {
     local rc=$? line=${1:-?}
