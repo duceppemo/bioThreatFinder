@@ -6,11 +6,11 @@
 # Target path (must match screen.metabuli_db in packs/*/pack.yaml):
 #   ${BTF_DB}/metabuli/<mode>              (default BTF_DB=/media/8tb/bioThreatFinder)
 #
-# Why Metabuli, given that KrakenUniq is already the primary screen
-# ----------------------------------------------------------------
-# KrakenUniq fixes the OTHER half of the stage-1 problem. Its HyperLogLog
-# distinct-k-mer counts tell you whether a taxon's reads are spread over a genome
-# or stacked on one conserved locus - that is a specificity fix, and it only
+# Why Metabuli, given that Kraken2 is already the primary screen
+# --------------------------------------------------------------
+# Kraken2 fixes the OTHER half of the stage-1 problem. Its HyperLogLog
+# distinct-minimizer counts (--report-minimizer-data) tell you whether a taxon's
+# reads are spread over a genome or stacked on one conserved locus - that is a specificity fix, and it only
 # helps for taxa whose exact nucleotide k-mers are in the index.
 #
 # The half it cannot fix: a divergent or genuinely novel agent shares almost no
@@ -28,8 +28,9 @@
 # what puts a divergent agent on the stage-1 candidate list in the first place.
 #
 # So the three nucleotide/protein screens are complementary, not redundant:
-#   kraken2     abundance (Bracken) and report compatibility
-#   krakenuniq  PRIMARY nucleotide screen; distinct-k-mer specificity
+#   kraken2     PRIMARY nucleotide screen; distinct-minimizer specificity,
+#               abundance (Bracken)
+#   krakenuniq  OPT-IN second opinion, off by default (docs/decisions.md D2)
 #   metabuli    divergence and novelty; joint DNA + AA
 #
 # NVMe placement matters

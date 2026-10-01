@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 #
-# build_krakenuniq_db.sh - build the KrakenUniq index that is the PRIMARY
-#                          nucleotide screen for bioThreatFinder stage 1.
+# build_krakenuniq_db.sh - build the KrakenUniq index for bioThreatFinder's
+#                          OPT-IN second-opinion stage-1 screen.
+#
+# READ docs/decisions.md D2 BEFORE RUNNING THIS. KrakenUniq is off by default
+# (--skip_krakenuniq defaults true) and Kraken2 is the primary nucleotide arm. It
+# is only switched on if the bake-off (scripts/run_bakeoff.sh, variant
+# plus_krakenuniq) shows a confirm-PPV gain worth the cost - and even then D2 says
+# use a PREBUILT index rather than this build (~1400 GiB transient disk, a
+# Jellyfish 1.x dependency, 12+ hours).
 #
 # Target path (must match screen.krakenuniq_db in packs/*/pack.yaml):
 #   ${BTF_DB}/krakenuniq/standard          (default BTF_DB=/media/8tb/bioThreatFinder)
@@ -19,9 +26,13 @@
 # a HyperLogLog sketch of the distinct database k-mers observed, and emits a
 # `kmers` (cardinality) and `dup` column beside the read count. Reads stacked on
 # one conserved locus give a large read count with a tiny distinct-k-mer count -
-# visible, and filterable, at stage 1 instead of at stage 2. So KrakenUniq is the
-# primary screen; the Kraken2 index stays for Bracken abundance and for
-# compatibility with existing reports.
+# visible, and filterable, at stage 1 instead of at stage 2.
+#
+# That argument was the original case for making KrakenUniq primary, and it was
+# wrong for Kraken2 >= 2.1.0: --report-minimizer-data emits distinct-minimizer
+# counts and duplicity from the same HyperLogLog code (see docs/decisions.md D2).
+# Kraken2 is therefore the primary screen; KrakenUniq remains an opt-in second
+# opinion, counting distinct k-mers rather than minimizers.
 #
 # CAN THE EXISTING KRAKEN2 DATABASE BE REUSED? NO.
 # ------------------------------------------------
@@ -140,8 +151,9 @@ usage() {
 Usage:
   build_krakenuniq_db.sh [options]
 
-Builds the KrakenUniq index used as bioThreatFinder's PRIMARY stage-1
-nucleotide screen, at
+Builds the KrakenUniq index for bioThreatFinder's OPT-IN second-opinion
+stage-1 screen (off by default; Kraken2 is primary - see docs/decisions.md D2,
+which prefers a prebuilt index over this build), at
   <btf-db>/krakenuniq/standard
 
 KrakenUniq reports DISTINCT k-mer counts per taxon (HyperLogLog cardinality)
