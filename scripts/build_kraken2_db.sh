@@ -76,6 +76,8 @@ REUSE_TAXDUMP=1
 # summary file", which reads like an NCBI outage rather than a local firewall.
 # 'auto' probes port 873 and falls back to --use-ftp (wget over HTTPS/FTP).
 TRANSPORT="auto"
+# Set by choose_transport; declared here so `set -u` is safe before it runs.
+DL_OPTS=""
 SKIP_MAPS=1
 FORCE=0
 
@@ -355,7 +357,10 @@ prepare_taxonomy() {
             done
             if (( SKIP_MAPS == 0 )); then
                 log "--with-maps: fetching accession2taxid maps only (~25 GB)"
-                run "$KRAKEN2_BUILD" --db "$DB_DIR" --download-taxonomy --threads "$THREADS"
+                # ${DL_OPTS} matters: download_taxonomy.sh uses rsync unless
+                # KRAKEN2_USE_FTP is set, and on a host with port 873 firewalled the
+                # rsync just hangs - no error, no partial file, nothing in the log.
+                run "$KRAKEN2_BUILD" --db "$DB_DIR" --download-taxonomy --threads "$THREADS" ${DL_OPTS}
                 # --download-taxonomy FETCHES AND UNPACKS NCBI'S CURRENT TAXDUMP INTO
                 # THIS SAME DIRECTORY, replacing the pinned nodes.dmp/names.dmp copied
                 # above - and then the step was stamped complete, so re-running skipped
@@ -386,7 +391,7 @@ prepare_taxonomy() {
 
     local extra_args=()
     if (( SKIP_MAPS == 1 )); then extra_args+=(--skip-maps); fi
-    run "$KRAKEN2_BUILD" --db "$DB_DIR" --download-taxonomy --threads "$THREADS" ${extra_args[@]+"${extra_args[@]}"}
+    run "$KRAKEN2_BUILD" --db "$DB_DIR" --download-taxonomy --threads "$THREADS" ${DL_OPTS} ${extra_args[@]+"${extra_args[@]}"}
     set_stamp taxonomy
 }
 
@@ -487,9 +492,6 @@ choose_transport() {
 
 download_libraries() {
     local lib
-    require_kraken2_version
-    choose_transport
-    [[ -n "$DL_OPTS" ]] && ensure_working_wget
     for lib in $LIBRARIES; do
         if have_stamp "library_${lib}" && (( FORCE == 0 )); then
             skip "library already downloaded: ${lib}"
@@ -609,6 +611,12 @@ if (( DRY_RUN == 0 )); then
     printf 'pid=%s started=%s host=%s\n' "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         "$(hostname)" > "${DB_DIR}/.btf_build.owner"
 fi
+
+# Before ANY download: the taxonomy step downloads too, so the transport has to be
+# settled first or --with-maps silently falls back to a blocked rsync.
+require_kraken2_version
+choose_transport
+if [[ -n "$DL_OPTS" ]]; then ensure_working_wget; fi
 
 prepare_taxonomy
 download_libraries
