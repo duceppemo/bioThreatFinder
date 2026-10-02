@@ -14,7 +14,7 @@ tail -f /media/8tb/bioThreatFinder/logs/build_kraken2_<latest>.log
 
 | Job | State when handed off | How to tell it finished |
 |---|---|---|
-| **Kraken2 PlusPF build** | downloading the bacteria library (archaea 2.2 GB done, bacteria ~4.9 GB and growing) | log ends with the Bracken section and a SUMMARY; `hash.k2d` exists |
+| **Kraken2 PlusPF build** | **DONE** 2026-10-02 — index + all three Bracken distributions | — |
 | **Marker DB full pass** | **DONE** — 163 rows, `bmand_18S` is `built` | — |
 
 **Do not start a second build against a live one.** I did, and the two
@@ -68,7 +68,7 @@ instead.
 | `packs/human/refs/masked/` | complete — 20.0 Mbp masked. **Two rows need re-masking: see below.** Per-source byte totals in D5 were double-counted and are upper bounds, not a partition |
 | `host/human/` | T2T-CHM13v2.0 + sr and map-ont indexes, 17 GB |
 | `packs/human/markers/` | 163 manifest rows; 18 referenced by rules can only be UNKNOWN (5 failed, 4 curation_required, 9 motif_todo) — see the vaccine/veto note below |
-| `kraken2/pluspf/` | building |
+| `kraken2/pluspf/` | **complete** 2026-10-02. `hash.k2d` 123.5 GB, `opts.k2d`, `taxo.k2d`, `seqid2taxid.map`, and `database{100,150,250}mers.kmer_distrib`. k=35, minimizer 31, full-sensitivity (no `--max-db-size`). Built against the pinned 2026-09-29 taxdump, md5-verified. Includes the 5,413 assemblies `kraken2-build` had silently dropped. `library/` still holds 327 GB — reclaim with `kraken2-build --db <db> --clean` |
 | `krakenuniq/`, `metabuli/` | not built. KrakenUniq is opt-in by design; Metabuli still pending a decision |
 
 ## Outstanding DATA fix: two reference genomes were never masked
@@ -82,8 +82,8 @@ to "examined and found clean". Both shipped BEDs are still in that state.
 The code is fixed (identical sequence is masked once and both BEDs written from that
 result, flagged `SHARED_SEQUENCE`; a name collision with *differing* sequence is now
 fatal). **The artifacts have not been regenerated**, because the host pass needs a
-minimap2 index of the 3.1 Gbp human genome and the Kraken2 build is using the machine.
-Run after Kraken2 finishes:
+minimap2 index of the 3.1 Gbp human genome and the Kraken2 build was using the machine.
+The Kraken2 build finished 2026-10-02, so this can run now:
 
 ```bash
 export PATH=/home/bioinfo/miniconda3/envs/btf-refs/bin:$PATH
@@ -111,6 +111,20 @@ and 4 `curation_required` markers is what restores those confirmations.
 - **rsync (port 873) is blocked** on this host; HTTPS and FTP are open. `kraken2-build`
   defaults to rsync and reports the failure as `"Error downloading assembly summary
   file"`, which looks like an NCBI outage. `--transport auto` probes and falls back.
+- **`systemd-oomd` kills anything memory-hungry that runs inside the user session.**
+  `/usr/lib/systemd/system/user@.service.d/10-oomd-user-service-defaults.conf` sets
+  `ManagedOOMMemoryPressure=kill` with a **50% pressure limit** on `user@1000.service`.
+  Bracken loading the 123 GB hash pushed pressure to 87.72%, and oomd killed the build,
+  gnome-shell and five tmux scopes at once — on a 503 GB box with no kernel OOM. Pressure,
+  not exhaustion, is the trigger. Run long/large jobs as a SYSTEM unit, which is not
+  monitored (`ManagedOOMMemoryPressure=auto`):
+  `sudo systemd-run --unit=<name> --uid=1000 --gid=1000 /bin/bash <script>`
+  (`--uid` keeps the output files owned by `bioinfo`). Note `ManagedOOMMemoryPressure=off`
+  is NOT a valid value - only `auto` or `kill` - so passing `off` fails the whole call with
+  `Invalid argument`.
+- **A Claude Code background task does not survive the session**, and `setsid` is not
+  enough because that process is a child subreaper, so an orphan reparents to it. Same fix:
+  a systemd unit.
 - NCBI Entrez is being queried **anonymously** (3 req/s). Supplying an email or
   `NCBI_API_KEY` raises it to 10/s. I did not put the user's address into outbound API
   URLs without being asked.
@@ -152,8 +166,10 @@ stays offline and fast by design.
    end to end, and that run will find more than any further static review: well over
    thirty silent-failure bugs have been found so far, all sharing the shape "produces an
    empty or degraded result indistinguishable from a clean negative".
-2. Wait out the Kraken2 build, then verify `--report-minimizer-data` actually produces
-   the distinct-minimizer and duplicity columns on a real sample.
+2. The Kraken2 build is done (2026-10-02), so verify `--report-minimizer-data` actually
+   produces the distinct-minimizer and duplicity columns on a real sample. Note the LoD
+   batch `lod_v1` has been scored with **sylph only** (`--skip_kraken2 --skip_metabuli`),
+   so its limits say nothing about the primary arm - re-run it with Kraken2 enabled.
 3. Re-mask taxids 264 and 620 (above).
 4. Then set thresholds from measurement. Three are explicitly PROVISIONAL and flagged in
    the code: the ONT read-identity floors (D10), `--ont-identity-slack` in the marker
