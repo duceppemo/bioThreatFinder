@@ -36,7 +36,7 @@ LoD for the high-consequence watchlist still comes from benchmarks/scenarios/hum
 Usage:
   fetch_mock_communities.py --scenarios benchmarks/scenarios/real_mock_communities.yaml \\
                             --out-dir /media/8tb/bioThreatFinder/real/zymo_v1
-  fetch_mock_communities.py ... --only zymo_even --subsample 2000000
+  fetch_mock_communities.py ... --only zymo_even
   fetch_mock_communities.py ... --dry-run
 """
 from __future__ import annotations
@@ -184,6 +184,7 @@ def main() -> int:
     ap.add_argument("--out-dir", required=True, type=Path)
     ap.add_argument("--only", action="append", default=[],
                     help="scenario id; repeatable. Default: all with accessions.")
+    ap.add_argument("--pack", default="human", help="pack whose watchlist defines absent")
     ap.add_argument("--min-free-gib", type=float, default=80.0)
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
@@ -200,6 +201,21 @@ def main() -> int:
     unknown = [w for w in want if w not in scenarios]
     if unknown:
         die(f"unknown scenario id(s): {', '.join(unknown)}")
+
+    # Same source of truth as simulate_benchmark.py, for the same reason.
+    wl_path = Path(__file__).resolve().parent.parent / "packs" / args.pack / "watchlist.tsv"
+    watchlist: list[str] = []
+    if wl_path.exists():
+        for line in wl_path.read_text().splitlines():
+            if line.startswith("#") or not line.strip():
+                continue
+            nm = line.split("\t", 1)[0].strip()
+            if nm and nm.lower() != "name":
+                watchlist.append(nm)
+    if not watchlist:
+        die(f"no usable watchlist at {wl_path}; truth_absent cannot be made exhaustive "
+            f"and specificity would silently exclude unlisted organisms (D14).")
+    log(f"watchlist: {len(watchlist)} taxa, used to expand truth_absent")
 
     avail = free_gib(args.out_dir)
     log(f"free space at {args.out_dir}: {avail:.0f} GiB")
@@ -218,10 +234,33 @@ def main() -> int:
         declared = sc.get("bracken_readlen")
         truth = sc.get("truth") or {}
         present = ";".join(truth.get("present") or [])
-        absent = ";".join(truth.get("absent") or [])
+        absent_list = list(truth.get("absent") or [])
+        absent = ";".join(absent_list)
         if not present:
             die(f"{sid} declares no truth.present. A manifest row with empty truth scores "
                 f"every call as 'unlisted' and silently measures nothing.")
+        # The same reasoning applies to `absent`, and used not to be applied. D14: an
+        # unlisted taxon is scored `unlisted`, NOT `false_positive`, so a short absent list
+        # excludes from specificity any organism the author forgot. The simulated path got
+        # this fix (simulate_benchmark.exhaustive_absent); this path shipped without it,
+        # which matters most for zymo_even_in_host - the one arm that deliberately puts
+        # human reads through host depletion, and therefore the one that will reproduce the
+        # T. gondii false positive D14 describes.
+        if not absent_list:
+            die(f"{sid} declares no truth.absent. Every watchlist organism not in this "
+                f"sample must be listed, or a false positive on it is scored 'unlisted' "
+                f"and dropped from specificity (docs/decisions.md D14).")
+        here = {n.strip().lower() for n in (truth.get("present") or [])}
+        here |= {n.strip().lower() for n in (truth.get("vaccine") or [])}
+        absent_full = list(absent_list)
+        seen = {a.strip().lower() for a in absent_full}
+        for name in watchlist:
+            k = name.strip().lower()
+            if k not in here and k not in seen:
+                absent_full.append(name)
+                seen.add(k)
+        absent = ";".join(absent_full)
+        log(f"  {sid}: truth_absent expanded {len(absent_list)} -> {len(absent_full)} taxa")
 
         for platform, acc_list in accs.items():
             for acc in acc_list or []:

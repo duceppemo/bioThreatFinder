@@ -261,7 +261,12 @@ sample**. The rest is *H. haemolyticus* and *N. lactamica*, also background.
 | 10000 rpm | 221,439 | 221,209 | 230 | 0.1% |
 
 Both pedestals are flat in absolute terms (~2,700 on the neighbour, ~210 on the target) and
-their ~13x asymmetry is a property of the references, not of the specimen. Consequence:
+their ~13x asymmetry is a property of the references, not of the specimen. Independently
+measured with `scripts/measure_recruitment.py`: *E. coli* recruits 1,950 records per million
+reads onto the *Y. enterocolitica* reference against 170 onto *Y. pestis*, an 11.5x
+asymmetry reached by a different route. (Those figures are the CORRECTED per-read values;
+see D14 for the 2x unit error in the first published set, and for why the "predicts within
+8%" claim in commit 276a3f1 does not hold.) Consequence:
 `neighbour_ratio ~= (true_target + 210) / 2,700`, so the 1.5 threshold needs ~3,840 true
 target reads whether or not a neighbour is present.
 

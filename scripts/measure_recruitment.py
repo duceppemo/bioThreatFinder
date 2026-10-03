@@ -120,12 +120,15 @@ def simulate(src: Path, n_reads: int, read_len: int, art: str, tmp: Path) -> Pat
 def recruit(r1: Path, r2: Path, index: Path, mapq: int,
             minimap2: str, samtools: str, threads: int) -> dict[str, int]:
     """MAPQ-passing read count per reference sequence in one bundle."""
+    # stderr is CAPTURED, not discarded: a samtools failure mid-stream is the one thing
+    # that turns "this reference recruits nothing" into "the alignment broke", and the two
+    # must not look alike.
     mm = subprocess.Popen([minimap2, "-ax", "sr", "-t", str(threads), "--secondary=no",
                            str(index), str(r1), str(r2)],
-                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     st = subprocess.Popen([samtools, "view", "-q", str(mapq), "-F", "0x904", "-"],
                           stdin=mm.stdout, stdout=subprocess.PIPE,
-                          stderr=subprocess.DEVNULL, text=True)
+                          stderr=subprocess.PIPE, text=True)
     if mm.stdout:
         mm.stdout.close()
     per_ref: dict[str, int] = defaultdict(int)
@@ -134,10 +137,19 @@ def recruit(r1: Path, r2: Path, index: Path, mapq: int,
         f = line.split("\t", 3)
         if len(f) > 2:
             per_ref[f[2]] += 1
+    st_err = st.stderr.read() if st.stderr else ""
     st.wait()
+    mm_err = mm.stderr.read().decode(errors="replace") if mm.stderr else ""
     mm.wait()
+    # BOTH halves. samtools can fail at the END of the stream - a malformed record, an
+    # option an older build rejects - long after minimap2 exited 0. The old code checked
+    # minimap2 only, so that bundle contributed no rows and simply vanished from the
+    # matrix, where "recruits nothing" and "alignment errored" are the same thing.
     if mm.returncode not in (0, None):
-        die(f"minimap2 exited {mm.returncode} for {index.name}")
+        die(f"minimap2 exited {mm.returncode} for {index.name}: {mm_err.strip()[-400:]}")
+    if st.returncode not in (0, None):
+        die(f"samtools view exited {st.returncode} for {index.name}: "
+            f"{st_err.strip()[-400:]}")
     return dict(per_ref)
 
 
@@ -189,10 +201,23 @@ def main() -> int:
                 bundle = index.name.split(".")[0]
                 per_ref = recruit(r1, r2, index, args.mapq, mm2, st, args.threads)
                 by_taxid: dict[str, int] = defaultdict(int)
+                unprefixed = [r for r in per_ref if not TAXID_RE.match(r)]
+                if unprefixed and len(unprefixed) == len(per_ref):
+                    # Same guard as bin/coverage_stats.py:210. Without it every reference
+                    # falls back to its raw name, is_bundle_target reads "no" for all of
+                    # them, and the matrix says this bundle recruits nothing to its own
+                    # target - plausible and wrong.
+                    die(f"no reference in {index.name} uses the 'taxid|<id>|...' naming "
+                        f"convention (saw {unprefixed[0]!r}). Recruitment could not be "
+                        f"attributed to a taxon.")
                 for ref, n in per_ref.items():
                     m = TAXID_RE.match(ref)
                     by_taxid[m.group(1) if m else ref] += n
                 total = sum(by_taxid.values())
+                if not by_taxid:
+                    # An explicit zero, so "measured and found nothing" is distinguishable
+                    # from "this bundle is missing from the matrix".
+                    by_taxid[bundle] = 0
                 for ref_taxid, n in sorted(by_taxid.items(), key=lambda kv: -kv[1]):
                     rows.append({
                         "source": src.name,
@@ -201,12 +226,16 @@ def main() -> int:
                         "is_bundle_target": "yes" if ref_taxid == bundle else "no",
                         "reads": n,
                         "source_pairs": n_pairs,
-                        # per million SOURCE reads - the unit that makes bundles comparable
-                        # and that multiplies by background abundance to predict a pedestal
-                        "rpm_source": f"{n / n_pairs * 1e6:.1f}",
+                        # Denominator is source READS, not pairs. `reads` above counts SAM
+                        # records and each mate is its own record, so dividing by pairs
+                        # would report a figure 2x the stated unit. bin/coverage_stats.py:305
+                        # counts records the same way and its denominator (the .nreads file)
+                        # sums FASTQ records across BOTH mates, so per-read is the unit that
+                        # lets a measured coefficient predict a pipeline pedestal.
+                        "source_reads": n_pairs * 2,
+                        "rpm_source_reads": f"{n / (n_pairs * 2) * 1e6:.1f}",
                     })
-                if i % 10 == 0 or total:
-                    log(f"  [{i}/{len(idx)}] bundle {bundle}: {total:,} read(s) recruited")
+                log(f"  [{i}/{len(idx)}] bundle {bundle}: {total:,} record(s) recruited")
 
     if not rows:
         die("no recruitment rows produced; refusing to write an empty matrix")
@@ -218,11 +247,11 @@ def main() -> int:
     log(f"wrote {args.out} ({len(rows)} row(s))")
 
     # Loudest line last: the references that absorb the most foreign reads.
-    worst = sorted(rows, key=lambda r: -float(r["rpm_source"]))[:10]
-    log("highest recruitment (reads per million source reads):")
+    worst = sorted(rows, key=lambda r: -float(r["rpm_source_reads"]))[:10]
+    log("highest recruitment (records per million source READS):")
     for r in worst:
         log(f"  {r['source']:<34} -> bundle {r['bundle_taxid']:<7} "
-            f"ref {r['ref_taxid']:<7} {r['rpm_source']:>10} rpm")
+            f"ref {r['ref_taxid']:<7} {r['rpm_source_reads']:>10} rpm")
     return 0
 
 

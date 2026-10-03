@@ -316,9 +316,19 @@ workflow {
     // -- Stage 0b: host depletion -----------------------------------------
     // Host reads are the majority of most clinical/veterinary specimens and a
     // major source of spurious classification via repeats.
+    // A run with --skip_host_depletion must not inherit the previous run's QC file.
+    // storeDir writes outside the work dir and is not cleaned between runs, so without a
+    // sentinel, run B (skipped) would present run A's healthy depletion figures as its own.
     if (params.skip_host_depletion) {
         ch_clean = ch_trimmed
         ch_host_stats = Channel.empty()
+        Channel.of("sample\tplatform\talignment_records\thost_matching_records\t" +
+                   "host_fraction_of_records\tsurviving_records\n" +
+                   "ALL_SAMPLES\tNA\tNA\tNA\tSKIPPED\tNA\n")
+            .collectFile(name: 'host_depletion.tsv', storeDir: "${params.outdir}/qc")
+            .subscribe { f -> log.warn "[QC] host depletion SKIPPED; eukaryotic references " +
+                               "recruit host reads in proportion to what survives it " +
+                               "(docs/decisions.md D14) -> ${f}" }
     } else {
         ch_host_idx = ch_trimmed.map { meta, reads ->
             def idx = meta.platform == 'illumina'

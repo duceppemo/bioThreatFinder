@@ -2505,10 +2505,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 if name and name.lower() != "name":
                     watchlist.append(name)
     if not watchlist:
-        LOG.warning("no watchlist at %s - truth_absent will be only what each scenario "
-                    "lists by hand, so a false positive on an unlisted organism will be "
-                    "scored 'unlisted' and silently excluded from specificity (D14)",
-                    watchlist_path)
+        # FATAL, not a warning. The warning text was an accurate description of D14, which
+        # is the argument for refusing: without the watchlist the planner writes short
+        # truth_absent columns and nothing downstream can tell that manifest from a
+        # correctly expanded one - specificity reads 0.000 exactly as it did in the run D14
+        # documents. resolve_watchlist.py and the pipeline already treat an unresolved
+        # watchlist as fatal; this was the one place that degraded quietly.
+        raise SystemExit(
+            f"ERROR: no usable watchlist at {watchlist_path}\n"
+            f"       truth_absent would fall back to each scenario's hand-written list, so "
+            f"a false positive on an unlisted organism would be scored 'unlisted' and "
+            f"silently dropped from specificity (docs/decisions.md D14).")
     else:
         LOG.info("watchlist: %d taxa, used to make truth_absent exhaustive", len(watchlist))
 

@@ -68,6 +68,15 @@ def parse(path: Path) -> tuple[int, int]:
                  f"read as a clean specimen.")
     if mapped > total:
         sys.exit(f"ERROR: {path} reports {mapped} host-matching of {total} total records.")
+    if total == 0:
+        # Without this, frac becomes 0.0 and the row reads "depletion examined this
+        # specimen and found no host" - the BEST possible figure - when in fact nothing
+        # was examined. Byte-identical in meaning to the genome_bp=0 masked_bp=0 rows
+        # that tests/test_pipeline.py `shared_assembly` was added to catch. Reached when
+        # fastp filtered every read, or minimap2 emitted a header and no records.
+        sys.exit(f"ERROR: {path} reports 0 alignment records. Refusing to write "
+                 f"host_fraction_of_records=0, which is indistinguishable from a "
+                 f"specimen that genuinely contained no host.")
     return total, mapped
 
 
@@ -102,7 +111,7 @@ def main() -> int:
         return 0
 
     total, mapped = parse(args.flagstat)
-    frac = mapped / total if total else 0.0
+    frac = mapped / total                      # parse() guarantees total > 0
     args.out.write_text(
         "\t".join(COLS) + "\n"
         + f"{args.sample}\t{args.platform}\t{total}\t{mapped}\t{frac:.6f}\t{total - mapped}\n")

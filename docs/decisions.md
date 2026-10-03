@@ -478,14 +478,21 @@ occupancy and 98.1% identity by host reads that survived depletion.
 **It is systematic, not a *T. gondii* quirk.** Measured recruitment per million human reads
 (`scripts/measure_recruitment.py`):
 
-| reference | rpm | % of human reads |
+| reference | records per 10^6 human reads | % of human reads |
 |---|---|---|
-| *Toxoplasma gondii* | 77,354 | **7.74%** |
-| *Plasmodium knowlesi* | 44,340 | 4.43% |
-| *Entamoeba dispar* | 8,160 | 0.82% |
-| *Plasmodium vivax* | 4,666 | 0.47% |
-| *Trichinella pseudospiralis* | 3,300 | 0.33% |
-| *Zika virus* | 2,164 | 0.22% |
+| *Toxoplasma gondii* | 38,677 | **3.87%** |
+| *Plasmodium knowlesi* | 22,170 | 2.22% |
+| *Entamoeba dispar* | 4,080 | 0.41% |
+| *Plasmodium vivax* | 2,333 | 0.23% |
+| *Trichinella pseudospiralis* | 1,650 | 0.17% |
+| *Zika virus* | 1,082 | 0.11% |
+
+⚠️ **These figures were first published at 2x these values** (*T. gondii* 77,354 / 7.74%).
+`measure_recruitment.py` divided SAM records, which count each mate separately, by read
+PAIRS - so it reported per-pair and called it per-read. Corrected 2026-10-03 after a review
+pass; the tool now emits `rpm_source_reads` against `source_reads = 2 x pairs`, matching
+`bin/coverage_stats.py:305`, whose denominator sums FASTQ records across both mates. The
+RANKING and the mechanism are unaffected, because both were direct record counts.
 
 Eukaryotic references absorb host reads at percent-level rates. The *Zika* row deserves
 separate attention: 0.22% of human reads landing on a 10.8 kb RNA virus is not plausible
@@ -507,11 +514,20 @@ was invisible to the measurement - the project's recurring failure shape, this t
 benchmark rather than the pipeline.
 
 **What is actually holding the line, and it is not what the design says.** Back-calculating
-from the recruitment coefficient: 8,380 recruited reads / 0.0774 => ~108,000 surviving human
-reads, i.e. host depletion removed ~99.5% of the ~19 M human reads in the sample. Recruitment
-scales linearly with whatever survives, so **host-depletion efficiency is the real control on
-eukaryotic false positives**, and nothing in the pipeline records or gates on it. At 95%
-depletion instead of 99.5% the same reference would recruit ~75,000 reads.
+from the corrected coefficient: 8,380 recruited records / 0.0387 => **~217,000 surviving
+human reads**. Recruitment scales linearly with whatever survives, so **host-depletion
+efficiency is the real control on eukaryotic false positives**, and until 2026-10-03 nothing
+in the pipeline recorded it (`ch_host_stats` was a dead channel; now written to
+`<outdir>/qc/host_depletion.tsv`). It still GATES nothing.
+
+⚠️ A matching prediction was claimed and does not hold. Commit `276a3f1` reported the
+measured coefficient predicting the observed *Y. pestis*-bundle pedestal "within 8%". That
+compared a per-PAIR coefficient against a per-RECORD count. With consistent units the
+prediction is 1,266 records against 2,664 observed - **2.1x out**, not 8%. The direct
+observations in this entry stand; the predictive arithmetic does NOT, and the most likely
+residual cause is that `unique_reads` for the background organism underestimates the
+organism's true record count. Resolving it needs the read-attribution denominator, not the
+MAPQ-filtered one.
 
 **Decision: fix the BENCHMARK first, not the thresholds.** The measurement has to be able to
 see the failure before any threshold is tuned against it, or the tuning is unfalsifiable:
