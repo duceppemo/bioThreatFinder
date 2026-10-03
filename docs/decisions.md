@@ -275,69 +275,96 @@ declared rpm give the actual LoD, and both gates get set from that.
 
 ---
 
-## D12 — `neighbour_ratio` measures a background pedestal at low abundance; expand the benchmark before changing it
+## D12 — `neighbour_ratio`'s denominator is 98% background cross-mapping and 0% neighbour ⚠️ *confirmed by read attribution*
 
-**Finding:** `[MEASURED]` 2026-10-03, `runs/lod_v2_kraken2`, 12 *Y. pestis* samples across
-four spike levels, 3 replicates each. The denominator of `neighbour_ratio` is
-**effectively constant** while the numerator moves over three orders of magnitude:
+**Finding:** `[MEASURED]` 2026-10-03. The gate is documented as "do these reads favour the
+target or its near neighbour?" (`coverage_stats.py:39`). By direct read attribution it is
+not measuring neighbour competition at all.
 
-| level | target reads | best-neighbour reads (630) | ratio | tier |
+The simulated reads carry their source accession in the read name, so every alignment in
+the competitive bundle can be traced to the genome it actually came from. For
+`lod_gram_negative`, taxid 632, MAPQ>=10, reads assigned to the NEIGHBOUR reference
+(taxid 630, *Y. enterocolitica*):
+
+| sample | neighbour reads | from *E. coli* | from *Y. pestis* | % *E. coli* |
 |---|---|---|---|---|
-| 10 rpm | 418-424 | 2,581-2,753 | 0.15 | attributed_to_neighbour |
-| 100 rpm | 2,328-2,466 | 2,722-2,811 | 0.86 | attributed_to_neighbour |
-| 1000 rpm | 22,316-22,401 | 2,695-2,722 | 8.28 | confirmed_in_silico |
-| 10000 rpm | 220,810-221,729 | 2,600-2,730 | 81.1 | confirmed_in_silico |
+| r1 rpm10 | 2,763 | 2,700 | **0** | 97.7% |
+| r1 rpm100 | 2,731 | 2,664 | **0** | 97.5% |
+| r1 rpm1000 | 2,708 | 2,660 | **0** | 98.2% |
+| r2 rpm100 | 2,773 | 2,718 | **0** | 98.0% |
+| r3 rpm100 | 2,822 | 2,749 | **0** | 97.4% |
+| r1 rpm10000 | 2,737 | 2,673 | **0** | 97.7% |
 
-**2,710 +/- 70 neighbour reads - 2.6% variation against a 530x swing in the target.**
+**Not one read from the spiked target is assigned to the neighbour, in any sample.** The
+remaining ~2% is *H. haemolyticus* and *N. lactamica*, also background. The reads are
+*E. coli* O157:H7 Sakai (NC_002695.2 plus its plasmids), which is the standing background
+at 2%. There is no Yersinia neighbour in these samples at all, so the "competition" the
+denominator represents does not exist.
 
-**It is not double-counting.** At 10 rpm the neighbour holds ~2,753 reads while the target
-has 424 in total, so the pedestal cannot be target reads leaking across the competitive
-bundle.
+**The numerator has the same defect, and at low abundance it is worse.** Reads assigned to
+the TARGET reference, by true origin:
 
-**Where it comes from:** taxid 630 is *Y. enterocolitica*, and `simulate.log` for this
-batch spikes no Yersinia other than *pestis* - no neighbour was planted. The standing
-background is dominated by *E. coli* (~650,000 reads) and 2,710 is ~0.4% of it, consistent
-with conserved-region cross-mapping within Enterobacteriaceae onto the neighbour reference.
+| level | target reads | true *Y. pestis* | *E. coli* | % false |
+|---|---|---|---|---|
+| 10 rpm | 427 | 225 | 202 | **47.3%** |
+| 100 rpm | 2,336 | 2,114 | 222 | 9.5% |
+| 1000 rpm | 22,320 | 22,128 | 191 | 0.9% |
+| 10000 rpm | 221,439 | 221,209 | 230 | 0.1% |
 
-**Why that matters.** `coverage_stats.py:39` states the intent: "unique_reads(target) /
-unique_reads(best neighbour). Below ~1 the reads are better explained by the neighbour."
-With a background-derived constant denominator the realised question is instead "is the
-target more abundant than a fixed cross-mapping floor?" - a disguised ABUNDANCE threshold
-whose value tracks background composition and sequencing depth rather than
-target/neighbour discrimination. The gate then fires hardest exactly where sensitivity
-matters most, and 6 truth-present rows are scored NEGATIVE by the evaluator
-(`attributed_to_neighbour` PPV 0.500 under Kraken2, vs 1.000 with sylph alone).
+So at 10 rpm **nearly half of what is counted as the target is *E. coli***. That corrupts
+breadth, `depth_cv` and `mean_identity` too, not only the ratio.
 
-**The benchmark expectation looks right and the gate looks wrong.** The failing
-expectation is `min_tier_at_rpm {100: supported}`. At 100 rpm the rows would still fail
-`depth_cv` (5.78 vs the 2.50 ceiling), which yields `supported` rather than
-`confirmed_in_silico` (`score_evidence.py:499`) - precisely what the scenario asks for. So
-this is not an optimistic expectation.
+**Both pedestals are constant, and their asymmetry is the whole bias.** *E. coli*
+contributes ~2,700 reads to the neighbour reference and ~210 to the target reference, at
+every spike level. The neighbour recruits **~13x more** background than the target does -
+a property of the two REFERENCES, not of the sample. So in this background
 
-Note the measured **LoD of 1000 rpm for CONFIRMATION is independently sound**: *Y. pestis*
-is >97% chromosomal ANI to *Y. pseudotuberculosis*, so confirmation rests on the pPCP1 /
-pMT1 markers, and at 100 rpm (0.07x depth) only ~0.45 reads are expected on `pla`, which
-the depth gate correctly calls UNKNOWN rather than ABSENT. Fixing the neighbour metric
-should move 100 rpm to `supported`, NOT to confirmed.
+    neighbour_ratio  ~=  (true_target_reads + 210) / 2,700
 
-**Decision: record it, EXPAND THE BENCHMARK, do not change the metric yet.** The evidence
-is one batch, one target, one platform, one background composition, and the evaluator
-itself flags the result `coarse - fewer than 5 replicates`. Every candidate fix - requiring
-the neighbour's own breadth/occupancy to be credible before it out-votes the target,
-subtracting a pedestal estimated from negative controls, or attributing on RELATIVE
-breadth instead of raw read count - changes detection behaviour for all 89 taxa. Choosing
-between them from a single scenario would repeat the mistake D11 refuses to make:
-replacing one arbitrary number with another.
+and clearing the 1.5 threshold needs about **3,840 true target reads** no matter what, with
+or without a neighbour present. `min_neighbour_ratio` is therefore an undeclared read floor
+whose height is set by background composition and by which reference happens to be more
+*E. coli*-like.
 
-**Would resolve it:** a benchmark that varies what the pedestal depends on. Specifically
-(a) levels between 100 and 1000 rpm with >=5 replicates, so the cliff is located rather
-than bracketed by a 10x gap; (b) at least one scenario with a near neighbour GENUINELY
-spiked, so a real neighbour signal can be told apart from the cross-mapping floor;
-(c) a background-composition arm, since the pedestal is predicted to scale with
-Enterobacteriaceae abundance - if it does not, this diagnosis is wrong; and (d) a second
-target whose neighbour is not in the same family, to show whether the effect is general or
-specific to *Yersinia*/*E. coli*. Prediction to test: the pedestal tracks background
-abundance and is near zero in a clean (non-Enterobacteriaceae) background.
+**Falsifiable prediction, now sharper than the one D12 first recorded.** Reads scale
+linearly with spike level (2,114 true reads at 100 rpm), so 3,840 is reached at **~180 rpm**.
+Detection should switch on between 100 and 1000 rpm and specifically near 180 - which is
+exactly why the measured LoD came out as 1000: the series steps 100 -> 1000 and brackets
+the real threshold. A finer grid should find the cliff at ~180 rpm, NOT at 1000. If it is
+found anywhere else, this arithmetic is wrong.
+
+**Masking does not currently touch this.** `mask_pack_refs.py` has a `crossgroup` source,
+but it compares "only across distant groups" (bacteria vs virus/fungus/parasite) by design,
+so bacteria-vs-bacteria recruitment is invisible to it: `masked_bp` crossgroup is **0 bp**
+for both 630 and 632. Masking conspecific-family recruitment is therefore an available
+lever that has never been pulled, and unlike a threshold change it would fix the numerator
+and denominator together.
+
+**Decision: still do not patch the metric; the fix is now a choice between three named
+options, and the measurement to choose between them is cheap.** What changed since this
+entry was first written is that the MECHANISM is no longer in doubt - it is background
+recruitment, quantified, with zero neighbour contribution. What is still undecided is the
+remedy, and the options differ in what they would cost every one of the 89 taxa:
+
+1. **Mask within-family recruitment.** Extend `crossgroup` to same-group genomes, or add a
+   `background` source masking against the pack's own standing background. Fixes numerator
+   and denominator at once and needs no threshold. Risk: over-masking a genuine shared
+   locus, which costs sensitivity silently - the thing masking is supposed to prevent.
+2. **Require the neighbour to be credible before it can out-vote.** Gate attribution on the
+   neighbour's own breadth and occupancy, not its raw count. A 2,700-read pedestal spread
+   thinly over 4.5 Mb has negligible breadth, so it would stop counting. Cheapest change,
+   but adds a second threshold to calibrate.
+3. **Subtract an estimated pedestal measured from the negative controls.** Honest about the
+   mechanism and uses data already produced every run, but the estimate is specimen- and
+   background-dependent, so it is the least portable.
+
+**Would resolve it:** the finer rpm grid above (does the cliff land at ~180?), plus the
+real-data arms in `benchmarks/scenarios/real_mock_communities.yaml`. The Zymo even standard
+remains the decisive external check, because there *Salmonella*'s declared neighbour
+(*E. coli*) IS genuinely present while *Listeria*'s neighbours are absent - so a real
+neighbour signal and a recruitment pedestal can be told apart in one library. Note the
+titration arm is no longer needed to establish the mechanism; it would only measure the
+slope.
 
 ---
 

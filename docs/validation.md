@@ -235,3 +235,39 @@ Two samples, `params.kraken2_memory_mapping = true`, `maxForks = 2`:
 Both tasks were submitted 13 s apart and ran at once with peak RSS FLAT, which is the
 point: they shared one file-backed copy of the 123.5 GB hash in page cache. Without mmap
 the same pair would have demanded ~247 GB of unreclaimable memory.
+
+## D12 mechanism confirmed by read attribution — 2026-10-03
+
+The simulated reads carry their source accession in the read name, so the competitive
+alignment BAMs already on disk answer the D12 question without any new sequencing. For
+`runs/lod_v2_kraken2`, taxid 632 bundle, MAPQ>=10:
+
+**Neighbour reference (taxid 630, *Y. enterocolitica*) — 6 samples spanning 4 spike levels:**
+2,708–2,822 reads assigned, of which **97.4–98.2% originate from *E. coli*** O157:H7 Sakai
+(the 2% standing background) and **0 originate from the spiked *Y. pestis*, in every
+sample**. The rest is *H. haemolyticus* and *N. lactamica*, also background.
+
+**Target reference (taxid 632) — the numerator is affected too:**
+
+| level | target reads | true *Y. pestis* | *E. coli* | % false |
+|---|---|---|---|---|
+| 10 rpm | 427 | 225 | 202 | 47.3% |
+| 100 rpm | 2,336 | 2,114 | 222 | 9.5% |
+| 1000 rpm | 22,320 | 22,128 | 191 | 0.9% |
+| 10000 rpm | 221,439 | 221,209 | 230 | 0.1% |
+
+Both pedestals are flat in absolute terms (~2,700 on the neighbour, ~210 on the target) and
+their ~13x asymmetry is a property of the references, not of the specimen. Consequence:
+`neighbour_ratio ~= (true_target + 210) / 2,700`, so the 1.5 threshold needs ~3,840 true
+target reads whether or not a neighbour is present.
+
+**Prediction for the finer grid:** 2,114 true reads at 100 rpm scales linearly, so 3,840 is
+reached at **~180 rpm**. The cliff should sit there, not at 1000 - the 1000 figure is an
+artefact of a series that steps 100 -> 1000. Finding it elsewhere falsifies the arithmetic.
+
+At 10 rpm nearly half the "target" reads are *E. coli*, so breadth, `depth_cv` and
+`mean_identity` are all affected at low abundance, not just the ratio.
+
+Masking cannot currently help: `mask_pack_refs.py`'s `crossgroup` source compares only
+across distant groups by design, so bacteria-vs-bacteria recruitment is 0 bp masked for both
+references. That makes within-family masking an untried lever.
