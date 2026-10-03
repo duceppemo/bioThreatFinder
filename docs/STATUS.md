@@ -68,7 +68,7 @@ instead.
 | `packs/human/refs/masked/` | complete — 20.0 Mbp masked. **Two rows need re-masking: see below.** Per-source byte totals in D5 were double-counted and are upper bounds, not a partition |
 | `host/human/` | T2T-CHM13v2.0 + sr and map-ont indexes, 17 GB |
 | `packs/human/markers/` | 163 manifest rows; 18 referenced by rules can only be UNKNOWN (5 failed, 4 curation_required, 9 motif_todo) — see the vaccine/veto note below |
-| `kraken2/pluspf/` | **complete** 2026-10-02. `hash.k2d` 123.5 GB, `opts.k2d`, `taxo.k2d`, `seqid2taxid.map`, and `database{100,150,250}mers.kmer_distrib`. k=35, minimizer 31, full-sensitivity (no `--max-db-size`). Built against the pinned 2026-09-29 taxdump, md5-verified. Includes the 5,413 assemblies `kraken2-build` had silently dropped. `library/` still holds 327 GB — reclaim with `kraken2-build --db <db> --clean` |
+| `kraken2/pluspf/` | **complete** 2026-10-02. `hash.k2d` 123.5 GB, `opts.k2d`, `taxo.k2d`, `seqid2taxid.map`, and `database{100,150,250}mers.kmer_distrib`. k=35, minimizer 31, full-sensitivity (no `--max-db-size`). Built against the pinned 2026-09-29 taxdump, md5-verified. Includes the 5,413 assemblies `kraken2-build` had silently dropped. `--clean` run 2026-10-03: 614 GB -> 233 GB. The remaining 125.5 GB is `database.kraken`, a Bracken BUILD intermediate - query-time Bracken reads only the `.kmer_distrib` files (measured: 0.6 s, 7.4 MB RSS). Keep it only to derive an extra read length without re-classifying the library |
 | `krakenuniq/`, `metabuli/` | not built. KrakenUniq is opt-in by design; Metabuli still pending a decision |
 
 ## Outstanding DATA fix: two reference genomes were never masked
@@ -166,11 +166,11 @@ stays offline and fast by design.
    end to end, and that run will find more than any further static review: well over
    thirty silent-failure bugs have been found so far, all sharing the shape "produces an
    empty or degraded result indistinguishable from a clean negative".
-2. The Kraken2 build is done (2026-10-02), so verify `--report-minimizer-data` actually
-   produces the distinct-minimizer and duplicity columns on a real sample. Note the LoD
-   batch `lod_v1` has been scored with **sylph only** (`--skip_kraken2 --skip_metabuli`),
-   so its limits say nothing about the primary arm - re-run it with Kraken2 enabled.
-3. Re-mask taxids 264 and 620 (above).
+2. **DONE 2026-10-03.** `--report-minimizer-data` verified on real reads: 8 columns,
+   e.g. Bacillus genus 20,075,887 minimizers / 1,794,592 distinct = 11.2 duplicity. The
+   LoD batch was re-run with Kraken2 as `runs/lod_v2_kraken2` (the sylph-only pass is
+   kept at `runs/lod_v1` for comparison).
+3. Re-mask taxids 264 and 620 (above). **Now unblocked** - the Kraken2 build is finished.
 4. Then set thresholds from measurement. Three are explicitly PROVISIONAL and flagged in
    the code: the ONT read-identity floors (D10), `--ont-identity-slack` in the marker
    tier, and the read/breadth gate incoherence (D11) where **75 of 89** taxa have a

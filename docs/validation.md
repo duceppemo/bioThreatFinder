@@ -179,3 +179,59 @@ posture for a biothreat tool, but it should be a deliberate choice, not an accid
   consequence-tiered reporting framework built for exactly this use case, including
   national-security and synthetic-biology detection. **Not yet read.** It should be,
   before the reporting layer is considered settled.
+
+## Measured detection limit — 2026-10-03
+
+First measurement against ground truth, `bin/evaluate_benchmark.py` over
+`benchmarks/scenarios/human_core.yaml` and the `lod_v1` manifest (21 samples, 3
+replicates per level).
+
+**LoD = 1000 RPM** for *Y. pestis* on Illumina, and it is a cliff rather than a gradient:
+0.000 detection at 1, 10 and 100 RPM, 1.000 detection AND 1.000 confirm at 1000 and
+10000. `lod_half_rpm` equals `lod_all_rpm`, so there is no partial-detection band to
+interpolate. Flagged `coarse - fewer than 5 replicates`.
+
+**This is the first empirical read on decision D2.** sylph-only (`runs/lod_v1`) and
+Kraken2 (`runs/lod_v2_kraken2`) produce the SAME LoD and the same 6
+`confirmed_in_silico` findings at PPV 1.000. Kraken2's distinct-minimizer evidence did
+not lower the detection limit on this batch. It is not a null result for D2 overall -
+this batch has one target, one platform and no divergent or novel agent - but it does
+mean the primary arm is not buying sensitivity here.
+
+**What Kraken2 did change, and it needs calibration work:**
+
+| tier | sylph-only | Kraken2 |
+|---|---|---|
+| `confirmed_in_silico` | 6, PPV 1.000 | 6, PPV 1.000 |
+| `attributed_to_neighbour` | 3, PPV 1.000 | **68, PPV 0.500** |
+| `screened_only` | — | 47, PPV 0.000 |
+| `supported` | — | 18 (all taxa absent from benchmark truth, so unassessable) |
+
+`attributed_to_neighbour` counts as NEGATIVE in the evaluator's mapping, so those 6
+truth-present rows are scored as missed detections. One scenario expectation fails in
+BOTH runs for the same reason:
+
+    FAIL lod_gram_negative/Yersinia pestis min_tier_at_rpm[100]:
+         expected >= supported, observed attributed_to_neighbour
+
+At 100 RPM *Y. pestis* carries ~2,300 unique reads at 0.062 breadth and is reassigned to
+a neighbour. Either the scenario's expectation is optimistic or `min_neighbour_ratio` is
+miscalibrated; the measurement cannot tell these apart, and resolving it is step 4.
+
+**Specificity is clean:** 0.000 false-positive and 0.000 false-confirm across all 6
+negative-control samples for every watchlist taxon, including *B. anthracis* and
+*F. tularensis*.
+
+## Kraken2 memory mapping — verified 2026-10-03
+
+Two samples, `params.kraken2_memory_mapping = true`, `maxForks = 2`:
+
+| | no mmap | mmap |
+|---|---|---|
+| KRAKEN2 realtime | 30 s - 3 m 24 s | **11.0 s / 11.1 s** |
+| peak RSS | 115.5-115.7 GB | 115.3 GB |
+| concurrent tasks | 1 | **2, overlapping** |
+
+Both tasks were submitted 13 s apart and ran at once with peak RSS FLAT, which is the
+point: they shared one file-backed copy of the 123.5 GB hash in page cache. Without mmap
+the same pair would have demanded ~247 GB of unreclaimable memory.
