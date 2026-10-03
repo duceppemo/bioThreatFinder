@@ -96,6 +96,29 @@ python3 scripts/mask_pack_refs.py --pack human --btf-db /media/8tb/bioThreatFind
 `--force` is required: both rows already carry a (vacuous) `masked_bp=0` result, so
 without it the run is skipped as already done.
 
+**Done 2026-10-03.** Both rows now carry real results, and the *Shigella* reference turned
+out to hold **10,412 bp of vector sequence** - the Wright et al. failure mode this step
+exists for:
+
+| taxid | taxon | genome_bp | masked_bp | intervals |
+|---|---|---|---|---|
+| 264 | *F. tularensis* subsp. *novicida* | 1,870,206 | 24 | 1 |
+| 620 | *Shigella* | 5,192,674 | 11,144 | 28 |
+
+Each pair now agrees exactly with its assembly partner (263 and 622), which is the
+invariant the bug violated, and `tests/test_pipeline.py` group `shared_assembly` pins it -
+including a not-vacuous check, so a regression cannot pass by agreeing at zero.
+
+**Known gap, not fixed: the `SHARED_SEQUENCE` flag is empty on all four rows.**
+`mask_pack_refs.py` detects sharing from RUN-TIME contig collisions (`contig_owner` is
+populated as genomes load), so the flag only appears when both partners are masked in the
+same invocation. A `--only-taxid` run of one partner produces correct numbers with no
+flag, which means the manifest's provenance column depends on how the script was invoked -
+the precise shape decisions.md warns about ("a guard that asserts how a script was invoked
+is not a guard"). The numbers are right either way; what is missing is the marker saying
+the agreement is intentional. The durable fix is to derive sharing from the refs manifest's
+`accession` column, which is an artifact rather than run state.
+
 Then confirm both rows have non-zero `genome_bp` in `masked/mask_manifest.tsv`.
 
 ## A behaviour change to be aware of: unevaluable vaccine and veto checks now cap the tier

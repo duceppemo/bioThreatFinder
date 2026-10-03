@@ -30,6 +30,7 @@ import os
 import shutil
 import subprocess
 import sys
+import pathlib
 import tempfile
 from pathlib import Path
 
@@ -929,6 +930,51 @@ def test_workflow_scripts(tmp: Path) -> None:
            f"by a classifier that reports containment rather than reads")
 
 
+def test_shared_assembly_masking(tmp: Path) -> None:
+    """Taxa sharing one NCBI assembly must carry IDENTICAL masking numbers.
+
+    F. tularensis (263) / F. novicida (264) share GCF_000833355.1, and
+    S. dysenteriae (622) / Shigella (620) share GCF_022354085.1. Because the FASTAs
+    carry identical contig names, mask_pack_refs.py used to attribute the contigs to
+    whichever genome loaded first and skip the second, writing genome_bp=0 masked_bp=0
+    and an interval-free BED - byte-identical in meaning to "examined and found clean".
+    Both shipped BEDs were in that state until 2026-10-03.
+
+    The invariant is agreement, not a flag: identical sequence must produce identical
+    masking. The SHARED_SEQUENCE flag is deliberately NOT asserted here, because it is
+    set from run-time contig collisions and so only appears when both partners are in
+    the same invocation - a --only-taxid run of one partner produces correct numbers with
+    an empty flag. See docs/STATUS.md.
+
+    Skips rather than fails when the built artifacts are absent, since the suite is
+    meant to run offline on a checkout without /media/8tb.
+    """
+    import csv as _csv
+    mask_manifest = pathlib.Path(
+        "/media/8tb/bioThreatFinder/packs/human/refs/masked/mask_manifest.tsv")
+    if not mask_manifest.exists():
+        skip("shared_assembly:pairs agree", f"no built artifacts at {mask_manifest}")
+        return
+    with mask_manifest.open() as fh:
+        rows = {r["taxid"]: r for r in _csv.DictReader(fh, delimiter="\t")}
+
+    for a, b, label in (("263", "264", "F. tularensis / F. novicida"),
+                        ("620", "622", "Shigella / S. dysenteriae")):
+        ra, rb = rows.get(a), rows.get(b)
+        if not ra or not rb:
+            skip(f"shared_assembly:{label}", f"taxid {a if not ra else b} not in manifest")
+            continue
+        fields = ("genome_bp", "masked_bp", "masked_fraction", "n_masked_intervals")
+        diffs = [f"{f}: {ra.get(f)} vs {rb.get(f)}"
+                 for f in fields if ra.get(f) != rb.get(f)]
+        record(f"shared_assembly:{label} agree", not diffs, "; ".join(diffs))
+        # The vacuous state the bug produced, asserted directly so a regression that
+        # reintroduces it cannot pass by agreeing at zero.
+        record(f"shared_assembly:{label} not vacuous",
+               ra.get("genome_bp") not in ("", "0") and rb.get("genome_bp") not in ("", "0"),
+               f"genome_bp {ra.get('genome_bp')} / {rb.get('genome_bp')}")
+
+
 def test_platform_carried(tmp: Path) -> None:
     """Every finding must carry ITS OWN row's platform, whatever tier it landed in.
 
@@ -990,6 +1036,7 @@ CASES = {
     "eval": test_evaluator,
     "workflow": test_workflow_scripts,
     "platform": test_platform_carried,
+    "shared_assembly": test_shared_assembly_masking,
 }
 
 
