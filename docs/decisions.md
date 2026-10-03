@@ -358,13 +358,98 @@ remedy, and the options differ in what they would cost every one of the 89 taxa:
    mechanism and uses data already produced every run, but the estimate is specimen- and
    background-dependent, so it is the least portable.
 
-**Would resolve it:** the finer rpm grid above (does the cliff land at ~180?), plus the
-real-data arms in `benchmarks/scenarios/real_mock_communities.yaml`. The Zymo even standard
-remains the decisive external check, because there *Salmonella*'s declared neighbour
-(*E. coli*) IS genuinely present while *Listeria*'s neighbours are absent - so a real
-neighbour signal and a recruitment pedestal can be told apart in one library. Note the
-titration arm is no longer needed to establish the mechanism; it would only measure the
-slope.
+**SCOPE, measured 2026-10-03 and narrower than first stated.** The same read attribution
+applied to the negative-control bundles shows the defect is NOT general. For five of the six
+other taxa that stage 1 nominated, the declared near-neighbour is genuinely present in the
+standing background - *B. thuringiensis* for *B. anthracis*, *L. innocua* for
+*L. monocytogenes*, *E. coli* for *Salmonella* and for *Shigella*, *N. lactamica* for
+*N. meningitidis* - so the denominator represents real competition and the gate does the job
+it claims. That is why `attributed_to_neighbour` scored PPV 0.500 rather than 0: half those
+calls were correct.
+
+The defect needs BOTH conditions together:
+
+  (a) the declared near-neighbour is ABSENT from the specimen, and
+  (b) the neighbour reference recruits more background than the target reference does.
+
+*Y. pestis* / *Y. enterocolitica* in this batch satisfies both. How often that pairing
+arises across 89 taxa and real specimen backgrounds is unmeasured, and is the open question.
+
+**CALIBRATION LIMIT, stated plainly.** Everything above comes from ONE simulated batch with
+ONE background composition (2% *E. coli*, 1% *N. lactamica*, 0.7% each
+*H. haemolyticus*/*L. innocua*, 0.5% *B. thuringiensis*) and reference pairs from one pack.
+The 2,700/210 figures and the ~13x asymmetry are properties of those specific references and
+that specific background. They should not be treated as constants.
+
+**Would resolve it:** the finer rpm grid above (does the cliff land at ~180?), and -
+for the calibration limit specifically - the TEN ZYMO ISOLATE RUNS, which are a better
+instrument than the community arms for this question. Each isolate library contains ONE
+organism, so recruitment onto any reference is unambiguous BY CONSTRUCTION, with no need for
+the read-name trick that real community data cannot supply. Aligning each isolate against
+each competitive bundle yields a per-reference recruitment coefficient in reads per million,
+measured on REAL reads with real error profiles: a 10 x 89 matrix in place of the single
+number this entry currently rests on. The even-vs-log standards then test whether recruitment
+scales linearly with background abundance, and the *Salmonella* (neighbour present) versus
+*Listeria* (neighbours absent) contrast tests condition (a) on real data.
+
+What Zymo CANNOT settle: it contains no *Yersinia*, *B. anthracis*, *Francisella* or
+*Burkholderia*, so those agents can be measured only as recruiting REFERENCES, never as
+low-abundance targets; its ten organisms are a floor on background diversity, not a model of
+a clinical specimen; and without the host-mixture arm it says nothing about the human-read
+recruitment D13 records.
+
+---
+
+## D13 — Masking is detected at 200 bp / 95% identity but reads map at 101 bp; the two scales do not meet
+
+**Finding:** `[MEASURED]` 2026-10-03, from the negative-control bundles of
+`runs/lod_v2_kraken2` (no watchlist target spiked; reads carry their source accession).
+Reads at MAPQ>=10 on each TARGET reference, by true origin:
+
+| taxid | taxon | reads on target | dominant true origin |
+|---|---|---|---|
+| 5811 | *Toxoplasma gondii* | 24,101 (7,645 in top 3) | **human** NC_060925.1 / 060933.1 / 060943.1 |
+| 487 | *Neisseria meningitidis* | 317 | *H. haemolyticus* (275), *E. coli* (42) |
+| 1392 | *Bacillus anthracis* | 66 | *L. innocua* (64) |
+| 1639 | *Listeria monocytogenes* | 45 | *B. thuringiensis* (45) |
+| 622 | *Shigella dysenteriae* | 61 | *E. coli* (60) |
+| 28901 | *Salmonella enterica* | 23 | *H. haemolyticus* (20) |
+
+The *T. gondii* reference is a **human-read sink**: thousands of host reads that survived
+depletion map to it at MAPQ>=10, three orders of magnitude more than any bacterial
+reference recruits. Its neighbour side holds 33 reads, so `neighbour_ratio` is **730** and
+the neighbour gate offers no protection whatsoever. Breadth, occupancy and identity are
+what actually hold the line - the specificity table shows 0.000 false positives - so this
+is a redundancy that is doing nothing, not an active false positive.
+
+**Why masking does not catch it.** `mask_pack_refs.py` runs at `min_hit_len=200` and
+`min_identity=0.95`. A 101 bp read needs neither: it maps at MAPQ>=10 on far shorter and
+far less identical stretches than a 200 bp 95%-identity alignment. The result pack-wide:
+
+* *T. gondii*: **1,982 bp** host-masked on a 65.7 Mb genome
+* **2 of 359 genomes** have ANY host masking at all, 2,737 bp in total
+* `crossgroup` is **0 bp** for every genome checked, because it compares only across
+  distant groups by design
+
+So the masking step cannot see read-scale recruitment. This is a scale mismatch, not a
+missing source.
+
+**Consequence for D12 option 1.** Masking within-family recruitment was listed there as the
+lever that would fix numerator and denominator together. At current parameters it would
+not: the *E. coli* pedestal on *Y. enterocolitica* sits on a reference with 571 bp masked
+and 0 bp crossgroup. Making masking catch it means read-scale parameters (~100 bp, lower
+identity), which on closely related genomes would mask large fractions of the reference and
+cost sensitivity in exactly the silent way masking exists to prevent. That trade-off has to
+be measured, not assumed.
+
+**Decision: record, and do not change the masking parameters.** Both numbers that matter -
+0.000 false-positive rate and 0.349% overall masked - are currently acceptable, and the
+mechanism is now documented so a future false positive on a eukaryotic reference is
+diagnosable rather than mysterious.
+
+**Would resolve it:** per-reference recruitment measured on REAL single-organism reads, so
+masking parameters can be chosen against a measured curve rather than a guess. The ten Zymo
+isolate runs are exactly that instrument - see D12.
 
 ---
 
