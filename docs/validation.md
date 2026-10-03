@@ -262,13 +262,14 @@ sample**. The rest is *H. haemolyticus* and *N. lactamica*, also background.
 
 Both pedestals are flat in absolute terms (~2,700 on the neighbour, ~210 on the target) and
 their ~13x asymmetry is a property of the references, not of the specimen. Independently
-measured with `scripts/measure_recruitment.py` at the batch's actual 150 bp: *E. coli*
-recruits 3,540 records per million source reads onto the *Y. enterocolitica* reference
-against 320 onto *Y. pestis*, an 11.1x asymmetry reached by a different route. Against the
-800,000 E. coli source records the simulator planned, that predicts 2,832 records on ref 630
-versus 2,664 observed - **within 6%**, so the pedestal model is calibrated. See D14 for the
-three-correction history behind that number; two earlier versions of it in this repo were
-wrong. Consequence:
+measured with `scripts/measure_recruitment.py` at the batch's conditions (150 bp, insert
+350, MAPQ>=10): *E. coli* recruits 3,355 records per 10^6 source reads onto the
+*Y. enterocolitica* reference against 256 onto *Y. pestis*, a **13.1x** asymmetry reached by
+a different route from the 12.9x observed in-sample. `scripts/check_pedestal_model.py`
+computes the comparison over all 12 samples from primary sources: the neighbour arm predicts
+2,684 against 2,581-2,811 observed (**mean -0.9%**) and the target arm 205 against 191-230
+attributed (**-3.0%**). See D14 for the four-version history of this coefficient; three
+earlier versions in this repo were wrong, all of them hand-copied. Consequence:
 `neighbour_ratio ~= (true_target + 210) / 2,700`, so the 1.5 threshold needs ~3,840 true
 target reads whether or not a neighbour is present.
 

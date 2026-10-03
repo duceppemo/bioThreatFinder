@@ -104,7 +104,7 @@ process MINIMAP2_HOST_DEPLETE {
 
     # Host-depletion efficiency as a first-class artifact. D14: eukaryotic references
     # recruit host reads in proportion to what survives this step - the T. gondii
-    # reference takes ~3.9% of them - so this fraction gates a whole class of false
+    # reference takes ~41% of the host reads that survive - so this gates a class of false
     # positive. flagstat already computed it, host_stats was published, and ch_host_stats
     # was a dead channel that nothing read.
     host_depletion_stats.py \\

@@ -478,37 +478,39 @@ occupancy and 98.1% identity by host reads that survived depletion.
 **It is systematic, not a *T. gondii* quirk.** Measured recruitment per million human reads
 (`scripts/measure_recruitment.py`):
 
-Measured at **150 bp**, which is the read length `lod_v1` was actually simulated at
-(`scripts/simulate_benchmark.py:120`; all 138 ART commands in that batch are `-l 150`):
+Measured at **150 bp** with **insert 350** and **MAPQ>=10**, matching `lod_v1`
+(`scripts/simulate_benchmark.py:120,1202`; all 138 ART commands in that batch are `-l 150`),
+over 10^6 simulated source reads:
 
 | reference | records per 10^6 human reads | % of human reads |
 |---|---|---|
-| *Toxoplasma gondii* | **55,106** | **5.51%** |
+| *Toxoplasma gondii* | **54,258** | **5.43%** |
 
-RANKING at 101 bp, which is the right shape but the wrong magnitude for this batch -
-*P. knowlesi* ~2.2%, *E. dispar* ~0.4%, *P. vivax* ~0.2%, *T. pseudospiralis* ~0.2%,
-*Zika* ~0.1%. A 150 bp matrix is being regenerated.
+The matrix now records `read_len`, `mapq_min` and `insert_mean` as columns, so a
+coefficient can no longer be lifted off disk without its conditions.
 
-⚠️ **This figure has been published three times and was wrong twice.** The history, because
-the lesson is in it:
+⚠️ **This figure was published four times and wrong three times.** The history is kept
+because the pattern is the lesson:
 
 | | *T. gondii* | why it was wrong |
 |---|---|---|
 | first | 7.74% | SAM records divided by read PAIRS, labelled per-read - 2x high |
 | second | 3.87% | unit fixed, but measured at 101 bp when the batch is 150 bp |
-| **now** | **5.51%** | per-read, at the batch's actual read length |
+| third | 5.51% | a 50k-read spot check quoted while a 500k run was producing a better one |
+| **now** | **5.43%** | 10^6 reads, 150 bp, insert 350, from the matrix file itself |
 
-Recruitment is **read-length dependent** - longer reads span more conserved sequence and
-clear MAPQ more often, so the same reference recruits ~1.8x more at 150 bp than at 101 bp.
-`measure_recruitment.py` therefore takes `--read-len` and it MUST match the data being
-explained. Neither the ranking nor the mechanism changed across the three versions, because
-those rest on direct record counts rather than on the coefficient.
+Every wrong version was hand-copied from a terminal into a document. The coefficient is
+read-length dependent (1.4-2.0x between 101 and 150 bp, varying BY REFERENCE - it is not a
+single factor), so `--read-len` is required, the artifact records it, and
+`scripts/check_pedestal_model.py` now computes the comparison from primary sources and
+REFUSES a matrix whose read length does not match the batch. Neither the ranking nor the
+mechanism moved across the four versions, because those rest on direct record counts.
 
 Eukaryotic references absorb host reads at percent-level rates. The *Zika* row deserves
-separate attention: 0.22% of human reads landing on a 10.8 kb RNA virus is not plausible
-homology and suggests human or vector sequence INSIDE that reference - the Wright et al.
-mechanism, which would make it a contaminated reference rather than a homology artefact.
-Flagged, not concluded.
+separate attention: **0.26%** of human reads landing on a 10.8 kb RNA virus (2,555 records
+per 10^6 at 150 bp) is not plausible homology and suggests human or vector sequence INSIDE
+that reference - the Wright et al. mechanism, which would make it a contaminated reference
+rather than a homology artefact. Flagged, not concluded.
 
 **THE BENCHMARK IS BLIND TO IT, AND THIS CORRECTS AN EARLIER CLAIM.** All **18** `supported`
 calls in the batch are *T. gondii*, one per sample, in LoD samples and negative controls
@@ -523,33 +525,50 @@ for the taxa the scenario happens to name. The most consequential false positive
 was invisible to the measurement - the project's recurring failure shape, this time in the
 benchmark rather than the pipeline.
 
-**What is actually holding the line, and it is not what the design says.** Back-calculating
-from the 150 bp coefficient: 8,380 recruited records / 0.0551 => **~152,000 surviving human
-reads**. Recruitment scales linearly with whatever survives, so **host-depletion efficiency
-is the real control on eukaryotic false positives**, and until 2026-10-03 nothing in the
-pipeline recorded it (`ch_host_stats` was a dead channel; now written to
-`<outdir>/qc/host_depletion.tsv`). It still GATES nothing.
+**What is actually holding the line.** Host-depletion efficiency is the control on this
+class of false positive, and until 2026-10-03 nothing in the pipeline recorded it
+(`ch_host_stats` was a dead channel; now written to `<outdir>/qc/host_depletion.tsv`). It
+still GATES nothing.
 
-**The predictive model DOES hold, after three corrections.** For the *Y. pestis* bundle:
+⚠️ **An earlier version of this entry inverted the coefficient to size host survival, and
+that was impossible arithmetic.** It read "8,380 / 0.0551 => ~152,000 surviving human
+reads". The sample's component JSON plans 980,000 non-host PAIRS = 1,960,000 records, and
+`total_reads_screened` is 1,980,236 - so residual human reads are **at most 20,236**, and
+152,000 exceeded the entire non-host remainder by 7x.
 
-    coefficient @150 bp            3,540 records per 10^6 source reads
-    source reads                   800,000   (simulate.log plans 400,000 E. coli PAIRS)
-    predicted on ref 630             2,832
-    observed                         2,664   -> within 6%
+The real in-pipeline rate is **8,380 / ~20,236 = ~41% of surviving human reads**, roughly
+**7.6x the 5.43% whole-genome coefficient**. That gap is the actual finding, and it has a
+mechanism: survivors of host depletion are **not a random sample of host reads**. They are
+precisely the reads that failed to map to CHM13 - repetitive, divergent, low-complexity -
+which is the same class that cross-maps to a 65 Mb parasite genome.
+`measure_recruitment.py` simulates from the whole host genome with no depletion step, so
+its coefficient describes a population the pipeline never sees. **The coefficient must not
+be inverted**, and "recruitment scales linearly with whatever survives" is wrong for the
+host arm. It holds for *E. coli*, which passes depletion untouched - which is exactly why
+that arm predicts within 1% while the host arm was out by 7x.
 
-So `pedestal = recruitment_rpm x source_reads` is a calibrated model, not a hypothesis.
-Getting there required fixing three independent errors, and two intermediate claims in this
-repo's history were wrong:
+**The predictive model holds on BOTH arms**, computed by `scripts/check_pedestal_model.py`
+across all 12 *Y. pestis* samples rather than by hand on one:
 
-1. commit `276a3f1` claimed "within 8%" - correct by ACCIDENT, two errors cancelling: a 2x
-   unit error against a 0.81x denominator error;
-2. commit `d2d8fb9` retracted that as "2.1x out" - also wrong, because it kept
-   `unique_reads` (649,362, MAPQ-filtered and mask-filtered records on the E. coli
-   references) as the denominator instead of the 800,000 source records the simulator
-   planned, and still used the 101 bp coefficient.
+    coefficient @150 bp, insert 350, MAPQ>=10, over 10^6 source reads
+      E. coli -> ref 630 (neighbour)   3,355 rpm
+      E. coli -> ref 632 (target)        256 rpm
+    source reads   800,000  (component JSON: 400,000 E. coli PAIRS x 2)
 
-The denominator must be the reads that ENTERED the competitive alignment, which the
-simulator's own log states, not a MAPQ-filtered count of what survived it.
+    NEIGHBOUR ARM  predicted 2,684  vs observed 2,581-2,811   mean error  -0.9%
+    TARGET ARM     predicted   205  vs attributed 191-230     mean error  -3.0%
+
+So `pedestal = recruitment_rpm x source_reads` is calibrated, within ~3% on both arms. The
+target arm is reported deliberately: an earlier version of this entry quoted only the
+neighbour arm, which is how a half-calibrated model gets called calibrated.
+
+Four claims about this one number were published before this one, and three were wrong:
+`276a3f1` "within 8%" (right by accident - a 2x unit error cancelling a 0.81x denominator
+error), `d2d8fb9` "2.1x out" (wrong denominator and wrong read length), `f197d39`
+"within 6%" (6.31% on its own two inputs, and both inputs were spot-check values superseded
+by a larger run already on disk). The denominator must be the reads that ENTERED the
+competitive alignment - the component JSON states it in PAIRS, so x2 - not a MAPQ-filtered
+count of what survived.
 
 **Decision: fix the BENCHMARK first, not the thresholds.** The measurement has to be able to
 see the failure before any threshold is tuned against it, or the tuning is unfalsifiable:

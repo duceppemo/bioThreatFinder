@@ -7,9 +7,12 @@ Every eukaryotic reference in the pack recruits host reads in proportion to how 
 survive host depletion. Measured 2026-10-03 (`scripts/measure_recruitment.py`), per
 million human reads reaching the competitive alignment:
 
-    Toxoplasma gondii      38,677 records per 10^6 human reads   (3.87%)
-    Plasmodium knowlesi    22,170
-    Entamoeba dispar        4,080
+    Toxoplasma gondii      54,258 records per 10^6 human reads   (5.43%)
+
+measured at 150 bp / insert 350 / MAPQ>=10. But the coefficient MUST NOT be inverted to
+estimate how much host survived: survivors are the reads that failed to map to the host
+reference, which is the same class that cross-maps to a divergent eukaryotic genome, so
+the observed in-pipeline rate is ~41% - about 7.6x the whole-genome figure. See D14.
 
 In a negative control with no parasite present, that produced 8,380 reads on the
 T. gondii reference - 100% of them human - at 44% breadth and 96.5% window occupancy,

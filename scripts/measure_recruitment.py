@@ -82,6 +82,11 @@ def genome_bp(path: Path) -> int:
     return n
 
 
+def insert_size(read_len: int) -> int:
+    """Match simulate_benchmark.py:1202 so the fragment regime is the batch's."""
+    return max(read_len * 2 + 50, 300)
+
+
 def simulate(src: Path, n_reads: int, read_len: int, art: str, tmp: Path) -> Path:
     """ART reads from one genome. Coverage is derived from the requested read count so
     the number is comparable across genomes of wildly different size."""
@@ -99,8 +104,12 @@ def simulate(src: Path, n_reads: int, read_len: int, art: str, tmp: Path) -> Pat
     out = tmp / "sim"
     log(f"  simulating ~{n_reads:,} pairs from {src.name} "
         f"({bp/1e6:.1f} Mbp, {fold:.4f}x)")
+    # Insert size follows read length exactly as simulate_benchmark.py:1202 does. A
+    # fixed -m 300 at 150 bp means mates overlap for half the fragments, which is a
+    # different pairing regime from the batch the coefficient is meant to explain.
+    insert = max(read_len * 2 + 50, 300)
     cmd = [art, "-ss", "HS25", "-i", str(plain), "-p", "-l", str(read_len),
-           "-f", f"{fold:.6f}", "-m", "300", "-s", "50", "-o", str(out),
+           "-f", f"{fold:.6f}", "-m", str(insert), "-s", "50", "-o", str(out),
            "-na", "-rs", "42"]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
@@ -141,10 +150,20 @@ def _drain(mm, st, mm_err_f, st_err_f, index: Path) -> dict[str, int]:
         mm.stdout.close()
     per_ref: dict[str, int] = defaultdict(int)
     assert st.stdout is not None
-    for line in st.stdout:
-        f = line.split("\t", 3)
-        if len(f) > 2:
-            per_ref[f[2]] += 1
+    try:
+        for line in st.stdout:
+            f = line.split("\t", 3)
+            if len(f) > 2:
+                per_ref[f[2]] += 1
+    except BaseException:
+        # Without this, a Ctrl-C mid-run leaves a 24-thread minimap2 detached and the
+        # stderr temp files are closed out from under two live children.
+        for proc in (st, mm):
+            if proc.poll() is None:
+                proc.kill()
+        for proc in (st, mm):
+            proc.wait()
+        raise
     st.wait()
     mm.wait()
 
@@ -157,10 +176,16 @@ def _drain(mm, st, mm_err_f, st_err_f, index: Path) -> dict[str, int]:
     # option an older build rejects - long after minimap2 exited 0. The old code checked
     # minimap2 only, so that bundle contributed no rows and simply vanished from the
     # matrix, where "recruits nothing" and "alignment errored" are the same thing.
+    # samtools FIRST. A samtools that dies mid-stream breaks minimap2's pipe, so
+    # minimap2 also exits non-zero - and checking it first reports the downstream
+    # symptom while hiding the actual error, which is the opposite of why both are
+    # checked at all.
+    if st.returncode not in (0, None):
+        die(f"samtools view exited {st.returncode} for {index.name}: {st_err}"
+            + (f" (minimap2 also exited {mm.returncode}: {mm_err})"
+               if mm.returncode not in (0, None) else ""))
     if mm.returncode not in (0, None):
         die(f"minimap2 exited {mm.returncode} for {index.name}: {mm_err}")
-    if st.returncode not in (0, None):
-        die(f"samtools view exited {st.returncode} for {index.name}: {st_err}")
     return dict(per_ref)
 
 
@@ -212,6 +237,7 @@ def main() -> int:
     for src in args.source:
         with tempfile.TemporaryDirectory(prefix="recruit.") as td:
             tmp = Path(td)
+            insert_mean = insert_size(args.read_len)
             r1 = simulate(src, args.reads, args.read_len, art, tmp)
             r2 = r1.with_name("sim2.fq")
             n_pairs = sum(1 for _ in r1.open()) // 4
@@ -252,6 +278,12 @@ def main() -> int:
                         # lets a measured coefficient predict a pipeline pedestal.
                         "source_reads": n_pairs * 2,
                         "rpm_source_reads": f"{n / (n_pairs * 2) * 1e6:.1f}",
+                        # The conditions travel WITH the number. A matrix on disk that
+                        # does not say what read length it was measured at is how a
+                        # 101 bp coefficient came to be applied to a 150 bp batch.
+                        "read_len": args.read_len,
+                        "mapq_min": args.mapq,
+                        "insert_mean": insert_mean,
                     })
                 log(f"  [{i}/{len(idx)}] bundle {bundle}: {total:,} record(s) recruited")
 
