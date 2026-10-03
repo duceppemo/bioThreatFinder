@@ -49,11 +49,13 @@ process KRAKEN2 {
 
     script:
     def paired = meta.single_end ? '' : '--paired'
+    def mmap   = params.kraken2_memory_mapping ? '--memory-mapping' : ''
     """
     kraken2 \\
         --db ${db} \\
         --threads ${task.cpus} \\
         ${paired} \\
+        ${mmap} \\
         --gzip-compressed \\
         --report ${meta.id}.kraken2.report.txt \\
         --output ${meta.id}.kraken2.output.txt \\
