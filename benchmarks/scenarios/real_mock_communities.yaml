@@ -3,10 +3,10 @@
 # DRAFT. Nothing here has been downloaded or run.
 #
 # SRA/ENA accessions are VERIFIED against the ENA portal API (2026-10-03): platform, model,
-# library_strategy, sample_title, read_count and fastq_bytes all checked per run. What
-# remains unverified is marked VERIFY inline - the standards' lot numbers (taken from the
-# data note, not from run metadata), the human WGS accession for the host-mixture arms, and
-# the Zymo strain-to-taxid resolution the watchlist needs.
+# library_strategy, sample_title, tax_id, read_count and fastq_bytes checked per run. The
+# lot numbers, taxid mapping and host accession were resolved on the same date - see
+# "Resolved" below. Nothing is left on trust except the per-lot abundance figures, which
+# only Zymo's certificate of analysis can supply.
 #
 # ---------------------------------------------------------------------------
 # WHY A SECOND SCENARIO FILE RATHER THAN MORE OF human_core.yaml
@@ -41,9 +41,11 @@
 #   * No host. Both standards are microbial only, so host depletion - the pipeline's
 #     first real filter - is not exercised by a neat mock run. `zymo_even_in_host`
 #     below addresses that by MIXING, and says so rather than pretending otherwise.
-#   * Strain identity matters. The watchlist is taxid-keyed and its Salmonella row says
-#     "serovar is the actionable unit, not species", so the exact Zymo strains must be
-#     resolved to taxids before truth means anything. VERIFY per lot.
+#   * Serovar is out of reach here, and the watchlist already says so. ENA submits the
+#     Salmonella isolate as taxid 28901 at SPECIES rank, and the watchlist's own note reads
+#     "Serovar is the actionable unit, not species. Hand off to a dedicated serovar caller".
+#     So species-level truth is sound and serovar-level truth is explicitly not attempted -
+#     this data cannot settle it either way.
 #
 # ---------------------------------------------------------------------------
 # HOW THIS TESTS D12 - the point of the exercise
@@ -107,6 +109,55 @@
 # EVEN 0.9 GB, LOG 3.2 GB. Ten isolates 0.44-1.60 GB each, ~8.6 GB for the set.
 # Total for everything referenced here is ~45 GB.
 
+# ---------------------------------------------------------------------------
+# RESOLVED 2026-10-03 - the three items previously marked VERIFY
+# ---------------------------------------------------------------------------
+# 1. LOT NUMBERS - confirmed from the ENA sample records, not just the data note:
+#      SAMEA5065621 "Zymo-EVEN"  DESCRIPTION: "Zymo Community Standards 2 (Even)
+#                                Batch ZRC190633"
+#      SAMEA5065622 "Zymo-LOG"   DESCRIPTION: "Zymo Community Standards 2 (Log/Staggered)
+#                                Batch ZRC190842"
+#    Both batches match the data note. BUT the submitter calls BOTH "Community Standards 2",
+#    which does not map cleanly onto Zymo's D6300 / D6310 catalogue numbers. The product
+#    codes below are therefore recorded as the data note's attribution and should NOT be
+#    treated as verified; what IS verified is the batch and the distribution (even vs
+#    log/staggered), which is all any scenario here depends on.
+#
+# 2. TAXID MAPPING - every watchlist member's submitted tax_id matches the pack exactly:
+#      Salmonella enterica      ENA 28901 == watchlist.resolved.tsv 28901
+#      Listeria monocytogenes   ENA 1639  == 1639
+#      Escherichia coli         ENA 562   == 562
+#      Cryptococcus neoformans  ENA 5207  == 5207
+#    So truth rows resolve against the pack with no translation. The community samples are
+#    submitted as taxid 256318 "metagenome", which is correct and carries no per-organism
+#    information - truth for those comes from the manufacturer's composition, not from ENA.
+#
+# 3. HOST READS - ERR194147, study PRJEB3381: "Whole genome sequencing of human individual
+#    NA12878 using the Illumina HiSeq 2000", 795,505,905 reads at ~201 bases per spot, i.e.
+#    about 2x100 bp. It must be SUBSAMPLED; the full run is far larger than any arm here
+#    needs. Chosen because ~2x100 matches the 2x101 microbial runs (see below).
+#
+# CAVEAT on inferring read length from ENA: base_count/read_count is a HINT, not proof.
+# ENA's read_count means spots for some submissions and individual reads for others, so the
+# same ratio can mean 2x75 or 1x150. Confirm the actual length from the first FASTQ record
+# after download, before any Bracken distribution is selected.
+#
+# ---------------------------------------------------------------------------
+# READ LENGTH IS NOT UNIFORM ACROSS THIS STUDY, AND BRACKEN CARES
+# ---------------------------------------------------------------------------
+# Computed from base_count/read_count, so subject to the caveat above:
+#
+#   ~2x101 bp   all ten isolates, AND the LOG community shotgun (ERR2935805)
+#   ~2x151 bp   the EVEN community shotgun (ERR2984773, MiSeq)
+#
+# Bracken's k-mer distribution is specific to BOTH the database and the read length, and
+# `params.bracken_readlen` defaults to 150. So the even community wants 150 while the
+# isolates and the log community want 100. nextflow.config:174 records that this exact
+# field "was READ by detect.nf and never declared, so a 100 bp or 250 bp run silently used
+# the 150 bp model" - the failure is silent, not loud. Every scenario below therefore
+# declares `bracken_readlen` explicitly rather than inheriting the default. All three
+# distributions (100, 150, 250) were built on 2026-10-02, so both values are available.
+
 schema_version: 1
 
 defaults:
@@ -136,10 +187,11 @@ scenarios:
           # VERIFIED 2026-10-03 via the ENA portal API.
           ont:      ["ERR3152364"]   # GridION, Zymo-EVEN, 3,491,390 reads, 15.0 GB
           illumina: ["ERR2984773"]   # MiSeq, in732_0_even_community_shotgun, 8,785,731 reads, 0.9 GB
+      bracken_readlen: 150          # ERR2984773 is ~2x151; see "READ LENGTH" above
       standard:
-          product: D6300
-          lot: ZRC190633             # from the data note; VERIFY against run metadata
-          distribution: even
+          product: D6300             # data note's attribution; submitter says "Standards 2"
+          lot: ZRC190633             # VERIFIED in the ENA sample description
+          distribution: even         # VERIFIED in the ENA sample description
       truth:
           # Watchlist members genuinely present. Non-watchlist members are deliberately
           # NOT listed, matching the human_core.yaml convention for background taxa.
@@ -197,10 +249,11 @@ scenarios:
           # VERIFIED 2026-10-03 via the ENA portal API.
           ont:      ["ERR3152366"]   # GridION, Zymo-LOG, 3,667,480 reads, 17.1 GB
           illumina: ["ERR2935805"]   # HiSeq 1500, in745_0_log_community_shotgun, 47,832,553 reads, 3.2 GB
+      bracken_readlen: 100          # ERR2935805 is ~2x101, NOT the 150 default
       standard:
-          product: D6310
-          lot: ZRC190842             # from the data note; VERIFY against run metadata
-          distribution: log
+          product: D6310             # data note's attribution; submitter says "Standards 2"
+          lot: ZRC190842             # VERIFIED in the ENA sample description
+          distribution: log          # VERIFIED ("Log/Staggered") in the ENA sample description
       truth:
           present:
               - Escherichia coli
@@ -238,9 +291,14 @@ scenarios:
         real reads on both sides.
       kind: mock_community
       source: external_sra
+      bracken_readlen: 150          # follows the microbial side (ERR2984773, ~2x151)
       mixture:
           microbial: zymo_even           # reuse the accessions above
-          host_reads: VERIFY             # a real human WGS accession, to be chosen
+          # NA12878, PRJEB3381, HiSeq 2000, ~2x100 bp. SUBSAMPLE - the full run is
+          # 795,505,905 reads. Note it is ~2x100 against the even community's ~2x151, so
+          # this arm mixes read lengths; prefer the log community (also ~2x101) if a
+          # single-length library matters for the Bracken model.
+          host_reads: ERR194147
           host_fraction: 0.95
       truth:
           present:
@@ -282,6 +340,7 @@ scenarios:
         any point, so ANY movement is pedestal). The contrast is the measurement.
       kind: mock_community
       source: external_sra
+      bracken_readlen: 100          # all isolates are ~2x101, NOT the 150 default
       mixture:
           # VERIFIED 2026-10-03 via the ENA portal API. All Illumina HiSeq 1500, paired.
           targets:
@@ -294,7 +353,8 @@ scenarios:
           # E. coli fraction varies - otherwise abundance and composition move together and
           # the result cannot be attributed to either.
           filler: ERR2935853                        # Pseudomonas aeruginosa, 0.46 GB
-          host_reads: VERIFY                        # real human WGS, for the ~95% host arm
+          # NA12878, PRJEB3381, ~2x100 bp - matches the 2x101 isolates. SUBSAMPLE.
+          host_reads: ERR194147
       truth:
           present: [Salmonella enterica, Listeria monocytogenes, Escherichia coli]
           absent:  [Bacillus anthracis, Yersinia pestis, Francisella tularensis]
