@@ -120,15 +120,23 @@ def simulate(src: Path, n_reads: int, read_len: int, art: str, tmp: Path) -> Pat
 def recruit(r1: Path, r2: Path, index: Path, mapq: int,
             minimap2: str, samtools: str, threads: int) -> dict[str, int]:
     """MAPQ-passing read count per reference sequence in one bundle."""
-    # stderr is CAPTURED, not discarded: a samtools failure mid-stream is the one thing
-    # that turns "this reference recruits nothing" into "the alignment broke", and the two
-    # must not look alike.
-    mm = subprocess.Popen([minimap2, "-ax", "sr", "-t", str(threads), "--secondary=no",
-                           str(index), str(r1), str(r2)],
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    st = subprocess.Popen([samtools, "view", "-q", str(mapq), "-F", "0x904", "-"],
-                          stdin=mm.stdout, stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE, text=True)
+    # stderr goes to TEMP FILES, not pipes. It has to be captured - a samtools failure
+    # mid-stream is what distinguishes "this reference recruits nothing" from "the
+    # alignment broke" - but capturing it with stderr=PIPE deadlocks: nothing reads those
+    # pipes until stdout hits EOF, so a child that fills its 64 KiB stderr buffer blocks,
+    # samtools never sees EOF, and the read loop below hangs forever. Reproduced with a
+    # child writing 200 KiB to stderr. A file has no such limit and is read after wait().
+    with tempfile.TemporaryFile() as mm_err_f, tempfile.TemporaryFile() as st_err_f:
+        mm = subprocess.Popen([minimap2, "-ax", "sr", "-t", str(threads), "--secondary=no",
+                               str(index), str(r1), str(r2)],
+                              stdout=subprocess.PIPE, stderr=mm_err_f)
+        st = subprocess.Popen([samtools, "view", "-q", str(mapq), "-F", "0x904", "-"],
+                              stdin=mm.stdout, stdout=subprocess.PIPE,
+                              stderr=st_err_f, text=True)
+        return _drain(mm, st, mm_err_f, st_err_f, index)
+
+
+def _drain(mm, st, mm_err_f, st_err_f, index: Path) -> dict[str, int]:
     if mm.stdout:
         mm.stdout.close()
     per_ref: dict[str, int] = defaultdict(int)
@@ -137,19 +145,22 @@ def recruit(r1: Path, r2: Path, index: Path, mapq: int,
         f = line.split("\t", 3)
         if len(f) > 2:
             per_ref[f[2]] += 1
-    st_err = st.stderr.read() if st.stderr else ""
     st.wait()
-    mm_err = mm.stderr.read().decode(errors="replace") if mm.stderr else ""
     mm.wait()
+
+    def _tail(fh) -> str:
+        fh.seek(0)
+        return fh.read().decode(errors="replace").strip()[-400:]
+
+    st_err, mm_err = _tail(st_err_f), _tail(mm_err_f)
     # BOTH halves. samtools can fail at the END of the stream - a malformed record, an
     # option an older build rejects - long after minimap2 exited 0. The old code checked
     # minimap2 only, so that bundle contributed no rows and simply vanished from the
     # matrix, where "recruits nothing" and "alignment errored" are the same thing.
     if mm.returncode not in (0, None):
-        die(f"minimap2 exited {mm.returncode} for {index.name}: {mm_err.strip()[-400:]}")
+        die(f"minimap2 exited {mm.returncode} for {index.name}: {mm_err}")
     if st.returncode not in (0, None):
-        die(f"samtools view exited {st.returncode} for {index.name}: "
-            f"{st_err.strip()[-400:]}")
+        die(f"samtools view exited {st.returncode} for {index.name}: {st_err}")
     return dict(per_ref)
 
 
@@ -164,8 +175,15 @@ def main() -> int:
     ap.add_argument("--only-bundle", action="append", default=[],
                     help="bundle taxid; repeatable. Default: all.")
     ap.add_argument("--reads", type=int, default=200_000, help="read pairs per source")
-    ap.add_argument("--read-len", type=int, default=101,
-                    help="must match the batch being explained; 101 for lod_v1")
+    # No default. Recruitment is read-length dependent - the same reference recruits ~1.8x
+    # more at 150 bp than at 101 bp - and a wrong default is the error that put two
+    # incorrect T. gondii figures into docs/decisions.md D14. Making it required forces the
+    # caller to state the length of the data being explained.
+    ap.add_argument("--read-len", type=int, required=True,
+                    help="READ LENGTH OF THE DATA THIS EXPLAINS. Recruitment scales with "
+                         "it, so a coefficient measured at the wrong length cannot predict "
+                         "that batch's pedestal. lod_v1 is 150 bp "
+                         "(simulate_benchmark.py read_length); the Zymo isolates are 101.")
     ap.add_argument("--mapq", type=int, default=10, help="match pack.yaml mapq_min")
     ap.add_argument("--threads", type=int, default=16)
     ap.add_argument("--art", default="art_illumina")

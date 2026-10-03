@@ -478,21 +478,31 @@ occupancy and 98.1% identity by host reads that survived depletion.
 **It is systematic, not a *T. gondii* quirk.** Measured recruitment per million human reads
 (`scripts/measure_recruitment.py`):
 
+Measured at **150 bp**, which is the read length `lod_v1` was actually simulated at
+(`scripts/simulate_benchmark.py:120`; all 138 ART commands in that batch are `-l 150`):
+
 | reference | records per 10^6 human reads | % of human reads |
 |---|---|---|
-| *Toxoplasma gondii* | 38,677 | **3.87%** |
-| *Plasmodium knowlesi* | 22,170 | 2.22% |
-| *Entamoeba dispar* | 4,080 | 0.41% |
-| *Plasmodium vivax* | 2,333 | 0.23% |
-| *Trichinella pseudospiralis* | 1,650 | 0.17% |
-| *Zika virus* | 1,082 | 0.11% |
+| *Toxoplasma gondii* | **55,106** | **5.51%** |
 
-⚠️ **These figures were first published at 2x these values** (*T. gondii* 77,354 / 7.74%).
-`measure_recruitment.py` divided SAM records, which count each mate separately, by read
-PAIRS - so it reported per-pair and called it per-read. Corrected 2026-10-03 after a review
-pass; the tool now emits `rpm_source_reads` against `source_reads = 2 x pairs`, matching
-`bin/coverage_stats.py:305`, whose denominator sums FASTQ records across both mates. The
-RANKING and the mechanism are unaffected, because both were direct record counts.
+RANKING at 101 bp, which is the right shape but the wrong magnitude for this batch -
+*P. knowlesi* ~2.2%, *E. dispar* ~0.4%, *P. vivax* ~0.2%, *T. pseudospiralis* ~0.2%,
+*Zika* ~0.1%. A 150 bp matrix is being regenerated.
+
+⚠️ **This figure has been published three times and was wrong twice.** The history, because
+the lesson is in it:
+
+| | *T. gondii* | why it was wrong |
+|---|---|---|
+| first | 7.74% | SAM records divided by read PAIRS, labelled per-read - 2x high |
+| second | 3.87% | unit fixed, but measured at 101 bp when the batch is 150 bp |
+| **now** | **5.51%** | per-read, at the batch's actual read length |
+
+Recruitment is **read-length dependent** - longer reads span more conserved sequence and
+clear MAPQ more often, so the same reference recruits ~1.8x more at 150 bp than at 101 bp.
+`measure_recruitment.py` therefore takes `--read-len` and it MUST match the data being
+explained. Neither the ranking nor the mechanism changed across the three versions, because
+those rest on direct record counts rather than on the coefficient.
 
 Eukaryotic references absorb host reads at percent-level rates. The *Zika* row deserves
 separate attention: 0.22% of human reads landing on a 10.8 kb RNA virus is not plausible
@@ -514,20 +524,32 @@ was invisible to the measurement - the project's recurring failure shape, this t
 benchmark rather than the pipeline.
 
 **What is actually holding the line, and it is not what the design says.** Back-calculating
-from the corrected coefficient: 8,380 recruited records / 0.0387 => **~217,000 surviving
-human reads**. Recruitment scales linearly with whatever survives, so **host-depletion
-efficiency is the real control on eukaryotic false positives**, and until 2026-10-03 nothing
-in the pipeline recorded it (`ch_host_stats` was a dead channel; now written to
+from the 150 bp coefficient: 8,380 recruited records / 0.0551 => **~152,000 surviving human
+reads**. Recruitment scales linearly with whatever survives, so **host-depletion efficiency
+is the real control on eukaryotic false positives**, and until 2026-10-03 nothing in the
+pipeline recorded it (`ch_host_stats` was a dead channel; now written to
 `<outdir>/qc/host_depletion.tsv`). It still GATES nothing.
 
-⚠️ A matching prediction was claimed and does not hold. Commit `276a3f1` reported the
-measured coefficient predicting the observed *Y. pestis*-bundle pedestal "within 8%". That
-compared a per-PAIR coefficient against a per-RECORD count. With consistent units the
-prediction is 1,266 records against 2,664 observed - **2.1x out**, not 8%. The direct
-observations in this entry stand; the predictive arithmetic does NOT, and the most likely
-residual cause is that `unique_reads` for the background organism underestimates the
-organism's true record count. Resolving it needs the read-attribution denominator, not the
-MAPQ-filtered one.
+**The predictive model DOES hold, after three corrections.** For the *Y. pestis* bundle:
+
+    coefficient @150 bp            3,540 records per 10^6 source reads
+    source reads                   800,000   (simulate.log plans 400,000 E. coli PAIRS)
+    predicted on ref 630             2,832
+    observed                         2,664   -> within 6%
+
+So `pedestal = recruitment_rpm x source_reads` is a calibrated model, not a hypothesis.
+Getting there required fixing three independent errors, and two intermediate claims in this
+repo's history were wrong:
+
+1. commit `276a3f1` claimed "within 8%" - correct by ACCIDENT, two errors cancelling: a 2x
+   unit error against a 0.81x denominator error;
+2. commit `d2d8fb9` retracted that as "2.1x out" - also wrong, because it kept
+   `unique_reads` (649,362, MAPQ-filtered and mask-filtered records on the E. coli
+   references) as the denominator instead of the 800,000 source records the simulator
+   planned, and still used the 101 bp coefficient.
+
+The denominator must be the reads that ENTERED the competitive alignment, which the
+simulator's own log states, not a MAPQ-filtered count of what survived it.
 
 **Decision: fix the BENCHMARK first, not the thresholds.** The measurement has to be able to
 see the failure before any threshold is tuned against it, or the tuning is unfalsifiable:

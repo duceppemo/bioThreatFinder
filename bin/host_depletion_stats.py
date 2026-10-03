@@ -7,9 +7,9 @@ Every eukaryotic reference in the pack recruits host reads in proportion to how 
 survive host depletion. Measured 2026-10-03 (`scripts/measure_recruitment.py`), per
 million human reads reaching the competitive alignment:
 
-    Toxoplasma gondii      77,354 rpm   (7.74% of human reads)
-    Plasmodium knowlesi    44,340 rpm
-    Entamoeba dispar        8,160 rpm
+    Toxoplasma gondii      38,677 records per 10^6 human reads   (3.87%)
+    Plasmodium knowlesi    22,170
+    Entamoeba dispar        4,080
 
 In a negative control with no parasite present, that produced 8,380 reads on the
 T. gondii reference - 100% of them human - at 44% breadth and 96.5% window occupancy,
