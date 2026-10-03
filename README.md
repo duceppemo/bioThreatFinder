@@ -32,8 +32,24 @@ python3 tests/test_pipeline.py     # 89 fixture-driven checks, ~10 s, no databas
 
 ## Workflow
 
-Processes are named as they appear in the Nextflow trace. `[opt]` is off by default;
-`[per candidate]` fans out to one task per (sample x watchlist candidate).
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/workflow/bioThreatFinder-workflow-dark.svg">
+  <img alt="bioThreatFinder workflow: a permissive stage-1 OR across classifier arms feeds a strict, per-candidate stage 2 that maps reads against the target together with its near neighbours, so reads preferring a harmless relative are attributed to the relative." src="assets/workflow/bioThreatFinder-workflow-light.svg" width="100%">
+</picture>
+
+Boxes are named as they appear in the Nextflow trace. `[opt]` is off by default and
+`x candidate` marks the fan-out: stage 2 runs once per (sample x watchlist candidate).
+Regenerate with `python3 scripts/make_workflow_svg.py`.
+
+The two things worth taking from it. Stage 1 is an **OR** — a single arm nominating a
+taxon carries it forward, because missing a lead costs more than carrying a false one into
+stage 2. And stage 2 maps against an index holding the **target together with its near
+neighbours**, so a read that fits a harmless relative better is scored to the relative
+rather than to the agent; that split is what `neighbour_ratio` measures. Nothing above
+`screened_only` is reported on stage-1 evidence alone.
+
+<details>
+<summary>Same diagram as text, for terminals and plain-text viewers</summary>
 
 ```text
   samplesheet.csv ──┬── illumina (paired) ──► FASTP ──┐
@@ -94,11 +110,7 @@ Processes are named as they appear in the Nextflow trace. `[opt]` is off by defa
                           report.html + summary.tsv
 ```
 
-Two things the picture is meant to make obvious. Stage 1 is an **OR** across arms — a
-single arm nominating a taxon is enough to carry it forward, because missing a lead is
-worse than carrying a false one into stage 2. And **nothing is reported on stage-1
-evidence alone**: every tier above `screened_only` requires alignment geometry, and for
-the taxa that have rules, marker evidence too.
+</details>
 
 ## Why two stages
 
