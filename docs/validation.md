@@ -218,9 +218,13 @@ At 100 RPM *Y. pestis* carries ~2,300 unique reads at 0.062 breadth and is reass
 a neighbour. Either the scenario's expectation is optimistic or `min_neighbour_ratio` is
 miscalibrated; the measurement cannot tell these apart, and resolving it is step 4.
 
-**Specificity is clean:** 0.000 false-positive and 0.000 false-confirm across all 6
-negative-control samples for every watchlist taxon, including *B. anthracis* and
-*F. tularensis*.
+**Specificity, as measured:** 0.000 false-positive and 0.000 false-confirm across all 6
+negative-control samples - **for the taxa the scenario lists**. That qualifier turned out to
+matter: see D14. `negative_host_only` names eleven taxa in `truth.absent`, and *Toxoplasma
+gondii* is not one of them, so the 18 `supported` *T. gondii* calls in this batch - every one
+driven by 100% human reads - were scored `unlisted` and excluded from the specificity table
+entirely. The 0.000 is real for *B. anthracis* and *F. tularensis*; it is not a pack-wide
+specificity figure, and this file should not have implied otherwise.
 
 ## Kraken2 memory mapping — verified 2026-10-03
 

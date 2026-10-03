@@ -453,6 +453,82 @@ isolate runs are exactly that instrument - see D12.
 
 ---
 
+## D14 — A notifiable parasite is reported `supported` in every sample, from 100% human reads, and the benchmark does not count it ⚠️ *corrects an earlier "specificity is clean" claim*
+
+**Finding:** `[MEASURED]` 2026-10-03, `runs/lod_v2_kraken2`. In a NEGATIVE CONTROL
+containing no parasite at all, *Toxoplasma gondii* is reported at tier **`supported`**:
+
+| metric | value | gate | verdict |
+|---|---|---|---|
+| unique_reads | 8,310 | floor | pass |
+| breadth | **0.441** | >= 0.01 | pass |
+| window_occupancy | **0.965** | >= 0.15 | pass |
+| mean_identity | **0.9815** | >= 0.98 | pass |
+| neighbour_ratio | **inf** | >= 1.5 | pass (no neighbour reads exist) |
+| depth_cv | 5.44 | <= 2.50 | **FAIL** |
+
+Every gate passes except `depth_cv`. That single threshold is the only thing between this
+and `confirmed_in_silico` for a notifiable agent.
+
+**The reads are 100% human.** Read attribution on the bundle BAM: of 8,380 reads on the
+*T. gondii* reference at MAPQ>=10, **8,380 come from T2T human chromosomes** (NC_0609*).
+Not a majority - all of them. 44% of a 65 Mb parasite genome is "covered" at 96.5% window
+occupancy and 98.1% identity by host reads that survived depletion.
+
+**It is systematic, not a *T. gondii* quirk.** Measured recruitment per million human reads
+(`scripts/measure_recruitment.py`):
+
+| reference | rpm | % of human reads |
+|---|---|---|
+| *Toxoplasma gondii* | 77,354 | **7.74%** |
+| *Plasmodium knowlesi* | 44,340 | 4.43% |
+| *Entamoeba dispar* | 8,160 | 0.82% |
+| *Plasmodium vivax* | 4,666 | 0.47% |
+| *Trichinella pseudospiralis* | 3,300 | 0.33% |
+| *Zika virus* | 2,164 | 0.22% |
+
+Eukaryotic references absorb host reads at percent-level rates. The *Zika* row deserves
+separate attention: 0.22% of human reads landing on a 10.8 kb RNA virus is not plausible
+homology and suggests human or vector sequence INSIDE that reference - the Wright et al.
+mechanism, which would make it a contaminated reference rather than a homology artefact.
+Flagged, not concluded.
+
+**THE BENCHMARK IS BLIND TO IT, AND THIS CORRECTS AN EARLIER CLAIM.** All **18** `supported`
+calls in the batch are *T. gondii*, one per sample, in LoD samples and negative controls
+alike. The evaluator maps `supported` to POSITIVE - it is an assertion of presence. Yet
+`specificity.tsv` contains **zero** *Toxoplasma* rows and the measured false-positive rate
+was 0.000, because `negative_host_only`'s `truth.absent` lists eleven taxa and *T. gondii*
+is not among them. An unlisted taxon is scored `unlisted`, not `false_positive`.
+
+So "specificity is clean: 0.000 false-positive across all 6 negative controls for every
+watchlist taxon", recorded in `docs/validation.md` on 2026-10-03, was wrong. It is 0.000
+for the taxa the scenario happens to name. The most consequential false positive in the run
+was invisible to the measurement - the project's recurring failure shape, this time in the
+benchmark rather than the pipeline.
+
+**What is actually holding the line, and it is not what the design says.** Back-calculating
+from the recruitment coefficient: 8,380 recruited reads / 0.0774 => ~108,000 surviving human
+reads, i.e. host depletion removed ~99.5% of the ~19 M human reads in the sample. Recruitment
+scales linearly with whatever survives, so **host-depletion efficiency is the real control on
+eukaryotic false positives**, and nothing in the pipeline records or gates on it. At 95%
+depletion instead of 99.5% the same reference would recruit ~75,000 reads.
+
+**Decision: fix the BENCHMARK first, not the thresholds.** The measurement has to be able to
+see the failure before any threshold is tuned against it, or the tuning is unfalsifiable:
+
+1. `truth.absent` in every negative/specificity scenario must be the FULL watchlist minus
+   what is deliberately present. Enumerating eleven taxa by hand guarantees the next gap.
+   This is a one-line change in intent and a real change in coverage.
+2. A `host_depletion_efficiency` figure belongs in the run metadata, because D14 shows it is
+   load-bearing and it is currently unmeasured.
+3. Only then consider `depth_cv`, which is carrying this alone, or host masking at read scale
+   (D13), which would attack the cause rather than the symptom.
+
+**Would resolve it:** re-running the batch after (1), which turns an invisible `unlisted`
+into a counted false positive and gives the first honest specificity number for the pack.
+
+---
+
 ## D9 — Rejected for now
 
 | Option | Why not yet |
