@@ -344,10 +344,10 @@ scenarios:
       mixture:
           # VERIFIED 2026-10-03 via the ENA portal API. All Illumina HiSeq 1500, paired.
           targets:
-              Salmonella enterica:     ERR2935848   # 14,269,735 reads, 0.91 GB
-              Listeria monocytogenes:  ERR2935854   # 10,564,043 reads, 0.65 GB
+              "Salmonella enterica": ERR2935848     # 14,269,735 reads, 0.91 GB
+              "Listeria monocytogenes": ERR2935854  # 10,564,043 reads, 0.65 GB
           background_titration:
-              Escherichia coli: ERR2935852          # 7,099,045 reads, 0.44 GB
+              "Escherichia coli": ERR2935852        # 7,099,045 reads, 0.44 GB
               fractions: [0.0, 0.002, 0.02, 0.20]
           # Non-Enterobacteriaceae filler, so total depth is held constant while only the
           # E. coli fraction varies - otherwise abundance and composition move together and
