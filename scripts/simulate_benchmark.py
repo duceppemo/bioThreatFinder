@@ -1503,7 +1503,9 @@ class SamplePlan:
 def plan_batch(scenarios: Sequence[Scenario], genomes: GenomeIndex,
                db_root: Path, reads_dir: Path, master_seed: int,
                platform_filter: Optional[List[str]],
-               replicates_override: Optional[int]) -> Tuple[List[SamplePlan], List[str]]:
+               replicates_override: Optional[int],
+               watchlist: Optional[List[str]] = None,
+               ) -> Tuple[List[SamplePlan], List[str]]:
     """Expand scenarios into concrete samples. Resolution failures are collected
     and reported together, then fatal: seeing all of them at once is the
     difference between one rerun and eight."""
@@ -1557,10 +1559,12 @@ def plan_batch(scenarios: Sequence[Scenario], genomes: GenomeIndex,
                             mine.append(build_sample_plan(
                                 sc, platform, rep, level, spike_refs, bg_refs,
                                 host_fasta, reads_dir, master_seed, primary,
-                                role="sample", depth_override=depth))
+                                role="sample", depth_override=depth,
+                                watchlist=watchlist))
                     if sc.include_ntc:
                         mine.append(build_ntc_plan(
-                            sc, platform, rep, bg_refs, reads_dir, master_seed))
+                            sc, platform, rep, bg_refs, reads_dir, master_seed,
+                            watchlist=watchlist))
         except SystemExit as exc:
             problems.append(f"{sc.sid}: {exc}")
             continue
@@ -1722,7 +1726,8 @@ def _compose(sc: Scenario, level: Optional[float],
 def build_sample_plan(sc: Scenario, platform: str, rep: int, level: Optional[float],
                       spike_refs: List[dict], bg_refs, host_fasta: Optional[Path],
                       reads_dir: Path, master_seed: int, primary: Optional[Spike],
-                      role: str, depth_override: Optional[int] = None) -> SamplePlan:
+                      role: str, depth_override: Optional[int] = None,
+                      watchlist: Optional[List[str]] = None) -> SamplePlan:
     parts = [sc.sid, platform, f"r{rep}"]
     if sc.kind == "lod_series" and level is not None:
         parts.append(f"rpm{level_tag(level)}")
@@ -1777,12 +1782,53 @@ def build_sample_plan(sc: Scenario, platform: str, rep: int, level: Optional[flo
                              else f"{sample}.fastq.gz"),
         fastq_2=(reads_dir / f"{sample}_R2.fastq.gz") if platform == "illumina" else None,
         host_fraction=host_frac, total_reads=depth,
-        truth_present=present, truth_absent=sc.absent, truth_vaccine=sc.vaccine,
+        truth_present=present,
+        truth_absent=(exhaustive_absent(sc, present, watchlist, components)
+                      if watchlist else sc.absent),
+        truth_vaccine=sc.vaccine,
         excluded_loci=excluded, notes=notes)
 
 
+def exhaustive_absent(sc: Scenario, present: list[str], watchlist: list[str],
+                      components) -> list[str]:
+    """Every watchlist organism that is NOT in this sample, not just the hand-listed few.
+
+    WHY: a scenario's `truth.absent` used to be a short hand-written list, and the
+    evaluator scores a call for an UNLISTED taxon as `unlisted`, not `false_positive`.
+    So a false positive on any organism the author forgot was invisible to the
+    specificity table - it did not lower the measured rate, it was excluded from it.
+
+    That is not hypothetical. `negative_host_only` listed eleven taxa, omitted
+    *Toxoplasma gondii*, and the 2026-10-03 run reported T. gondii `supported` - an
+    assertion of presence - in all 21 samples off 100% human reads while specificity read
+    0.000 with zero T. gondii rows. See docs/decisions.md D14.
+
+    Exclusions, each of which would otherwise manufacture a false positive for a CORRECT
+    detection:
+      * truth.present and truth.vaccine - deliberately there;
+      * every spiked taxon, including neighbours spiked as confusers;
+      * every background organism in the mixture, since the standing background is real
+        and several of its members (E. coli, and near neighbours) are watchlist taxa.
+    """
+    here = {n.strip().lower() for n in present}
+    here |= {sp.taxon.strip().lower() for sp in sc.spikes}
+    here |= {n.strip().lower() for n in sc.vaccine}
+    here |= {c.label.strip().lower() for c in components if c.kind == "background"}
+    # Keep the author's explicit list first so a deliberate assertion stays visible, then
+    # append the rest of the watchlist.
+    out = [a for a in sc.absent if a.strip().lower() not in here]
+    seen = {o.strip().lower() for o in out}
+    for name in watchlist:
+        k = name.strip().lower()
+        if k not in here and k not in seen:
+            out.append(name)
+            seen.add(k)
+    return out
+
+
 def build_ntc_plan(sc: Scenario, platform: str, rep: int, bg_refs,
-                   reads_dir: Path, master_seed: int) -> SamplePlan:
+                   reads_dir: Path, master_seed: int,
+                   watchlist: Optional[List[str]] = None) -> SamplePlan:
     """A no-template control for this scenario: background only, no host, no spike.
 
     The NTC is what control subtraction is computed against, so it must be built
@@ -1810,7 +1856,14 @@ def build_ntc_plan(sc: Scenario, platform: str, rep: int, bg_refs,
     # handful of their reads here: "present in trace amounts via barcode bleed" is
     # exactly the thing the pipeline must NOT call, so absent is the correct
     # expectation and the hop is recorded in notes.
+    bg_present = [c.label for c in components if c.kind == "background"]
     absent = list(dict.fromkeys(list(sc.absent) + [sp.taxon for sp in sc.spikes]))
+    if watchlist:
+        # An NTC has no spike and no host, so everything on the watchlist that is not in
+        # the background panel is absent - which is exactly what makes an NTC the
+        # strictest specificity sample in the batch.
+        absent = list(dict.fromkeys(
+            absent + exhaustive_absent(sc, bg_present, watchlist, components)))
     return SamplePlan(
         sample=sample, scenario=ntc_sc, platform=platform, replicate=rep,
         level_rpm=None, role="control", seed=seed, components=components,
@@ -2437,8 +2490,31 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         scenarios = tuple(sc for sc in scenarios if sc.sid in wanted)
 
     genomes = GenomeIndex(refs_manifest, taxdump=args.taxdump)
+
+    # The pack watchlist is what makes truth_absent exhaustive. Without it a false
+    # positive on an organism no scenario happened to name scores as `unlisted` and is
+    # dropped from the specificity table rather than counted - see docs/decisions.md D14.
+    watchlist_path = pack_dir / "watchlist.tsv"
+    watchlist: list[str] = []
+    if watchlist_path.exists():
+        with watchlist_path.open() as fh:
+            for line in fh:
+                if line.startswith("#") or not line.strip():
+                    continue
+                name = line.split("\t", 1)[0].strip()
+                if name and name.lower() != "name":
+                    watchlist.append(name)
+    if not watchlist:
+        LOG.warning("no watchlist at %s - truth_absent will be only what each scenario "
+                    "lists by hand, so a false positive on an unlisted organism will be "
+                    "scored 'unlisted' and silently excluded from specificity (D14)",
+                    watchlist_path)
+    else:
+        LOG.info("watchlist: %d taxa, used to make truth_absent exhaustive", len(watchlist))
+
     plans, problems = plan_batch(scenarios, genomes, args.db_root, reads_dir,
-                                 args.seed, platform_filter, args.replicates)
+                                 args.seed, platform_filter, args.replicates,
+                                 watchlist=watchlist)
     if problems:
         LOG.error("--- scenarios that cannot be built ---")
         for msg in problems:

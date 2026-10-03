@@ -74,7 +74,9 @@ process CHOPPER {
 process MINIMAP2_HOST_DEPLETE {
     tag   "${meta.id}"
     label 'process_high'
-    conda "bioconda::minimap2=2.31 bioconda::samtools=1.22"
+    // python is here for bin/host_depletion_stats.py, which turns flagstat into the
+    // host-depletion figure D14 shows is load-bearing. Same pin as MAKE_REPORT.
+    conda "bioconda::minimap2=2.31 bioconda::samtools=1.22 conda-forge::python=3.11"
 
     input:
     tuple val(meta), path(reads), path(index)
@@ -82,6 +84,7 @@ process MINIMAP2_HOST_DEPLETE {
     output:
     tuple val(meta), path("${meta.id}.dehost*.fastq.gz"), emit: reads
     tuple val(meta), path("${meta.id}.host_stats.txt")  , emit: stats
+    path "${meta.id}.host_depletion.tsv"                , emit: efficiency
     path "versions.yml"                                 , emit: versions
 
     script:
@@ -98,6 +101,17 @@ process MINIMAP2_HOST_DEPLETE {
       | ${extract}
 
     echo "# host index: ${index}" >> ${meta.id}.host_stats.txt
+
+    # Host-depletion efficiency as a first-class artifact. D14: eukaryotic references
+    # recruit host reads in proportion to what survives this step - the T. gondii
+    # reference takes 7.74% of them - so this fraction gates a whole class of false
+    # positive. flagstat already computed it, host_stats was published, and ch_host_stats
+    # was a dead channel that nothing read.
+    host_depletion_stats.py \\
+        --flagstat ${meta.id}.host_stats.txt \\
+        --sample '${meta.id}' \\
+        --platform '${meta.platform}' \\
+        --out ${meta.id}.host_depletion.tsv
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

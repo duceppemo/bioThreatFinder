@@ -975,6 +975,60 @@ def test_shared_assembly_masking(tmp: Path) -> None:
                f"genome_bp {ra.get('genome_bp')} / {rb.get('genome_bp')}")
 
 
+def test_exhaustive_absent(tmp: Path) -> None:
+    """truth_absent must be the whole watchlist minus what is really in the sample.
+
+    The evaluator scores a call for an unlisted taxon as `unlisted`, not
+    `false_positive`, so a hand-written absent list silently excludes from the
+    specificity table any organism its author forgot. negative_host_only listed eleven
+    taxa, omitted Toxoplasma gondii, and the 2026-10-03 run reported T. gondii
+    `supported` in all 21 samples off 100% human reads while specificity read 0.000 with
+    zero T. gondii rows. docs/decisions.md D14.
+
+    Asserts both halves: the forgotten organism IS now absent, and the things genuinely
+    in the sample are NOT - because listing a present organism as absent would score a
+    CORRECT detection as a false positive, which is the opposite failure.
+    """
+    sys.path.insert(0, str(REPO / "scripts"))
+    try:
+        import simulate_benchmark as sb
+    except Exception as exc:                                    # noqa: BLE001
+        skip("absent:exhaustive", f"cannot import simulate_benchmark: {exc}")
+        return
+
+    class _Spike:
+        def __init__(self, taxon): self.taxon = taxon
+
+    class _Comp:
+        def __init__(self, label, kind): self.label, self.kind = label, kind
+
+    class _Sc:
+        spikes = [_Spike("Yersinia pestis")]
+        vaccine = ["Mycobacterium bovis"]
+        absent = ["Bacillus anthracis"]
+
+    watchlist = ["Bacillus anthracis", "Yersinia pestis", "Toxoplasma gondii",
+                 "Escherichia coli", "Mycobacterium bovis", "Francisella tularensis"]
+    components = [_Comp("Escherichia coli", "background"),
+                  _Comp("Yersinia pestis", "spike")]
+    got = sb.exhaustive_absent(_Sc(), ["Yersinia pestis"], watchlist, components)
+    low = {g.lower() for g in got}
+
+    record("absent:forgotten watchlist organism is now absent",
+           "toxoplasma gondii" in low, f"got {sorted(got)}")
+    record("absent:unrelated watchlist organism is absent",
+           "francisella tularensis" in low, f"got {sorted(got)}")
+    record("absent:explicit entry is kept",
+           "bacillus anthracis" in low, f"got {sorted(got)}")
+    # Each of these would turn a correct detection into a scored false positive.
+    record("absent:spiked target is NOT absent",
+           "yersinia pestis" not in low, f"got {sorted(got)}")
+    record("absent:background organism is NOT absent",
+           "escherichia coli" not in low, f"got {sorted(got)}")
+    record("absent:vaccine strain is NOT absent",
+           "mycobacterium bovis" not in low, f"got {sorted(got)}")
+
+
 def test_platform_carried(tmp: Path) -> None:
     """Every finding must carry ITS OWN row's platform, whatever tier it landed in.
 
@@ -1036,6 +1090,7 @@ CASES = {
     "eval": test_evaluator,
     "workflow": test_workflow_scripts,
     "platform": test_platform_carried,
+    "absent": test_exhaustive_absent,
     "shared_assembly": test_shared_assembly_masking,
 }
 

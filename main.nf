@@ -329,6 +329,13 @@ workflow {
         MINIMAP2_HOST_DEPLETE(ch_host_idx)
         ch_clean      = MINIMAP2_HOST_DEPLETE.out.reads
         ch_host_stats = MINIMAP2_HOST_DEPLETE.out.stats
+        // Run-level QC artifact. Previously ch_host_stats was produced and consumed by
+        // nothing; D14 showed the number is load-bearing, so it is now written out.
+        MINIMAP2_HOST_DEPLETE.out.efficiency
+            .collectFile(name: 'host_depletion.tsv',
+                         storeDir: "${params.outdir}/qc",
+                         keepHeader: true, skip: 1, sort: true)
+            .subscribe { f -> log.info "[QC] host depletion -> ${f}" }
     }
 
     SEQKIT_STATS(ch_clean)
