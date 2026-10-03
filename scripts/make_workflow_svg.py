@@ -149,7 +149,7 @@ def build(theme: str) -> str:
     arms = [
         (155, "KRAKEN2", "+ BRACKEN", None),
         (365, "SYLPH_PROFILE", "ANI-based", None),
-        (575, "METABULI", "DNA + AA", "opt"),
+        (575, "METABULI", "DNA + AA", None),
         (785, "KRAKENUNIQ", "distinct k-mers", "opt"),
     ]
     for ax, name, sub, opt in arms:
@@ -227,8 +227,15 @@ def build(theme: str) -> str:
     g.text(1005, 520, "three-valued", size=9, fill=c["muted"], font=SANS)
     g.line(920, 560, 950, 560, stroke=c["muted"], sw=1.2, arrow="muted")
 
+    # Stage 2's two halves take DIFFERENT inputs. The competitive alignment is per
+    # candidate and follows PARSE_SCREEN; the marker tier runs once per SAMPLE straight off
+    # the host-depleted reads (main.nf:498-507, "Run per sample, not per candidate"). An
+    # earlier version drew both as fed by PARSE_SCREEN, which misstated the fan-out.
     g.path(f"M{cx} 396 V432 H300 V458", arrow="ink")
-    g.path(f"M{cx} 432 H840 V458", arrow="ink")
+    # Routed outside RESOLVE_WATCHLIST (which ends at x=1080) rather than through it.
+    g.path("M600 184 H1112 V446 H1040 V458", stroke=c["muted"], dash="4 3", arrow="muted")
+    g.text(1106, 300, "per sample,", size=9, fill=c["muted"], anchor="end", font=SANS)
+    g.text(1106, 312, "from clean reads", size=9, fill=c["muted"], anchor="end", font=SANS)
 
     # ---- decide ---------------------------------------------------------------
     g.band(684, "DECIDE", "gates + marker rules + control subtraction")

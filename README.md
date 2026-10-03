@@ -38,7 +38,9 @@ python3 tests/test_pipeline.py     # 89 fixture-driven checks, ~10 s, no databas
 </picture>
 
 Boxes are named as they appear in the Nextflow trace. `[opt]` is off by default and
-`x candidate` marks the fan-out: stage 2 runs once per (sample x watchlist candidate).
+`x candidate` marks the fan-out: the competitive alignment runs once per (sample x
+watchlist candidate), while the marker tier runs once per sample off the host-depleted
+reads (`main.nf:498`).
 Regenerate with `python3 scripts/make_workflow_svg.py`.
 
 The two things worth taking from it. Stage 1 is an **OR** — a single arm nominating a
@@ -68,7 +70,7 @@ rather than to the agent; that split is what `neighbour_ratio` measures. Nothing
                     ▼              ▼              ▼              ▼        │
                  KRAKEN2        SYLPH_PROFILE  METABULI      KRAKENUNIQ   │
                  + BRACKEN      ANI-based      DNA + AA      distinct     │
-                 (illumina)                    [opt]         k-mers [opt] │
+                 (illumina)                                  k-mers [opt] │
                     └──────────────┴──────────────┴──────────────┘        │
                                           │                              │
                                           ▼                              │
@@ -77,7 +79,8 @@ rather than to the agent; that split is what `neighbour_ratio` measures. Nothing
                                           │
   ═════════ STAGE 2 ─ does the ALIGNMENT hold up? (strict, this decides) ══════════
                                           │
-                 ┌────────────────────────┴───────────────────┐
+                 │                        (marker tier takes the CLEAN reads,
+                 │                         per sample — not per candidate)
                  ▼                                            ▼
     MINIMAP2_COMPETITIVE [per candidate]            2b. MARKER TIER
     target + near neighbours in ONE index           MARKER_ALIGN_NT  (nucleotide)

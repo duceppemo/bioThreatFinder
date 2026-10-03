@@ -400,7 +400,7 @@ recruitment D13 records.
 
 ---
 
-## D13 — Masking is detected at 200 bp / 95% identity but reads map at 101 bp; the two scales do not meet
+## D13 — Masking is detected at 200 bp / 95% identity but reads map at 150 bp; the two scales do not meet
 
 **Finding:** `[MEASURED]` 2026-10-03, from the negative-control bundles of
 `runs/lod_v2_kraken2` (no watchlist target spiked; reads carry their source accession).
@@ -408,22 +408,27 @@ Reads at MAPQ>=10 on each TARGET reference, by true origin:
 
 | taxid | taxon | reads on target | dominant true origin |
 |---|---|---|---|
-| 5811 | *Toxoplasma gondii* | 24,101 (7,645 in top 3) | **human** NC_060925.1 / 060933.1 / 060943.1 |
+| 5811 | *Toxoplasma gondii* | **8,318** | **human** NC_060925.1 / 060933.1 / 060943.1 |
 | 487 | *Neisseria meningitidis* | 317 | *H. haemolyticus* (275), *E. coli* (42) |
 | 1392 | *Bacillus anthracis* | 66 | *L. innocua* (64) |
 | 1639 | *Listeria monocytogenes* | 45 | *B. thuringiensis* (45) |
 | 622 | *Shigella dysenteriae* | 61 | *E. coli* (60) |
 | 28901 | *Salmonella enterica* | 23 | *H. haemolyticus* (20) |
 
-The *T. gondii* reference is a **human-read sink**: thousands of host reads that survived
-depletion map to it at MAPQ>=10, three orders of magnitude more than any bacterial
-reference recruits. Its neighbour side holds 33 reads, so `neighbour_ratio` is **730** and
+The *T. gondii* reference is a **human-read sink**: 8,318 host reads that survived depletion
+map to it at MAPQ>=10, **26x** what the worst bacterial reference recruits (319 onto
+*N. meningitidis*). An earlier version of this table put 24,101 in that cell and claimed
+"three orders of magnitude" - that figure was counted at ANY MAPQ including supplementary
+alignments while every bacterial row beside it was MAPQ>=10 primary, so the comparison was a
+unit artifact. All rows are now MAPQ>=10 primary. Its neighbour side holds 33 reads, so `neighbour_ratio` is **730** and
 the neighbour gate offers no protection whatsoever. Breadth, occupancy and identity are
 what actually hold the line - the specificity table shows 0.000 false positives - so this
 is a redundancy that is doing nothing, not an active false positive.
 
 **Why masking does not catch it.** `mask_pack_refs.py` runs at `min_hit_len=200` and
-`min_identity=0.95`. A 101 bp read needs neither: it maps at MAPQ>=10 on far shorter and
+`min_identity=0.95`. A 150 bp read needs neither - and 150 bp is the length this batch
+actually used (`simulate_benchmark.py:120`); an earlier version of this entry said 101 bp
+throughout, which would have sent the remediation below to the wrong parameter: it maps at MAPQ>=10 on far shorter and
 far less identical stretches than a 200 bp 95%-identity alignment. The result pack-wide:
 
 * *T. gondii*: **1,982 bp** host-masked on a 65.7 Mb genome
@@ -437,9 +442,10 @@ missing source.
 **Consequence for D12 option 1.** Masking within-family recruitment was listed there as the
 lever that would fix numerator and denominator together. At current parameters it would
 not: the *E. coli* pedestal on *Y. enterocolitica* sits on a reference with 571 bp masked
-and 0 bp crossgroup. Making masking catch it means read-scale parameters (~100 bp, lower
-identity), which on closely related genomes would mask large fractions of the reference and
-cost sensitivity in exactly the silent way masking exists to prevent. That trade-off has to
+and 0 bp crossgroup. Making masking catch it means read-scale parameters (~150 bp here,
+and in general the batch's own read length, lower identity), which on closely related
+genomes would mask large fractions of the reference and cost sensitivity in exactly the
+silent way masking exists to prevent. That trade-off has to
 be measured, not assumed.
 
 **Decision: record, and do not change the masking parameters.** Both numbers that matter -
@@ -530,15 +536,32 @@ class of false positive, and until 2026-10-03 nothing in the pipeline recorded i
 (`ch_host_stats` was a dead channel; now written to `<outdir>/qc/host_depletion.tsv`). It
 still GATES nothing.
 
-⚠️ **An earlier version of this entry inverted the coefficient to size host survival, and
-that was impossible arithmetic.** It read "8,380 / 0.0551 => ~152,000 surviving human
-reads". The sample's component JSON plans 980,000 non-host PAIRS = 1,960,000 records, and
-`total_reads_screened` is 1,980,236 - so residual human reads are **at most 20,236**, and
-152,000 exceeded the entire non-host remainder by 7x.
+⚠️ **Two earlier versions of this paragraph were wrong, the second in three ways.** It
+first inverted the coefficient to claim "~152,000 surviving human reads", which exceeded
+the sample's entire non-host remainder. The replacement then said "residual human reads are
+**at most** 20,236, so the rate is ~41%, about 7.6x" - and that was wrong because:
 
-The real in-pipeline rate is **8,380 / ~20,236 = ~41% of surviving human reads**, roughly
-**7.6x the 5.43% whole-genome coefficient**. That gap is the actual finding, and it has a
-mechanism: survivors of host depletion are **not a random sample of host reads**. They are
+1. **the inequality was inverted.** `residual = screened - nonhost_survivors`, and
+   survivors are at most what was GENERATED, so the expression is a **floor** on residual
+   host, not a ceiling;
+2. the bound was **refuted by the same BAM it described** - 8,318 host-origin records land
+   on this one reference, and the "at most" figure was for the whole sample;
+3. the numerator **8,380 counted supplementary alignments** (`-F 0x4`) while the
+   coefficient excludes them (`-F 0x904`), so the ratio mixed units.
+
+`scripts/check_host_recruitment.py` now computes this, with the inequality direction in the
+code and the filters forced to match:
+
+    screened records           1,980,236
+    non-host generated         1,956,528   (978,264 pairs x 2)
+    residual host FLOOR           23,708
+    records on ref 5811            8,318   MAPQ>=10, primary, all host-origin
+    whole-genome coefficient        5.43%  (150 bp, insert 350, MAPQ>=10)
+    in-pipeline rate CEILING        35.1%
+    enrichment CEILING               6.5x
+
+Both in-pipeline figures are **ceilings**, because the denominator is a floor. The
+qualitative finding does not depend on the exact value, and it has a mechanism: survivors of host depletion are **not a random sample of host reads**. They are
 precisely the reads that failed to map to CHM13 - repetitive, divergent, low-complexity -
 which is the same class that cross-maps to a 65 Mb parasite genome.
 `measure_recruitment.py` simulates from the whole host genome with no depletion step, so
@@ -547,16 +570,22 @@ be inverted**, and "recruitment scales linearly with whatever survives" is wrong
 host arm. It holds for *E. coli*, which passes depletion untouched - which is exactly why
 that arm predicts within 1% while the host arm was out by 7x.
 
-**The predictive model holds on BOTH arms**, computed by `scripts/check_pedestal_model.py`
-across all 12 *Y. pestis* samples rather than by hand on one:
+**The predictive model holds on both arms.** The neighbour arm is computed by
+`scripts/check_pedestal_model.py` over the 12 of 15 *Y. pestis* samples that have a 632
+coverage TSV - stage 1 never nominated the taxon in the three rpm1 samples, and the script
+now reports that skip rather than hiding it. The target arm is NOT computed by that script:
+the coverage TSV does not separate which of the target's reads came from *E. coli*, so the
+observed value comes from D12's read attribution (4 samples: 191, 202, 222, 230) and must be
+passed in with `--attributed`. An earlier version of this entry said the script computed
+both, which was false.
 
     coefficient @150 bp, insert 350, MAPQ>=10, over 10^6 source reads
       E. coli -> ref 630 (neighbour)   3,355 rpm
       E. coli -> ref 632 (target)        256 rpm
     source reads   800,000  (component JSON: 400,000 E. coli PAIRS x 2)
 
-    NEIGHBOUR ARM  predicted 2,684  vs observed 2,581-2,811   mean error  -0.9%
-    TARGET ARM     predicted   205  vs attributed 191-230     mean error  -3.0%
+    NEIGHBOUR ARM  predicted 2,684  vs observed 2,581-2,811   mean error  -0.9%  (n=12, script)
+    TARGET ARM     predicted   205  vs attributed 191/202/222/230       -3.0%  (n=4, read attribution)
 
 So `pedestal = recruitment_rpm x source_reads` is calibrated, within ~3% on both arms. The
 target arm is reported deliberately: an earlier version of this entry quoted only the

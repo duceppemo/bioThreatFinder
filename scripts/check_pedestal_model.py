@@ -54,7 +54,7 @@ def load_matrix(path: Path, source: str, bundle: str) -> dict[str, dict]:
             if r["source"] == source and r["bundle_taxid"] == bundle]
     if not rows:
         die(f"no rows in {path} for source={source} bundle={bundle}")
-    if "read_len" not in rows[0]:
+    if "read_len" not in rows[0]:  # noqa: SIM102 - message is the point
         die(f"{path} has no read_len column, so the conditions it was measured under are "
             f"unknown. Regenerate with scripts/measure_recruitment.py - applying a "
             f"coefficient at the wrong read length is the error this check exists to stop.")
@@ -72,6 +72,9 @@ def main() -> int:
                     help="component label in the batch JSON for --source")
     ap.add_argument("--bundle", required=True)
     ap.add_argument("--neighbour", required=True)
+    ap.add_argument("--attributed", help="comma-separated observed records on the TARGET "
+                    "reference attributable to --organism, from read attribution. Without "
+                    "it the target arm is reported as not compared.")
     a = ap.parse_args()
 
     refs = load_matrix(a.matrix, a.source, a.bundle)
@@ -92,11 +95,27 @@ def main() -> int:
             if " -l " in line:
                 parts = line.split()
                 lens.add(parts[parts.index("-l") + 1])
-    if lens and {str(cond["read_len"])} != lens:
+    if not lens:
+        die(f"no ART commands found under {a.batch / 'logs'}/*.cmds, so the batch's read "
+            f"length is unknown. Previously this printed 'conditions match' and continued, "
+            f"which is worse than no guard: it asserts a condition it could not check.")
+    if {str(cond["read_len"])} != lens:
         die(f"coefficient measured at {cond['read_len']} bp but the batch was simulated at "
             f"{sorted(lens)} bp. Recruitment is read-length dependent; this comparison "
             f"would be invalid.")
-    print(f"  batch simulated at {sorted(lens) or ['?']} bp  -> conditions match")
+    # Insert size is checked too: the two 150 bp matrices on disk differ ONLY by insert
+    # (300 vs 350) and that moves the target-arm coefficient by 10% and ref 633 by 28%.
+    inserts = set()
+    for c in cmds:
+        for line in open(c):
+            parts = line.split()
+            if "-m" in parts:
+                inserts.add(parts[parts.index("-m") + 1])
+    if inserts and str(cond.get("insert_mean", "")) not in inserts:
+        die(f"coefficient measured at insert {cond.get('insert_mean')} but the batch used "
+            f"{sorted(inserts)}. That alone moves coefficients by 10-28%.")
+    print(f"  batch simulated at {sorted(lens)} bp, insert {sorted(inserts) or ['?']} "
+          f"-> conditions match")
 
     rows = []
     for sample_json in sorted(glob.glob(str(a.batch / "logs" / "*.json"))):
@@ -105,16 +124,25 @@ def main() -> int:
         cov = a.run / "confirm" / f"{sample}.{a.bundle}.coverage.tsv"
         if not cov.exists():
             continue
-        pairs = sum((c.get("reads_actual") or c.get("reads_requested") or 0)
+        # reads_generated is what ART actually produced; reads_requested is the plan.
+        # There is no reads_actual - an earlier version looked for it and so always
+        # silently used the planned figure.
+        pairs = sum((c.get("reads_generated") or c.get("reads_requested") or 0)
                     for c in d["components"] if c.get("label") == a.organism)
         if not pairs:
             continue
         src_reads = pairs * 2          # components are PAIRS; the pipeline counts RECORDS
         obs = next(csv.DictReader(cov.open(), delimiter="\t"))
+        if obs.get("best_neighbour_taxid") != a.neighbour:
+            # Comparing a coefficient for ref X against a count for ref Y is silent
+            # nonsense, so it is refused rather than averaged in.
+            die(f"{sample}: best_neighbour_taxid is {obs.get('best_neighbour_taxid')}, "
+                f"not the --neighbour {a.neighbour} the coefficient was taken for.")
         rows.append((sample, src_reads,
                      float(refs[a.neighbour]["rpm_source_reads"]) * src_reads / 1e6,
                      int(obs["best_neighbour_reads"]),
                      float(refs[a.bundle]["rpm_source_reads"]) * src_reads / 1e6))
+    skipped = len(glob.glob(str(a.batch / "logs" / "*.json"))) - len(rows)
     if not rows:
         die(f"no sample had both a component JSON and {a.bundle}.coverage.tsv")
 
@@ -125,14 +153,25 @@ def main() -> int:
         errs.append(e)
         print(f"{s:<42} {src:>10,} {pred_nb:>8.0f} {obs_nb:>7,} {e:>+6.1%}")
     mean = sum(errs) / len(errs)
-    print(f"\nNEIGHBOUR ARM: mean error {mean:+.1%} over {len(errs)} sample(s)")
+    print(f"\nNEIGHBOUR ARM: mean error {mean:+.1%} over {len(errs)} sample(s)"
+          f"  ({skipped} sample(s) had no {a.bundle} coverage TSV and were skipped - "
+          f"stage 1 never nominated the taxon there)")
 
     # The target arm is reported too. Quoting only the arm that agrees is how a model gets
     # called calibrated when half of it is not.
     tgt_pred = sum(r[4] for r in rows) / len(rows)
-    print(f"TARGET ARM:    predicted {tgt_pred:.0f} records on ref {a.bundle} "
-          f"per sample - compare against the E. coli-attributed subset, which the "
-          f"coverage TSV does not separate (D12 measured it by read attribution).")
+    print(f"TARGET ARM:    predicted {tgt_pred:.0f} records on ref {a.bundle} per sample.")
+    if a.attributed:
+        obs_t = [float(x) for x in a.attributed.split(",")]
+        m = sum(obs_t) / len(obs_t)
+        print(f"               observed {min(obs_t):.0f}-{max(obs_t):.0f} "
+              f"(mean {m:.0f}, n={len(obs_t)}, supplied via --attributed) "
+              f"-> {tgt_pred / m - 1:+.1%}")
+    else:
+        print("               NOT COMPARED: the coverage TSV does not separate which of "
+              "the target's reads came from the background organism, so the observed "
+              "value must come from read attribution and be passed with --attributed. "
+              "Do not quote a target-arm error without it.")
     return 0
 
 
