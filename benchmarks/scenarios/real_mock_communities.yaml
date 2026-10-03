@@ -1,0 +1,252 @@
+# bioThreatFinder benchmark scenarios - REAL sequencing data, defined communities
+#
+# DRAFT. Nothing here has been run. Accessions are marked VERIFY until downloaded and
+# checked; see "Provenance" below.
+#
+# ---------------------------------------------------------------------------
+# WHY A SECOND SCENARIO FILE RATHER THAN MORE OF human_core.yaml
+# ---------------------------------------------------------------------------
+# These scenarios are NOT simulated. `scripts/simulate_benchmark.py` validates `kind`
+# against its own KINDS list and will refuse `mock_community`, which is deliberate: the
+# simulator must never be pointed at this file and silently "generate" reads for data
+# that is supposed to come from a sequencer. `bin/evaluate_benchmark.py` treats `kind` as
+# a label and does not validate it, so the evaluator reads this file happily.
+#
+# The consequence is that the manifest is WRITTEN BY HAND (or by a fetch script) rather
+# than emitted by the simulator. Ground truth for a defined community comes from the
+# manufacturer's composition sheet, not from a spike plan.
+#
+# ---------------------------------------------------------------------------
+# WHAT REAL MOCK DATA BUYS THAT SIMULATION CANNOT
+# ---------------------------------------------------------------------------
+# 1. REAL ERROR PROFILES. ART and friends model what we already believe about the
+#    instrument. ONT homopolymer and basecaller-version error, Illumina tile and adapter
+#    artefacts, index hopping and chimeras are exactly the things that manufacture false
+#    positives, and a simulator that produced them would be modelling them from the same
+#    assumptions the pipeline uses to filter them.
+# 2. ONT AT ALL. This pipeline has NEVER processed nanopore data. The D10 read-identity
+#    floors and `--ont-identity-slack` in the marker tier are both PROVISIONAL and
+#    entirely unmeasured. A real ONT run is the first evidence either has ever had.
+# 3. A GENUINELY PRESENT NEAR NEIGHBOUR, which is arm (b) of D12 - see below.
+#
+# WHAT IT CANNOT DO, STATED PLAINLY
+#   * No select agents. The Zymo standards contain NO B. anthracis, Y. pestis,
+#     F. tularensis, Burkholderia or orthopox. LoD for the high-consequence agents still
+#     requires the simulated series in human_core.yaml. This file does not replace it.
+#   * No host. Both standards are microbial only, so host depletion - the pipeline's
+#     first real filter - is not exercised by a neat mock run. `zymo_even_in_host`
+#     below addresses that by MIXING, and says so rather than pretending otherwise.
+#   * Strain identity matters. The watchlist is taxid-keyed and its Salmonella row says
+#     "serovar is the actionable unit, not species", so the exact Zymo strains must be
+#     resolved to taxids before truth means anything. VERIFY per lot.
+#
+# ---------------------------------------------------------------------------
+# HOW THIS TESTS D12 - the point of the exercise
+# ---------------------------------------------------------------------------
+# D12 found `neighbour_ratio`'s denominator pinned at 2,710 +/- 70 reads while the target
+# moved 530x, and attributed it to background Enterobacteriaceae cross-mapping onto a
+# neighbour reference that was never spiked. D12 records a falsifiable prediction: the
+# pedestal tracks Enterobacteriaceae abundance and falls to near zero in a clean
+# background.
+#
+# The even standard is a natural experiment for this, because within ONE sample at ONE
+# depth it contains both cases:
+#
+#   Salmonella enterica       near_neighbours: Escherichia coli;Citrobacter freundii
+#                             -> E. coli IS PRESENT at ~12% genomic abundance.
+#                                A low ratio here is a REAL competing signal.
+#
+#   Listeria monocytogenes    near_neighbours: Listeria innocua;L. seeligeri;L. ivanovii
+#                             -> NONE of them are present.
+#                                Any neighbour reads here are pedestal by construction.
+#
+# Same library, same depth, same error profile. If Listeria shows a substantial
+# best-neighbour count with no Listeria neighbour in the sample, the pedestal is
+# confirmed on real data. If Listeria's neighbour count is ~0 while Salmonella's is
+# large, then the metric behaves as documented and D12's diagnosis is WRONG - which is
+# the outcome this file has to be able to produce.
+#
+# ---------------------------------------------------------------------------
+# PROVENANCE OF THE ACCESSIONS  -  all VERIFY
+# ---------------------------------------------------------------------------
+# `[IND]` Nicholls SM, Quick JC, Tang S, Loman NJ (2019) "Ultra-deep, long-read nanopore
+# sequencing of mock microbial community standards", GigaScience 8(5):giz043,
+# doi:10.1093/gigascience/giz043 (preprint bioRxiv 487033). It reports GridION and
+# PromethION runs of ZymoBIOMICS D6300 (Lot ZRC190633) and ZymoBIOMICS Community
+# Standard II / D6310 (Lot ZRC190842), and states that both communities AND the ten
+# individual isolates were also sequenced on Illumina.
+#
+# A web search returned ERR3152364 and ERR3152366 as the nanopore run accessions. These
+# are UNVERIFIED - they came from a search summary, not from ENA - and the matching
+# Illumina accessions were not identified at all. Nothing should be downloaded, and no
+# truth table believed, until each accession has been resolved at
+# https://www.ebi.ac.uk/ena/browser/ and its library strategy, platform, lot and read
+# count checked against the fields below. A wrong accession here would not error: it
+# would quietly measure a different library and report it as this one.
+#
+# Download cost is not trivial. The ultra-deep PromethION runs in that data note are
+# hundreds of GB. Prefer a subsampled fetch, and record the subsampling in the manifest.
+
+schema_version: 1
+
+defaults:
+    # Overridden per scenario; these exist so a missing field fails loudly rather than
+    # defaulting to a simulated-data assumption.
+    replicates: 1
+    platforms: [illumina, ont]
+    host: human
+    source: external_sra
+
+scenarios:
+
+    # -----------------------------------------------------------------------
+    # EVEN COMMUNITY - the D12 natural experiment, and the first ONT data
+    # -----------------------------------------------------------------------
+    - id: zymo_even
+      description: >
+        ZymoBIOMICS Microbial Community Standard (D6300), even distribution: 8 bacteria
+        at ~12% genomic abundance each and 2 yeasts at ~2%. Four members are on the human
+        watchlist - E. coli, Salmonella enterica, Listeria monocytogenes and
+        Cryptococcus neoformans - so this yields real-data true positives at known
+        abundance. Run on BOTH Illumina and ONT from the same standard, which is what
+        makes it the first measurement of the D10 ONT identity floors.
+      kind: mock_community
+      source: external_sra
+      accessions:
+          ont:      ["ERR3152364"]   # VERIFY - unconfirmed, see Provenance
+          illumina: []               # VERIFY - not yet identified
+      standard:
+          product: D6300
+          lot: ZRC190633             # VERIFY against the run metadata
+          distribution: even
+      truth:
+          # Watchlist members genuinely present. Non-watchlist members are deliberately
+          # NOT listed, matching the human_core.yaml convention for background taxa.
+          present:
+              - Escherichia coli
+              - Salmonella enterica
+              - Listeria monocytogenes
+              - Cryptococcus neoformans
+          # Everything high-consequence is absent BY CONSTRUCTION, which is the strongest
+          # specificity statement available: real reads, real errors, no select agent.
+          absent:
+              - Bacillus anthracis
+              - Yersinia pestis
+              - Francisella tularensis
+              - Burkholderia pseudomallei
+              - Brucella melitensis
+      expect:
+          # Present at ~12% of a microbial-only library, so detection is not the question -
+          # anything less than confirmed indicates a wiring or threshold fault.
+          - taxon: Salmonella enterica
+            min_tier: supported
+          - taxon: Listeria monocytogenes
+            min_tier: supported
+          - taxon: Escherichia coli
+            min_tier: supported
+          # 2% yeast, ~19 Mb genome: the eukaryote arm, where breadth per read is lowest.
+          - taxon: Cryptococcus neoformans
+            min_tier: supported
+          # Specificity on real data. A confirmed call for any of these is a false
+          # positive that no simulated negative has been able to produce.
+          - taxon: Bacillus anthracis
+            max_tier: screened_only
+          - taxon: Yersinia pestis
+            max_tier: screened_only
+          - taxon: Francisella tularensis
+            max_tier: screened_only
+          - taxon: Burkholderia pseudomallei
+            max_tier: screened_only
+
+    # -----------------------------------------------------------------------
+    # LOG COMMUNITY - a real LoD series inside a single library
+    # -----------------------------------------------------------------------
+    - id: zymo_log
+      description: >
+        ZymoBIOMICS Microbial Community Standard II (D6310), LOG distribution: the same
+        ten organisms spanning several orders of magnitude of abundance in one sample.
+        This is D12 arm (a) - locating the detection cliff - without simulating anything,
+        and it does it better than a dilution series because every level shares one
+        library prep, one run and one error profile, so abundance is the only variable.
+        The per-organism abundances come from the manufacturer's sheet for THIS LOT and
+        must be read from it, not assumed.
+      kind: mock_community
+      source: external_sra
+      accessions:
+          ont:      ["ERR3152366"]   # VERIFY - unconfirmed, see Provenance
+          illumina: []               # VERIFY - not yet identified
+      standard:
+          product: D6310
+          lot: ZRC190842             # VERIFY against the run metadata
+          distribution: log
+      truth:
+          present:
+              - Escherichia coli
+              - Salmonella enterica
+              - Listeria monocytogenes
+              - Cryptococcus neoformans
+          absent:
+              - Bacillus anthracis
+              - Yersinia pestis
+              - Francisella tularensis
+      expect:
+          # Deliberately NO min_tier on the low-abundance members until the lot sheet has
+          # been read. Asserting a floor before knowing the abundance would be the D10/D11
+          # mistake again: a threshold that cannot be met, or one that nothing can fail.
+          - taxon: Bacillus anthracis
+            max_tier: screened_only
+          - taxon: Yersinia pestis
+            max_tier: screened_only
+
+    # -----------------------------------------------------------------------
+    # EVEN COMMUNITY IN A HUMAN BACKGROUND - restores the host filter
+    # -----------------------------------------------------------------------
+    - id: zymo_even_in_host
+      description: >
+        The mock standards contain no human DNA, so a neat run leaves host depletion -
+        the pipeline's first real filter - completely unexercised, and reports sensitivity
+        at a host fraction no clinical specimen ever has. This scenario MIXES real mock
+        reads with real human reads at ~95% host to match the simulated series, so the
+        two are comparable.
+        .
+        This is a COMPUTATIONAL MIXTURE, not a sequenced co-extraction. It therefore does
+        not reproduce competition during library prep or extraction bias, and must not be
+        described as if it did. What it does measure is whether host depletion plus the
+        stage-1 screen still recover a known organism at a realistic host fraction, using
+        real reads on both sides.
+      kind: mock_community
+      source: external_sra
+      mixture:
+          microbial: zymo_even           # reuse the accessions above
+          host_reads: VERIFY             # a real human WGS accession, to be chosen
+          host_fraction: 0.95
+      truth:
+          present:
+              - Escherichia coli
+              - Salmonella enterica
+              - Listeria monocytogenes
+          absent:
+              - Bacillus anthracis
+              - Yersinia pestis
+      expect:
+          - taxon: Salmonella enterica
+            min_tier: supported
+          - taxon: Listeria monocytogenes
+            min_tier: supported
+          - taxon: Bacillus anthracis
+            max_tier: screened_only
+
+    # -----------------------------------------------------------------------
+    # D12 ARM (c) - does the pedestal track background composition?
+    # -----------------------------------------------------------------------
+    # This one is SIMULATED, not real, and belongs in human_core.yaml once drafted. It is
+    # recorded here only because it completes the D12 experiment and would otherwise be
+    # lost: the even standard supplies the genuine-neighbour contrast but cannot vary
+    # Enterobacteriaceae abundance independently, which is what the prediction needs.
+    #
+    #   - id: pedestal_background_titration
+    #     kind: lod_series
+    #     Y. pestis held at a FIXED 100 rpm - the level where D12 shows the gate firing -
+    #     while E. coli background is swept across, say, 0 / 0.2 / 2 / 20%. D12 predicts
+    #     best_neighbour_reads for taxid 630 rises with E. coli abundance and approaches
+    #     zero in a clean background. If it stays flat, the diagnosis is wrong.

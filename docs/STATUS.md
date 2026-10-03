@@ -87,9 +87,14 @@ The Kraken2 build finished 2026-10-02, so this can run now:
 
 ```bash
 export PATH=/home/bioinfo/miniconda3/envs/btf-refs/bin:$PATH
-python3 scripts/mask_pack_refs.py --pack human --btf-db /media/8tb \
-        --only-taxid 264 --only-taxid 620 --threads 24
+# --btf-db is the base that `packs/` hangs off, NOT the volume: /media/8tb gives
+# /media/8tb/packs/... and the script dies with "no refs manifest".
+python3 scripts/mask_pack_refs.py --pack human --btf-db /media/8tb/bioThreatFinder \
+        --only-taxid 264 --only-taxid 620 --threads 24 --force
 ```
+
+`--force` is required: both rows already carry a (vacuous) `masked_bp=0` result, so
+without it the run is skipped as already done.
 
 Then confirm both rows have non-zero `genome_bp` in `masked/mask_manifest.tsv`.
 
@@ -171,6 +176,12 @@ stays offline and fast by design.
    LoD batch was re-run with Kraken2 as `runs/lod_v2_kraken2` (the sylph-only pass is
    kept at `runs/lod_v1` for comparison).
 3. Re-mask taxids 264 and 620 (above). **Now unblocked** - the Kraken2 build is finished.
+   Run 2026-10-03.
+3b. **Expand the benchmark before touching the D12 neighbour gate.**
+   `benchmarks/scenarios/real_mock_communities.yaml` drafts the real-data arms around the
+   ZymoBIOMICS standards (even D6300 and log D6310, Illumina + ONT). All accessions in it
+   are marked VERIFY and nothing has been downloaded. It also gives this pipeline its
+   FIRST ONT data, which is the only evidence the provisional D10 floors have ever had.
 4. Then set thresholds from measurement. Three are explicitly PROVISIONAL and flagged in
    the code: the ONT read-identity floors (D10), `--ont-identity-slack` in the marker
    tier, and the read/breadth gate incoherence (D11) where **75 of 89** taxa have a
