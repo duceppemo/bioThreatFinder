@@ -929,6 +929,55 @@ def test_workflow_scripts(tmp: Path) -> None:
            f"by a classifier that reports containment rather than reads")
 
 
+def test_platform_carried(tmp: Path) -> None:
+    """Every finding must carry ITS OWN row's platform, whatever tier it landed in.
+
+    `plat` was read only inside the innermost else, so a row that short-circuited
+    earlier (read floor, neighbour attribution, control suppression) fell back on
+    whatever Python had left in the loop local. First row short-circuiting =>
+    UnboundLocalError and no findings at all; any later row => the PREVIOUS row's
+    platform silently written into this finding. That field tells a reader which
+    read-identity floor was applied, so a stale value misreports an ONT confirmation
+    as Illumina. Found by the 2026-10-03 Kraken2 LoD run, which crashed here.
+
+    The ordering matters: the FIRST row must be one that short-circuits.
+    """
+    cov = tmp / "platform_carried.tsv"
+    write_cov(cov, [
+        # Below its read floor -> stops before the identity-floor branch. First on purpose.
+        cov_row(sample="ONT_LOWREADS", role="sample", taxid="632",
+                taxon="Yersinia pestis", group="bacteria", platform="ont",
+                reference_bp=4650000, unique_reads=1, reads_per_million=0.2,
+                breadth=0.0001, mean_depth=0.01, depth_cv=9.0, window_bp=1000,
+                windows_expected=4650, windows_occupied=1, window_occupancy=0.0002,
+                mean_identity=0.9100, total_reads_screened=5000000, mapq_min=10),
+        # Reaches the full gate set, so it assigns plat itself.
+        cov_row(sample="ILL_FULL", role="sample", taxid="632", taxon="Yersinia pestis",
+                group="bacteria", platform="illumina", reference_bp=4650000,
+                unique_reads=820, reads_per_million=164.0, breadth=0.3400,
+                mean_depth=0.88, depth_cv=1.15, window_bp=1000, windows_expected=4650,
+                windows_occupied=2790, window_occupancy=0.6000, mean_identity=0.9950,
+                best_neighbour_taxid="633", best_neighbour_reads=12,
+                neighbour_ratio="68.33", screen_assigned_reads=1000,
+                mapped_fraction_of_assigned="0.8200", total_reads_screened=5000000,
+                mapq_min=10),
+        # Short-circuits AFTER an ont row: the leak case, which never crashed.
+        cov_row(sample="ILL_LOWREADS", role="sample", taxid="632",
+                taxon="Yersinia pestis", group="bacteria", platform="illumina",
+                reference_bp=4650000, unique_reads=2, reads_per_million=0.4,
+                breadth=0.0002, mean_depth=0.01, depth_cv=8.0, window_bp=1000,
+                windows_expected=4650, windows_occupied=2, window_occupancy=0.0004,
+                mean_identity=0.9950, total_reads_screened=5000000, mapq_min=10),
+    ])
+    # Reaching this at all is half the test: the bug aborted before writing findings.
+    got = score(tmp, cov)
+    for sample, want in (("ONT_LOWREADS", "ont"), ("ILL_FULL", "illumina"),
+                         ("ILL_LOWREADS", "illumina")):
+        row = got.get((sample, "Yersinia pestis"))
+        record(f"platform:{sample} keeps its own platform={want}",
+               row is not None and row["platform"] == want,
+               f"got {row and row['platform']!r}")
+
 CASES = {
     "selftests": test_selftests,
     "tiering": test_tiering,
@@ -940,7 +989,9 @@ CASES = {
     "depth": test_depth_gate,
     "eval": test_evaluator,
     "workflow": test_workflow_scripts,
+    "platform": test_platform_carried,
 }
+
 
 
 def main() -> int:

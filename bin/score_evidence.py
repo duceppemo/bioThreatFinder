@@ -431,6 +431,16 @@ def main() -> int:
         nb_ratio = as_float(row.get("neighbour_ratio"), math.inf)
         rpm = as_float(row.get("reads_per_million"))
 
+        # Read per-row BEFORE any branching. These were assigned only inside the
+        # innermost else, but `platform` is written into every finding and Python
+        # leaks loop locals across iterations, so a row that short-circuited on
+        # unique_reads / attributed_to_neighbour / suppressed_control either crashed
+        # with UnboundLocalError (if it was the FIRST row) or silently inherited the
+        # PREVIOUS row's platform - into the very field a reader uses to tell an ONT
+        # confirmation from an Illumina one.
+        grp = (row.get("group") or meta.get("group") or "").strip().lower()
+        plat = (row.get("platform") or "").strip().lower()
+
         reasons: list[str] = []
         tier = "screened_only"
 
@@ -456,8 +466,6 @@ def main() -> int:
                 # genus-correct, species-wrong), but a divergent virus is
                 # legitimately far from any available reference and the same floor
                 # would manufacture false negatives where sensitivity matters most.
-                grp = (row.get("group") or meta.get("group") or "").strip().lower()
-                plat = (row.get("platform") or "").strip().lower()
                 id_floor, floor_src = resolve_identity_floor(thresholds, grp, plat)
 
                 gates = {
