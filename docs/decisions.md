@@ -275,6 +275,72 @@ declared rpm give the actual LoD, and both gates get set from that.
 
 ---
 
+## D12 — `neighbour_ratio` measures a background pedestal at low abundance; expand the benchmark before changing it
+
+**Finding:** `[MEASURED]` 2026-10-03, `runs/lod_v2_kraken2`, 12 *Y. pestis* samples across
+four spike levels, 3 replicates each. The denominator of `neighbour_ratio` is
+**effectively constant** while the numerator moves over three orders of magnitude:
+
+| level | target reads | best-neighbour reads (630) | ratio | tier |
+|---|---|---|---|---|
+| 10 rpm | 418-424 | 2,581-2,753 | 0.15 | attributed_to_neighbour |
+| 100 rpm | 2,328-2,466 | 2,722-2,811 | 0.86 | attributed_to_neighbour |
+| 1000 rpm | 22,316-22,401 | 2,695-2,722 | 8.28 | confirmed_in_silico |
+| 10000 rpm | 220,810-221,729 | 2,600-2,730 | 81.1 | confirmed_in_silico |
+
+**2,710 +/- 70 neighbour reads - 2.6% variation against a 530x swing in the target.**
+
+**It is not double-counting.** At 10 rpm the neighbour holds ~2,753 reads while the target
+has 424 in total, so the pedestal cannot be target reads leaking across the competitive
+bundle.
+
+**Where it comes from:** taxid 630 is *Y. enterocolitica*, and `simulate.log` for this
+batch spikes no Yersinia other than *pestis* - no neighbour was planted. The standing
+background is dominated by *E. coli* (~650,000 reads) and 2,710 is ~0.4% of it, consistent
+with conserved-region cross-mapping within Enterobacteriaceae onto the neighbour reference.
+
+**Why that matters.** `coverage_stats.py:39` states the intent: "unique_reads(target) /
+unique_reads(best neighbour). Below ~1 the reads are better explained by the neighbour."
+With a background-derived constant denominator the realised question is instead "is the
+target more abundant than a fixed cross-mapping floor?" - a disguised ABUNDANCE threshold
+whose value tracks background composition and sequencing depth rather than
+target/neighbour discrimination. The gate then fires hardest exactly where sensitivity
+matters most, and 6 truth-present rows are scored NEGATIVE by the evaluator
+(`attributed_to_neighbour` PPV 0.500 under Kraken2, vs 1.000 with sylph alone).
+
+**The benchmark expectation looks right and the gate looks wrong.** The failing
+expectation is `min_tier_at_rpm {100: supported}`. At 100 rpm the rows would still fail
+`depth_cv` (5.78 vs the 2.50 ceiling), which yields `supported` rather than
+`confirmed_in_silico` (`score_evidence.py:499`) - precisely what the scenario asks for. So
+this is not an optimistic expectation.
+
+Note the measured **LoD of 1000 rpm for CONFIRMATION is independently sound**: *Y. pestis*
+is >97% chromosomal ANI to *Y. pseudotuberculosis*, so confirmation rests on the pPCP1 /
+pMT1 markers, and at 100 rpm (0.07x depth) only ~0.45 reads are expected on `pla`, which
+the depth gate correctly calls UNKNOWN rather than ABSENT. Fixing the neighbour metric
+should move 100 rpm to `supported`, NOT to confirmed.
+
+**Decision: record it, EXPAND THE BENCHMARK, do not change the metric yet.** The evidence
+is one batch, one target, one platform, one background composition, and the evaluator
+itself flags the result `coarse - fewer than 5 replicates`. Every candidate fix - requiring
+the neighbour's own breadth/occupancy to be credible before it out-votes the target,
+subtracting a pedestal estimated from negative controls, or attributing on RELATIVE
+breadth instead of raw read count - changes detection behaviour for all 89 taxa. Choosing
+between them from a single scenario would repeat the mistake D11 refuses to make:
+replacing one arbitrary number with another.
+
+**Would resolve it:** a benchmark that varies what the pedestal depends on. Specifically
+(a) levels between 100 and 1000 rpm with >=5 replicates, so the cliff is located rather
+than bracketed by a 10x gap; (b) at least one scenario with a near neighbour GENUINELY
+spiked, so a real neighbour signal can be told apart from the cross-mapping floor;
+(c) a background-composition arm, since the pedestal is predicted to scale with
+Enterobacteriaceae abundance - if it does not, this diagnosis is wrong; and (d) a second
+target whose neighbour is not in the same family, to show whether the effect is general or
+specific to *Yersinia*/*E. coli*. Prediction to test: the pedestal tracks background
+abundance and is near zero in a clean (non-Enterobacteriaceae) background.
+
+---
+
 ## D9 — Rejected for now
 
 | Option | Why not yet |
