@@ -1,7 +1,12 @@
 # bioThreatFinder benchmark scenarios - REAL sequencing data, defined communities
 #
-# DRAFT. Nothing here has been run. Accessions are marked VERIFY until downloaded and
-# checked; see "Provenance" below.
+# DRAFT. Nothing here has been downloaded or run.
+#
+# SRA/ENA accessions are VERIFIED against the ENA portal API (2026-10-03): platform, model,
+# library_strategy, sample_title, read_count and fastq_bytes all checked per run. What
+# remains unverified is marked VERIFY inline - the standards' lot numbers (taken from the
+# data note, not from run metadata), the human WGS accession for the host-mixture arms, and
+# the Zymo strain-to-taxid resolution the watchlist needs.
 #
 # ---------------------------------------------------------------------------
 # WHY A SECOND SCENARIO FILE RATHER THAN MORE OF human_core.yaml
@@ -67,25 +72,40 @@
 # the outcome this file has to be able to produce.
 #
 # ---------------------------------------------------------------------------
-# PROVENANCE OF THE ACCESSIONS  -  all VERIFY
+# PROVENANCE OF THE ACCESSIONS  -  VERIFIED against the ENA portal API 2026-10-03
 # ---------------------------------------------------------------------------
 # `[IND]` Nicholls SM, Quick JC, Tang S, Loman NJ (2019) "Ultra-deep, long-read nanopore
 # sequencing of mock microbial community standards", GigaScience 8(5):giz043,
-# doi:10.1093/gigascience/giz043 (preprint bioRxiv 487033). It reports GridION and
-# PromethION runs of ZymoBIOMICS D6300 (Lot ZRC190633) and ZymoBIOMICS Community
-# Standard II / D6310 (Lot ZRC190842), and states that both communities AND the ten
-# individual isolates were also sequenced on Illumina.
+# doi:10.1093/gigascience/giz043.
 #
-# A web search returned ERR3152364 and ERR3152366 as the nanopore run accessions. These
-# are UNVERIFIED - they came from a search summary, not from ENA - and the matching
-# Illumina accessions were not identified at all. Nothing should be downloaded, and no
-# truth table believed, until each accession has been resolved at
-# https://www.ebi.ac.uk/ena/browser/ and its library strategy, platform, lot and read
-# count checked against the fields below. A wrong accession here would not error: it
-# would quietly measure a different library and report it as this one.
+# Study: PRJEB29504 (secondary ERP111811). 27 runs: 14 Oxford Nanopore, 12 Illumina.
+# Queried via https://www.ebi.ac.uk/ena/portal/api/filereport - run accession, platform,
+# model, library_strategy, sample_title, read_count and fastq_bytes all confirmed.
 #
-# Download cost is not trivial. The ultra-deep PromethION runs in that data note are
-# hundreds of GB. Prefer a subsampled fetch, and record the subsampling in the manifest.
+# THREE TRAPS IN THIS STUDY, each of which would fail silently:
+#
+# 1. SIX RUNS ARE EMPTY. ERR2887847, ERR2887848, ERR2887849 (Zymo-EVEN) and ERR2887850,
+#    ERR2887851, ERR2887852 (Zymo-LOG) report read_count=0, fastq_bytes empty and NO
+#    fastq files. They carry correct-looking titles and platforms, so picking one by
+#    title gives an empty download that reads as "no organisms detected" - the exact
+#    failure shape this project keeps finding. Do not use them.
+#
+# 2. NEAR-DUPLICATE RUN PAIRS. ERR3152364 and ERR2906227 are both Zymo-EVEN GridION with
+#    3,491,390 vs 3,491,078 reads; ERR3152366 and ERR2906229 are both Zymo-LOG GridION
+#    with 3,667,480 vs 3,667,007. They are almost certainly the same library, plausibly
+#    re-basecalled. Using both would double-count one library as two replicates and
+#    report a fabricated agreement. Pick ONE per community; this file uses the ERR3152xxx
+#    pair, which is the set the data note cites. VERIFY the basecaller version if
+#    read-identity numbers are ever compared across them.
+#
+# 3. PROMETHION IS 10x THE DOWNLOAD FOR NO BENEFIT HERE. ERR3152365 (Zymo-EVEN
+#    PromethION) is 35.8M reads / 151 Gbases; the GridION run of the same community is
+#    3.5M reads / 14 Gbases. Depth is not the limiting factor for any question in this
+#    file, so GridION is specified throughout.
+#
+# Sizes (fastq_bytes, gzipped): ONT GridION EVEN 15.0 GB, LOG 17.1 GB. Illumina community
+# EVEN 0.9 GB, LOG 3.2 GB. Ten isolates 0.44-1.60 GB each, ~8.6 GB for the set.
+# Total for everything referenced here is ~45 GB.
 
 schema_version: 1
 
@@ -113,11 +133,12 @@ scenarios:
       kind: mock_community
       source: external_sra
       accessions:
-          ont:      ["ERR3152364"]   # VERIFY - unconfirmed, see Provenance
-          illumina: []               # VERIFY - not yet identified
+          # VERIFIED 2026-10-03 via the ENA portal API.
+          ont:      ["ERR3152364"]   # GridION, Zymo-EVEN, 3,491,390 reads, 15.0 GB
+          illumina: ["ERR2984773"]   # MiSeq, in732_0_even_community_shotgun, 8,785,731 reads, 0.9 GB
       standard:
           product: D6300
-          lot: ZRC190633             # VERIFY against the run metadata
+          lot: ZRC190633             # from the data note; VERIFY against run metadata
           distribution: even
       truth:
           # Watchlist members genuinely present. Non-watchlist members are deliberately
@@ -173,11 +194,12 @@ scenarios:
       kind: mock_community
       source: external_sra
       accessions:
-          ont:      ["ERR3152366"]   # VERIFY - unconfirmed, see Provenance
-          illumina: []               # VERIFY - not yet identified
+          # VERIFIED 2026-10-03 via the ENA portal API.
+          ont:      ["ERR3152366"]   # GridION, Zymo-LOG, 3,667,480 reads, 17.1 GB
+          illumina: ["ERR2935805"]   # HiSeq 1500, in745_0_log_community_shotgun, 47,832,553 reads, 3.2 GB
       standard:
           product: D6310
-          lot: ZRC190842             # VERIFY against the run metadata
+          lot: ZRC190842             # from the data note; VERIFY against run metadata
           distribution: log
       truth:
           present:
@@ -237,16 +259,70 @@ scenarios:
             max_tier: screened_only
 
     # -----------------------------------------------------------------------
-    # D12 ARM (c) - does the pedestal track background composition?
+    # D12 ARM (c) - does the pedestal track background composition? REAL READS.
     # -----------------------------------------------------------------------
-    # This one is SIMULATED, not real, and belongs in human_core.yaml once drafted. It is
-    # recorded here only because it completes the D12 experiment and would otherwise be
-    # lost: the even standard supplies the genuine-neighbour contrast but cannot vary
-    # Enterobacteriaceae abundance independently, which is what the prediction needs.
+    - id: pedestal_background_titration
+      description: >
+        The decisive test of D12, and it needs no simulation. The same study sequenced all
+        TEN member organisms as individual Illumina isolates, so background composition can
+        be titrated with real reads carrying real error profiles.
+        .
+        D12 predicts that `best_neighbour_reads` for a target is dominated by background
+        Enterobacteriaceae cross-mapping onto the neighbour reference rather than by any
+        genuine neighbour signal. Hold a target isolate at a FIXED low abundance and sweep
+        E. coli across roughly 0 / 0.2 / 2 / 20% of the library.
+        .
+        PREDICTION (D12): best_neighbour_reads rises with E. coli abundance and approaches
+        zero in a clean background, while the target's own read count stays flat - so
+        `neighbour_ratio` moves without the target changing at all. If the neighbour count
+        stays flat instead, D12's diagnosis is WRONG and the metric behaves as documented.
+        .
+        Run it with Salmonella enterica (declared neighbour IS E. coli, so the ratio should
+        genuinely move) and with Listeria monocytogenes (no declared neighbour present at
+        any point, so ANY movement is pedestal). The contrast is the measurement.
+      kind: mock_community
+      source: external_sra
+      mixture:
+          # VERIFIED 2026-10-03 via the ENA portal API. All Illumina HiSeq 1500, paired.
+          targets:
+              Salmonella enterica:     ERR2935848   # 14,269,735 reads, 0.91 GB
+              Listeria monocytogenes:  ERR2935854   # 10,564,043 reads, 0.65 GB
+          background_titration:
+              Escherichia coli: ERR2935852          # 7,099,045 reads, 0.44 GB
+              fractions: [0.0, 0.002, 0.02, 0.20]
+          # Non-Enterobacteriaceae filler, so total depth is held constant while only the
+          # E. coli fraction varies - otherwise abundance and composition move together and
+          # the result cannot be attributed to either.
+          filler: ERR2935853                        # Pseudomonas aeruginosa, 0.46 GB
+          host_reads: VERIFY                        # real human WGS, for the ~95% host arm
+      truth:
+          present: [Salmonella enterica, Listeria monocytogenes, Escherichia coli]
+          absent:  [Bacillus anthracis, Yersinia pestis, Francisella tularensis]
+      expect:
+          # No min_tier yet: the point is to MEASURE how neighbour_ratio moves, and
+          # asserting a tier before that measurement exists would prejudge the D12 fix.
+          - taxon: Bacillus anthracis
+            max_tier: screened_only
+          - taxon: Yersinia pestis
+            max_tier: screened_only
+
+    # -----------------------------------------------------------------------
+    # THE TEN ISOLATES - per-organism ground truth, one organism per library
+    # -----------------------------------------------------------------------
+    # All Illumina HiSeq 1500, paired, VERIFIED 2026-10-03 via the ENA portal API.
+    # Four are on the human watchlist; the rest are the background and filler used above.
     #
-    #   - id: pedestal_background_titration
-    #     kind: lod_series
-    #     Y. pestis held at a FIXED 100 rpm - the level where D12 shows the gate firing -
-    #     while E. coli background is swept across, say, 0 / 0.2 / 2 / 20%. D12 predicts
-    #     best_neighbour_reads for taxid 630 rises with E. coli abundance and approaches
-    #     zero in a clean background. If it stays flat, the diagnosis is wrong.
+    #   ERR2935848  Salmonella enterica         14,269,735 reads  0.91 GB   WATCHLIST
+    #   ERR2935854  Listeria monocytogenes      10,564,043        0.65 GB   WATCHLIST
+    #   ERR2935852  Escherichia coli             7,099,045        0.44 GB   WATCHLIST
+    #   ERR2935856  Cryptococcus neoformans      8,422,093        0.52 GB   WATCHLIST
+    #   ERR2935849  Staphylococcus aureus       17,188,862        1.02 GB
+    #   ERR2935850  Enterococcus faecalis       18,870,511        1.14 GB
+    #   ERR2935851  Bacillus subtilis           23,164,220        1.60 GB
+    #   ERR2935853  Pseudomonas aeruginosa       7,386,928        0.46 GB
+    #   ERR2935855  Saccharomyces cerevisiae    11,944,989        0.75 GB
+    #   ERR2935857  Lactobacillus fermentum     16,379,390        1.07 GB
+    #
+    # A single-organism library is the cleanest possible specificity test: every read has
+    # one correct answer, so any watchlist call other than the organism itself is a false
+    # positive with no ambiguity about truth. Worth running before the community arms.
