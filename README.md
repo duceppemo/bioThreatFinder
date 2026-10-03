@@ -27,8 +27,78 @@ across human, animal and plant health.
 | [`docs/STATUS.md`](docs/STATUS.md) | Session handoff: what is running, environment traps, unresolved questions. |
 
 ```bash
-python3 tests/test_pipeline.py     # 76 fixture-driven checks, ~10 s, no databases
+python3 tests/test_pipeline.py     # 89 fixture-driven checks, ~10 s, no databases
 ```
+
+## Workflow
+
+Processes are named as they appear in the Nextflow trace. `[opt]` is off by default;
+`[per candidate]` fans out to one task per (sample x watchlist candidate).
+
+```text
+  samplesheet.csv ──┬── illumina (paired) ──► FASTP ──┐
+                    └── ont (single)      ──► CHOPPER ─┤
+                                                       ▼
+                                      MINIMAP2_HOST_DEPLETE          pack.yaml
+                                      host reads removed                 │
+                                   ┌───────────┴───────────┐             ▼
+                                   │                       │     RESOLVE_WATCHLIST
+                      qc/host_depletion.tsv          SEQKIT_STATS   name ──► taxid
+                      how much host got through           │         + descendants
+                                                          │               │
+  ═════════ STAGE 1 ─ what MIGHT be here (permissive, any-arm OR) ════════│════════
+                                                          │               │
+                    ┌──────────────┬──────────────┬───────┴──────┐        │
+                    ▼              ▼              ▼              ▼        │
+                 KRAKEN2        SYLPH_PROFILE  METABULI      KRAKENUNIQ   │
+                 + BRACKEN      ANI-based      DNA + AA      distinct     │
+                 (illumina)                    [opt]         k-mers [opt] │
+                    └──────────────┴──────────────┴──────────────┘        │
+                                          │                              │
+                                          ▼                              │
+                                    PARSE_SCREEN ◄───────────────────────┘
+                                    candidates.tsv per sample
+                                          │
+  ═════════ STAGE 2 ─ does the ALIGNMENT hold up? (strict, this decides) ══════════
+                                          │
+                 ┌────────────────────────┴───────────────────┐
+                 ▼                                            ▼
+    MINIMAP2_COMPETITIVE [per candidate]            2b. MARKER TIER
+    target + near neighbours in ONE index           MARKER_ALIGN_NT  (nucleotide)
+                 │                                  MARKER_SEARCH_AA (protein)
+                 │                                          │ hit reads
+                 │                                          ▼
+                 │                                  MARKER_SEARCH_HMM (profile)
+                 ▼                                          │
+          COVERAGE_STATS                                    ▼
+          breadth · window occupancy               MARKER_EVIDENCE
+          depth_cv · identity                      PRESENT / ABSENT / UNKNOWN
+          neighbour_ratio                          per virulence locus
+          masked regions excluded                  (UNKNOWN when depth is too
+                                                    low to call absence)
+                 │                                            │
+                 └────────────────────┬───────────────────────┘
+                                      ▼
+                               SCORE_EVIDENCE
+                               gates + marker rules + control subtraction
+                                      │
+                                      ▼
+                                 findings.tsv
+                     confirmed_in_silico · supported · screened_only
+                     attributed_to_neighbour · suppressed_control
+                     control_background · marker_veto · vaccine_strain
+                     no_reference
+                                      │
+                                      ▼
+                                 MAKE_REPORT
+                          report.html + summary.tsv
+```
+
+Two things the picture is meant to make obvious. Stage 1 is an **OR** across arms — a
+single arm nominating a taxon is enough to carry it forward, because missing a lead is
+worse than carrying a false one into stage 2. And **nothing is reported on stage-1
+evidence alone**: every tier above `screened_only` requires alignment geometry, and for
+the taxa that have rules, marker evidence too.
 
 ## Why two stages
 
