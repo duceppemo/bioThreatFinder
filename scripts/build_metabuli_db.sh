@@ -713,9 +713,18 @@ detect_taxonomy_namespace() {
     # which NCBI never does, so the names file itself is the evidence.
     local d="${1:-}" f names="" requested_gtdb=0
     case "${MODE,,}|${PREBUILT,,}" in *gtdb*) requested_gtdb=1 ;; esac
-    for f in "${d}/taxonomy/names.dmp" "${d}/names.dmp" "${d}/taxonomy/nodes.dmp"; do
+    # The prebuilt archives ship their taxonomy under ncbi-taxdump/, which this list did
+    # not know about - so a correctly unpacked NCBI index was stamped
+    # "NCBI (UNVERIFIED - no taxonomy names file found)" and main.nf:171 then refused to
+    # run on it. Searching for the FILE rather than guessing its directory also covers
+    # whatever the next archive layout calls it.
+    for f in "${d}/taxonomy/names.dmp" "${d}/names.dmp" "${d}/ncbi-taxdump/names.dmp" \
+             "${d}/taxonomy/nodes.dmp"; do
         [[ -s "$f" ]] && { names="$f"; break; }
     done
+    if [[ -z "$names" ]]; then
+        names="$(find "$d" -maxdepth 2 -name names.dmp -size +0 -print -quit 2>/dev/null || true)"
+    fi
     if [[ -n "$names" ]]; then
         if head -c 2000000 "$names" 2>/dev/null \
                 | grep -qE '(^|[|[:space:]])[dpcofgs]__'; then
