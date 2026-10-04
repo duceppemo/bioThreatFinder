@@ -39,12 +39,12 @@ cannot reproduce.
 ## Design: scenarios built to break the tool
 
 A benchmark that spikes targets into a clean background measures almost nothing —
-any tool looks good at 100 RPM of pure *B. anthracis*. The 25 scenarios in
+any tool looks good at 100 RPM of pure *B. anthracis*. The 31 scenarios in
 `benchmarks/scenarios/human_core.yaml` are weighted towards failure modes:
 
 | Kind | n | What it measures |
 |---|---|---|
-| `lod_series` | 6 | Sensitivity and LOD across genome sizes (30 kb virus → 23 Mb parasite), plus a 99.9%-host case |
+| `lod_series` | 12 | Sensitivity and LOD across genome sizes (30 kb virus → 23 Mb parasite), plus a 99.9%-host case |
 | `specificity` | 9 | The near neighbours that actually cause false positives, with the target genuinely **absent** |
 | `marker_ablation` | 3 | Target chromosome **without** its virulence loci |
 | `vaccine` | 4 | BCG, vaccinia, Sabin, RB51 — must read as stand-down, not disease |
@@ -55,7 +55,7 @@ The `exclude_loci` mechanism is what makes the marker scenarios possible: it
 simulates *B. anthracis* chromosome with pXO1/pXO2 **removed**, so alignment
 evidence is overwhelming and the correct answer is still "not confirmed".
 
-23 expectations are machine-checkable, so `evaluate_benchmark.py` exits non-zero
+28 expectations are machine-checkable, so `evaluate_benchmark.py` exits non-zero
 on regression and can gate CI.
 
 ## Semantics, stated explicitly
@@ -208,6 +208,36 @@ more than a missed borderline lead.
 variant*. An aggregate sensitivity figure hides the case where one configuration
 finds the divergent filovirus and another finds the extra *Plasmodium*. That is a
 trade to decide deliberately, not a ranking to read off.
+
+## Results so far (2026-10-04)
+
+The first batch has been run and scored, so this section is no longer hypothetical.
+
+**Limit of detection: 1000 RPM** for *Y. pestis* on Illumina - a cliff, not a gradient
+(0.000 detection at 1/10/100 RPM, 1.000 at 1000 and 10000, with `lod_half_rpm ==
+lod_all_rpm`). The evaluator flags it `coarse - fewer than 5 replicates`.
+
+**sylph alone and Kraken2+sylph give the SAME limit** and the same 6 `confirmed_in_silico`
+findings at PPV 1.000. That is the first empirical read on D2: on this batch the primary arm
+bought no sensitivity. One target, one platform, no divergent agent - so it is a measurement,
+not a verdict.
+
+**What Kraken2 changed was the lower tiers**, and it needed investigation:
+`attributed_to_neighbour` went from 3 calls at PPV 1.000 to 68 at PPV 0.500, holding 6
+truth-present rows the evaluator scores as missed detections. That led to D12 - the
+neighbour denominator is ~98% background cross-mapping and 0% neighbour - and to a
+calibrated pedestal model predicting the cliff at **171-184 RPM**, which the finer grid is
+meant to test. See `docs/validation.md` and D12/D13/D14.
+
+**A false positive the benchmark could not see.** *Toxoplasma gondii* was reported
+`supported` in all 21 samples off 100% human reads, and scored `unlisted` rather than
+`false_positive` because the scenario's `truth.absent` listed 11 taxa by hand and omitted
+it. `truth_absent` is now derived from the watchlist (D14).
+
+**Real-data arms are drafted, not run.** `benchmarks/scenarios/real_mock_communities.yaml`
+covers the ZymoBIOMICS even and log standards on Illumina and ONT, with accessions verified
+against ENA, and `scripts/fetch_mock_communities.py` fetches and verifies them. Nothing has
+been downloaded.
 
 ## Once results exist
 

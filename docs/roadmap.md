@@ -164,9 +164,17 @@ false detections **40-94% with 100% true-positive preservation** (J Clin Microbi
 2026) - described in the second review as a better specificity trade than anything
 available downstream, including assembly; Conterminator-style cross-contamination screening is described as
 table stakes. Independently, Wright et al. 2026 traced an *H. pylori* false positive
-to **phage sequence inside the reference genome itself**. We currently download
-references and use them unmasked, so some of our FP budget is coming from our own
-database. This is probably the single highest-value item left.
+to **phage sequence inside the reference genome itself**.
+
+**DONE 2026-09/10.** `scripts/mask_pack_refs.py` is implemented, run and shipped:
+20,040,144 bp masked across all 359 pack genomes (0.349%), of which 104,404 bp is cloning
+vector in 45 contigs and 81,934 bp is cross-group sequence in 50. The decision is recorded
+as D5. **What is NOT done is the part D13 measured:** masking is detected at
+`min_hit_len=200` / `min_identity=0.95` while reads map at 150 bp on shorter and less
+identical stretches, so it cannot see read-scale recruitment - only 2 of 359 genomes carry
+any host masking at all (2,737 bp), while the *T. gondii* reference absorbs ~5.4% of host
+reads. Read-scale masking parameters are an untried lever with a real sensitivity cost; see
+D13 before pulling it.
 
 ### B. Adopt UKHSA mSCAPE's control vocabulary and spike-in screen
 mSCAPE (the most transparent public-health implementation; pipeline

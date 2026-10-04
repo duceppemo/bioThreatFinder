@@ -4,7 +4,10 @@ What it would take to make output from this pipeline defensible, and which
 authorities apply. Assembled from a 2025–2026 literature and standards review; every
 claim carries its source so it can be checked rather than trusted.
 
-**Status: none of this has been done.** This document is the map, not the territory.
+**Status: partly done.** The normative and regulatory sections below are still a map, not
+the territory - no EQA panel, no reference material, no accreditation work. What HAS been
+done is the simulated-data measurement reported further down: a limit of detection, the
+recruitment and pedestal calibration, and the read attribution behind D12/D13/D14.
 
 ---
 
@@ -268,10 +271,11 @@ measured with `scripts/measure_recruitment.py` at the batch's conditions (150 bp
 a different route from the 12.9x observed in-sample. `scripts/check_pedestal_model.py`
 computes both arms under the coefficient's own `-F 0x904` filter: the neighbour arm predicts
 2,684 against 2,581-2,811 observed (**mean -0.9%**, n=12) and the target arm 205 against
-188-223 (**-0.6%**, n=4). An earlier version of this paragraph credited the script with the
-target arm when that figure was hand-entered, and quoted -3.0% from values measured at
-`-F 0x4` - including supplementary alignments the coefficient excludes. See D14 for the
-full history; several earlier versions of these numbers were wrong, all hand-copied. Consequence:
+**181-238** (**-2.9%**, **n=12**, same samples). Earlier versions of this paragraph quoted
+-3.0% from hand-entered values measured at `-F 0x4`, then -0.6% from four of the twelve
+available BAMs with no record of which four - fixing the filter while leaving the sample
+subset selectable. See D14 for the full history; several earlier versions were wrong, all
+hand-copied. Consequence:
 `neighbour_ratio ~= (true_target + 210) / 2,700`, so the 1.5 threshold needs ~3,840 true
 target reads whether or not a neighbour is present.
 

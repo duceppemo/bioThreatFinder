@@ -28,7 +28,7 @@ across human, animal and plant health.
 
 ```bash
 python3 tests/test_pipeline.py     # 108 checks with samtools on PATH; 89 passed /
-                                   # 2 skipped without it, ~10 s, no databases
+                                   # 2 skipped without it, ~30 s, no databases
 ```
 
 ## Workflow
@@ -400,23 +400,24 @@ genome being masked against something it legitimately resembles.
 
 ### What it actually found
 
-Measured over the built human pack — 359 genomes, 5.3 Gbp:
+Measured over the built human pack — 359 genomes, 5.75 Gbp (recomputed 2026-10-04,
+after taxids 263/264/620/622 were re-masked):
 
 | Source | Masked | Spread |
 |---|---|---|
-| low complexity | 19,864,087 bp | the bulk, as expected |
-| **vector** | **93,882 bp** | **44 contigs** |
-| crossgroup | 79,730 bp | 49 contigs (bacteria 6, fungus 12, parasite 31, virus 0) |
+| low complexity | 19,864,159 bp | the bulk, as expected |
+| **vector** | **104,404 bp** | **45 contigs** |
+| crossgroup | 81,934 bp | 50 contigs (bacteria 7, fungus 12, parasite 31, virus 0) |
 | host | 2,737 bp | 5 contigs |
-| **total** | **20,028,976 bp (0.349%)** | no genome tripped `OVER_MASKED` |
+| **total** | **20,040,144 bp (0.349%)** | no genome tripped `OVER_MASKED` |
 
 Read that honestly. 0.349% is nowhere near the headline 40–94% false-detection
 reduction from the literature, and it should not be: 281 of 363 references here are
 RefSeq **reference-grade complete** assemblies, which are already well curated — the
 *Y. pestis* cross-group run correctly found **0 bp**.
 
-The part that matters is the 93.9 kb of cloning-vector sequence sitting in **44
-reference contigs**, and 79.7 kb of cross-kingdom sequence in 49 more. That is exactly
+The part that matters is the 104.4 kb of cloning-vector sequence sitting in **45
+reference contigs**, and 81.9 kb of cross-kingdom sequence in 50 more. That is exactly
 the mechanism behind the Wright *H. pylori* false positive, and it is now excluded from
 every breadth denominator with the reads reported rather than silently counted. Expect
 the payoff to concentrate in the 40 scaffold- and contig-level assemblies we had to
@@ -652,9 +653,11 @@ homology-based detection cannot see a wholly novel agent.
 
 ## Status
 
-Scaffold complete, databases largely built, **nothing measured**.
+Scaffold complete, databases built, **first measurements in** - a limit of detection, a
+calibrated pedestal model, and three findings serious enough to get their own decision
+entries (D12, D13, D14). Thresholds are still literature defaults, not measured.
 
-`tests/test_pipeline.py` holds 76 fixture-driven checks covering every decision path in
+`tests/test_pipeline.py` holds 108 fixture-driven checks covering every decision path in
 the tiering, marker-gating, confirmation-gate, coverage-metric and screen-parsing logic.
 It caught a real bug on its first run: a broken `elif` chain meant a BCG vaccine strain
 was being reported as `supported` — a possible TB detection — instead of `vaccine_strain`.
@@ -670,18 +673,27 @@ See `docs/verification.md`, which also lists what is **not** verified.
 | Reference masking | complete — 20.0 Mbp masked across 359 genomes |
 | Host genome | T2T-CHM13v2.0 + both presets, 17 GB |
 | Marker DB | 132 built / 13 partial / 9 motif_todo / 5 failed / 4 curation_required |
-| Kraken2 PlusPF | building |
-| KrakenUniq, Metabuli | not built (KrakenUniq opt-in by design; Metabuli pending the bake-off) |
+| Kraken2 PlusPF | **built** 2026-10-02 - `hash.k2d` 123.5 GB, Bracken 100/150/250, `--clean` run (614 -> 233 GB) |
+| Metabuli | **built** 2026-10-04 - prebuilt `refseq_standard`, 110 GB, NCBI taxonomy verified, 62.5 GB peak RSS / 1 m 22 s per sample |
+| KrakenUniq | not built - opt-in by design (D2) |
 
-**What has NOT happened:** no simulated datasets generated, no pipeline run end to end,
-no thresholds measured. Every number in `packs/*/pack.yaml` is a literature default or a
-reasoned guess.
+**What HAS happened:** simulated batches generated, the pipeline run end to end many
+times, and a limit of detection measured (1000 RPM for *Y. pestis* on Illumina; sylph alone
+and Kraken2+sylph give the same answer).
+
+**What has NOT:** no threshold is measured. Every number in `packs/*/pack.yaml` is still a
+literature default or a reasoned guess, and nothing has run on REAL sequencing data -
+`benchmarks/scenarios/real_mock_communities.yaml` is drafted and nothing downloaded.
 
 ### Known gaps
 
-- **Nothing is measured YET.** The harness exists and is self-tested, but no datasets
-  have been generated and no pipeline run has happened, so every threshold is a
-  literature default or a reasoned guess. See `docs/benchmarking.md`.
+- **No threshold is measured yet.** An LoD exists, but every gate in `packs/*/pack.yaml`
+  is still a literature default or a reasoned guess. D12 names the measurement that would
+  set `min_neighbour_ratio` and predicts the cliff at 171-184 RPM; the finer-grid run that
+  would test it has not been done. See `docs/benchmarking.md` and `docs/validation.md`.
+- **Nothing has run on real sequencing data.** Everything measured so far is simulated, so
+  error profiles, adapters and chimeras are modelled rather than observed, and the pipeline
+  has never seen ONT reads at all.
 - ***F. tularensis* vs *F. novicida* cannot currently be discriminated.** Both resolved
   to the same assembly (`GCF_000833355.1`), so the duplicate was dropped from the
   competitive bundle. Needs a curated distinct *F. novicida* assembly. This is the

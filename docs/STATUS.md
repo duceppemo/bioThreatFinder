@@ -16,6 +16,7 @@ tail -f /media/8tb/bioThreatFinder/logs/build_kraken2_<latest>.log
 |---|---|---|
 | **Kraken2 PlusPF build** | **DONE** 2026-10-02 — index + all three Bracken distributions | — |
 | **Marker DB full pass** | **DONE** — 163 rows, `bmand_18S` is `built` | — |
+| **Three-arm bake-off** | **RUNNING** as `systemd --user` unit `btf-lodv3` → `runs/lod_v3_threearm`. Kraken2 + Metabuli + sylph over the same `lod_v1` reads as `runs/lod_v1` (sylph only) and `runs/lod_v2_kraken2`, so all three are comparable | `systemctl --user is-active btf-lodv3`; log path in the unit's output |
 
 **Do not start a second build against a live one.** I did, and the two
 `kraken2-build --download-library bacteria` processes collided on the same staging
@@ -65,7 +66,7 @@ instead.
 |---|---|
 | `taxdump/2026-09-29/` | **pinned**, md5-verified, `PROVENANCE.txt` inside. 3,016,439 nodes |
 | `packs/human/refs/` | 89/89 targets, 359 genomes, 89 competitive bundles + 178 indexes, 43 GB. All bundles verified free of duplicated sequence |
-| `packs/human/refs/masked/` | complete — 20.0 Mbp masked. **Two rows need re-masking: see below.** Per-source byte totals in D5 were double-counted and are upper bounds, not a partition |
+| `packs/human/refs/masked/` | complete — **20,040,144 bp** over 359 genomes (0.349%); vector 104,404 bp / 45 contigs, crossgroup 81,934 / 50, host 2,737 / 5. The two vacuous rows were re-masked 2026-10-04 and both shared-assembly pairs now agree and carry `SHARED_SEQUENCE` flags. Per-source byte totals in D5 were double-counted and are upper bounds, not a partition |
 | `host/human/` | T2T-CHM13v2.0 + sr and map-ont indexes, 17 GB |
 | `packs/human/markers/` | 163 manifest rows; 18 referenced by rules can only be UNKNOWN (5 failed, 4 curation_required, 9 motif_todo) — see the vaccine/veto note below |
 | `kraken2/pluspf/` | **complete** 2026-10-02. `hash.k2d` 123.5 GB, `opts.k2d`, `taxo.k2d`, `seqid2taxid.map`, and `database{100,150,250}mers.kmer_distrib`. k=35, minimizer 31, full-sensitivity (no `--max-db-size`). Built against the pinned 2026-09-29 taxdump, md5-verified. Includes the 5,413 assemblies `kraken2-build` had silently dropped. `--clean` run 2026-10-03: 614 GB -> 233 GB. The remaining 125.5 GB is `database.kraken`, a Bracken BUILD intermediate - query-time Bracken reads only the `.kmer_distrib` files (measured: 0.6 s, 7.4 MB RSS). Keep it only to derive an extra read length without re-classifying the library |
@@ -192,7 +193,10 @@ stays offline and fast by design.
 
 ## Next steps, in order
 
-1. **Run the pipeline end to end.** There is now one usable input: an ART-generated
+1. **DONE.** The pipeline has run end to end many times (`runs/` holds eight completed
+   runs). The original note follows because the ONT half is still true - no ONT data has
+   ever been processed.
+1b. **Run the pipeline end to end.** There is now one usable input: an ART-generated
    Illumina positive control at
    `/media/8tb/bioThreatFinder/simulated/plumbing/` — 2M reads, 5000 rpm *Y. pestis*,
    94.6% host, truth row in `manifest.tsv`. Its ONT partner was cut off by a 1700 s

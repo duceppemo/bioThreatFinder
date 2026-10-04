@@ -79,7 +79,7 @@ def main() -> int:
                     help="Also compute the target arm, from the SAME samples the neighbour "
                          "arm used. The BAM set is derived, not supplied: an earlier "
                          "--attributed-bam let the operator choose, and the published "
-                         "-0.6% came from 4 of 12 available BAMs with no record of which. "
+                         "-0.6%% came from 4 of 12 available BAMs with no record of which. "
                          "Fixing the filter while leaving the subject set selectable moved "
                          "the laundering rather than removing it.")
     ap.add_argument("--organism-prefix", default="NC_002695.2,NC_002127.1,NC_002128.1",
