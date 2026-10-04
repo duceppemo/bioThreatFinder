@@ -72,12 +72,13 @@ def main() -> int:
                     help="component label in the batch JSON for --source")
     ap.add_argument("--bundle", required=True)
     ap.add_argument("--neighbour", required=True)
-    ap.add_argument("--attributed-bam", action="append", default=[],
-                    help="BAM(s) whose TARGET-reference records attributable to --organism "
-                         "are counted HERE, with the same -F 0x904 filter as the "
-                         "coefficient. Repeatable. Replaces a free-text --attributed that "
-                         "accepted bare integers with no filter or provenance - the values "
-                         "passed through it were -F 0x4 and so overstated the error.")
+    ap.add_argument("--target-arm", action="store_true",
+                    help="Also compute the target arm, from the SAME samples the neighbour "
+                         "arm used. The BAM set is derived, not supplied: an earlier "
+                         "--attributed-bam let the operator choose, and the published "
+                         "-0.6% came from 4 of 12 available BAMs with no record of which. "
+                         "Fixing the filter while leaving the subject set selectable moved "
+                         "the laundering rather than removing it.")
     ap.add_argument("--organism-prefix", default="NC_002695.2,NC_002127.1,NC_002128.1",
                     help="comma-separated read-name prefixes identifying --organism reads")
     ap.add_argument("--samtools", default="samtools")
@@ -98,9 +99,12 @@ def main() -> int:
     lens = set()
     for c in cmds:
         for line in open(c):
-            if " -l " in line:
-                parts = line.split()
-                lens.add(parts[parts.index("-l") + 1])
+            if " -l " not in line or "art_illumina" not in line:
+                continue          # only the ART line; a stray `ls -l` must not pollute it
+            parts = line.split()
+            i = parts.index("-l")
+            if i + 1 < len(parts):     # the bounds check added for -m, missing here
+                lens.add(parts[i + 1])
     if not lens:
         die(f"no ART commands found under {a.batch / 'logs'}/*.cmds, so the batch's read "
             f"length is unknown. Previously this printed 'conditions match' and continued, "
@@ -114,8 +118,8 @@ def main() -> int:
     inserts = set()
     for c in cmds:
         for line in open(c):
-            if " -m " not in line:
-                continue
+            if " -m " not in line or "art_illumina" not in line:
+                continue          # `samtools sort -m 4G` in the same log is not an insert
             parts = line.split()
             i = parts.index("-m")
             if i + 1 < len(parts):            # "-m" as the last token was an IndexError
@@ -133,13 +137,22 @@ def main() -> int:
           f"-> conditions match")
 
     rows = []
-    no_organism, no_coverage = 0, []
+    no_organism, no_target, no_coverage = 0, 0, []
     for sample_json in sorted(glob.glob(str(a.batch / "logs" / "*.json"))):
         d = json.load(open(sample_json))
         sample = d["sample"]
+        # Two different questions. The organism supplies the COEFFICIENT's denominator;
+        # the bundle target is what stage 1 must nominate for a coverage TSV to exist. The
+        # previous version tested the organism for both, so six negative controls - which
+        # contain E. coli but never contained the target - were all labelled "stage 1 did
+        # not nominate it".
         has_org = any(c.get("label") == a.organism for c in d["components"])
+        has_target = any(c.get("kind") in ("spike", "target") for c in d["components"])
         if not has_org:
             no_organism += 1
+            continue
+        if not has_target:
+            no_target += 1
             continue
         cov = a.run / "confirm" / f"{sample}.{a.bundle}.coverage.tsv"
         if not cov.exists():
@@ -172,24 +185,33 @@ def main() -> int:
     print(f"\n{'sample':<42} {'src reads':>10} {'pred nb':>8} {'obs nb':>7} {'err':>7}")
     errs = []
     for s, src, pred_nb, obs_nb, _ in rows:
+        if obs_nb == 0:
+            die(f"{s}: best_neighbour_reads is 0, so a relative error is undefined. This "
+                f"is a real value - every negative 5811 row has it - not a parse failure.")
         e = pred_nb / obs_nb - 1
         errs.append(e)
         print(f"{s:<42} {src:>10,} {pred_nb:>8.0f} {obs_nb:>7,} {e:>+6.1%}")
     mean = sum(errs) / len(errs)
     print(f"\nNEIGHBOUR ARM: mean error {mean:+.1%} over {len(errs)} sample(s)")
-    print(f"  skipped: {no_organism} with no {a.organism} component at all; "
-          f"{len(no_coverage)} with the organism but no {a.bundle} coverage TSV "
-          f"(stage 1 did not nominate it): {', '.join(no_coverage) or 'none'}")
+    print(f"  skipped: {no_organism} with no {a.organism} component; "
+          f"{no_target} with no spiked target at all (negative controls); "
+          f"{len(no_coverage)} spiked but with no {a.bundle} coverage TSV - stage 1 did not "
+          f"nominate it: {', '.join(no_coverage) or 'none'}")
 
     # The target arm is reported too. Quoting only the arm that agrees is how a model gets
     # called calibrated when half of it is not.
     tgt_pred = sum(r[4] for r in rows) / len(rows)
     print(f"TARGET ARM:    predicted {tgt_pred:.0f} records on ref {a.bundle} per sample.")
-    if a.attributed_bam:
+    if a.target_arm:
         import subprocess
         prefixes = tuple(a.organism_prefix.split(","))
-        obs_t = []
-        for bam in a.attributed_bam:
+        obs_t, used = [], []
+        bams = [a.run / "minimap2_competitive" / f"{s}.{a.bundle}.bam" for s, *_ in rows]
+        missing = [b.name for b in bams if not b.exists()]
+        if missing:
+            die(f"target arm needs one BAM per neighbour-arm sample; missing: "
+                f"{', '.join(missing)}")
+        for bam in map(str, bams):
             refs = [ln.split("\t")[0] for ln in subprocess.run(
                 [a.samtools, "idxstats", bam], capture_output=True, text=True,
                 check=True).stdout.splitlines()
@@ -203,15 +225,15 @@ def main() -> int:
                 [a.samtools, "view", "-q", str(int(cond["mapq_min"])), "-F", "0x904", bam]
                 + refs, capture_output=True, text=True, check=True).stdout.splitlines()
             obs_t.append(sum(1 for ln in lines if ln.startswith(prefixes)))
+            used.append(Path(bam).name)
         m = sum(obs_t) / len(obs_t)
         print(f"               observed {min(obs_t)}-{max(obs_t)} (mean {m:.1f}, "
-              f"n={len(obs_t)}, counted here at -F 0x904 MAPQ>={cond['mapq_min']}) "
-              f"-> {tgt_pred / m - 1:+.1%}")
+              f"n={len(obs_t)}, same samples as the neighbour arm, counted here at "
+              f"-F 0x904 MAPQ>={cond['mapq_min']}) -> {tgt_pred / m - 1:+.1%}")
     else:
-        print("               NOT COMPARED: the coverage TSV does not separate which of "
-              "the target's reads came from the background organism. Pass --attributed-bam "
-              "so the observation is counted here under the coefficient's own filter; do "
-              "not quote a target-arm error from a hand-entered number.")
+        print("               NOT COMPARED: pass --target-arm. The coverage TSV does not "
+              "separate which of the target's reads came from the background organism, so "
+              "it is counted from the BAMs of the same samples under the same filter.")
     return 0
 
 

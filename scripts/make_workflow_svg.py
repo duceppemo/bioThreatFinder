@@ -239,8 +239,10 @@ def build(theme: str) -> str:
     # endpoint (W-28 = 1112) rather than exactly on it.
     # Three things to miss on the way: the dashed qc/ box border (y=184), the band notes
     # (baseline y=206, right-aligned to x=1104) and the band rules (which end at W-28=1112).
-    # So: leave the host box bottom, run at y=192 ABOVE the notes, and drop at x=1124 beyond
-    # every rule endpoint.
+    # So: leave the host box bottom at x=560 - to the RIGHT of the main flow at x=470, so it
+    # never crosses it - run at y=192 ABOVE the notes, and drop at x=1124 beyond every rule
+    # endpoint. Verified by rendering; two earlier routes each traded one collision for
+    # another.
     g.path("M560 184 V192 H1124 V446 H1040 V458", stroke=c["muted"], dash="4 3",
            arrow="muted")
     g.text(1118, 320, "per sample,", size=9, fill=c["muted"], anchor="end", font=SANS)

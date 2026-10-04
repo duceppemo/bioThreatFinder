@@ -442,7 +442,9 @@ far less identical stretches than a 200 bp 95%-identity alignment. The result pa
 * *T. gondii*: **1,982 bp** host-masked on a 65.7 Mb genome
 * **2 of 359 genomes** have ANY host masking at all, 2,737 bp in total
 * `crossgroup` is **0 bp for the two references this entry turns on** (630 and 632), and
-  pack-wide only 20 of 359 genomes carry any at all (81,565 bp). It compares only across
+  pack-wide only 20 of 359 genomes carry any at all (81,565 bp as the mask manifest totals
+  it; `README.md` reports 79,730 bp over 19 genomes because it excludes `620_Shigella`, whose
+  BED is byte-identical to `622_Shigella_dysenteriae` - same assembly, two watchlist rows). It compares only across
   distant GROUPS by design, so bacteria-vs-bacteria recruitment is invisible to it - note
   *S. dysenteriae* (622), in the table above, does carry 2,204 bp of crossgroup from
   non-bacterial sources, so "0 bp for every genome checked" as this entry once read was
@@ -488,9 +490,11 @@ containing no parasite at all, *Toxoplasma gondii* is reported at tier **`suppor
 Every gate passes except `depth_cv`. That single threshold is the only thing between this
 and `confirmed_in_silico` for a notifiable agent.
 
-**The reads are 100% human.** Read attribution on the bundle BAM: of 8,380 reads on the
-*T. gondii* reference at MAPQ>=10, **8,380 come from T2T human chromosomes** (NC_0609*).
-Not a majority - all of them. 44% of a 65 Mb parasite genome is "covered" at 96.5% window
+**The reads are 100% human.** Read attribution on the bundle BAM: of **8,318** records on the
+*T. gondii* reference at MAPQ>=10 primary, **8,318 come from T2T human chromosomes**
+(NC_0609*). Not a majority - all of them. (An earlier version of this paragraph said 8,380,
+which is the `-F 0x4` count including supplementary alignments - the same unit error this
+entry retracts further down. It was corrected in the retraction and left standing here.) 44% of a 65 Mb parasite genome is "covered" at 96.5% window
 occupancy and 98.1% identity by host reads that survived depletion.
 
 **It is systematic, not a *T. gondii* quirk.** Measured recruitment per million human reads
@@ -586,30 +590,34 @@ that arm predicts within 1% while the host arm was out by 7x.
 
 **The predictive model holds on both arms**, both computed by
 `scripts/check_pedestal_model.py`. The neighbour arm covers the 12 samples with a 632
-coverage TSV; the script now reports its skips by reason - 9 samples lack one, of which only
-the three `rpm1` are "stage 1 did not nominate it" and the other six are negative controls
-that never contained *Y. pestis*. An earlier version said "3 skipped", a number the script
-never printed. The target arm is counted from the BAMs via `--attributed-bam`, because the
+coverage TSV, and the script PRINTS its skips by reason: 6 negative controls that never
+contained *Y. pestis*, and 3 `rpm1` samples that did but which stage 1 never nominated. An
+earlier version of this paragraph asserted that 3/6 split while the script, testing the wrong
+component field, printed all 9 under "stage 1 did not nominate it". The target arm is counted from the BAMs via `--attributed-bam`, because the
 coverage TSV does not separate which of the target's reads came from *E. coli*; it replaced
 a free-text flag that accepted bare integers with no filter or provenance.
 
     coefficient @150 bp, insert 350, MAPQ>=10, over 10^6 source reads
       E. coli -> ref 630 (neighbour)   3,355 rpm
       E. coli -> ref 632 (target)        256 rpm
-    source reads   800,000  (component JSON: 400,000 E. coli PAIRS x 2)
+    source reads   799,992  (component JSON reads_generated: 399,996 PAIRS x 2;
+                              reads_requested is 400,000 - the plan, not the result)
 
     NEIGHBOUR ARM  predicted 2,684  vs observed 2,581-2,811   mean error  -0.9%  (n=12)
-    TARGET ARM     predicted   205  vs observed   188-223      mean error  -0.6%  (n=4)
+    TARGET ARM     predicted   205  vs observed   181-238      mean error  -2.9%  (n=12)
 
-Both arms are now counted by the script under the coefficient's own `-F 0x904` filter. The
-target arm was previously quoted as -3.0% from four hand-entered values that were measured
-at `-F 0x4` - i.e. including the supplementary alignments the coefficient excludes, the same
-unit error this entry documents for the host numerator. Matched, the figures are 188/214/199/223
-and the error is -0.6%.
+Both arms are counted by the script, under the coefficient's own `-F 0x904` filter, over the
+SAME 12 samples. Two earlier versions of the target arm were wrong in different ways: -3.0%
+from four hand-entered values measured at `-F 0x4` (including the supplementary alignments
+the coefficient excludes), then **-0.6% from four of the twelve available BAMs with no record
+of which four**. Fixing the filter while leaving the operator free to choose the samples moved
+the laundering rather than removing it, so the script now DERIVES the BAM set from the samples
+it just averaged - the two arms cannot silently differ in subject.
 
 So `pedestal = recruitment_rpm x source_reads` is calibrated, within ~3% on both arms. The
-target arm is reported deliberately: an earlier version of this entry quoted only the
-neighbour arm, which is how a half-calibrated model gets called calibrated.
+target arm is reported deliberately: an earlier version quoted only the neighbour arm, which
+is how a half-calibrated model gets called calibrated - and a later one quoted the target arm
+from a subset, which is how it gets called better-calibrated than it is.
 
 Four claims about this one number were published before this one, and three were wrong:
 `276a3f1` "within 8%" (right by accident - a 2x unit error cancelling a 0.81x denominator

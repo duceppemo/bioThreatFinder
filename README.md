@@ -27,8 +27,8 @@ across human, animal and plant health.
 | [`docs/STATUS.md`](docs/STATUS.md) | Session handoff: what is running, environment traps, unresolved questions. |
 
 ```bash
-python3 tests/test_pipeline.py     # 108 checks (89 without samtools on PATH -
-                                   #  19 skip), ~10 s, no databases
+python3 tests/test_pipeline.py     # 108 checks with samtools on PATH; 89 passed /
+                                   # 2 skipped without it, ~10 s, no databases
 ```
 
 ## Workflow
@@ -80,10 +80,11 @@ rather than to the agent; that split is what `neighbour_ratio` measures. Nothing
                                           │
   ═════════ STAGE 2 ─ does the ALIGNMENT hold up? (strict, this decides) ══════════
                                           │
-                 │     clean reads ──────────────────────────┐ per sample,
-                 │     (from host depletion, main.nf:506)     │ not per candidate
-                 ▼                                            ▼
+                 ▼
     MINIMAP2_COMPETITIVE [per candidate]            2b. MARKER TIER
+                                                    ▲
+    clean reads (main.nf:340) ──────────────────────┘
+    per sample, not per candidate
     target + near neighbours in ONE index           MARKER_ALIGN_NT  (nucleotide)
                  │                                  MARKER_SEARCH_AA (protein)
                  │                                          │ hit reads

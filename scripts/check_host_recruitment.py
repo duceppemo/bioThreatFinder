@@ -104,12 +104,6 @@ def main() -> int:
         capture_output=True, text=True, check=True).stdout
     recs = out.splitlines()
     host_recs = sum(1 for ln in recs if ln.startswith(a.host_prefix))
-    if not host_recs:
-        die(f"0 of {len(recs):,} records carry the --host-prefix {a.host_prefix!r}. Either "
-            f"the prefix is wrong for this host assembly (CHM13v2.0 contigs are NC_0609*, "
-            f"but a GRCh38 batch is NC_0000* and chrM is NC_012920.1) or the host truly "
-            f"contributes nothing. Refusing to report 0.0%, which looks identical to a "
-            f"reference that recruits no host at all.")
 
     # EXACT denominator: every screened read appears once as a primary record in this BAM.
     allrec = subprocess.run(
@@ -119,6 +113,15 @@ def main() -> int:
         die(f"BAM holds {len(allrec):,} primary records but total_reads_screened is "
             f"{screened:,}; they must match for the exact denominator to be valid.")
     residual_exact = sum(1 for ln in allrec if ln.startswith(a.host_prefix))
+    # The guard belongs HERE, on the denominator, not on the numerator. Testing host_recs
+    # rejected the common correct answer - 7 of this sample's 8 bundles legitimately recruit
+    # ZERO host reads, which is the whole point of D13's table. What is never legitimate is a
+    # prefix that matches nothing in the sample at all.
+    if residual_exact == 0:
+        die(f"--host-prefix {a.host_prefix!r} matches none of the {len(allrec):,} records in "
+            f"this sample, so it cannot be the host naming for this batch (CHM13v2.0 is "
+            f"NC_0609*; a GRCh38 analysis set is NC_0000* plus chrM NC_012920.1). A "
+            f"zero-recruitment ANSWER is fine; a prefix that matches nothing is not.")
     if residual_exact < residual_floor:
         die(f"exact residual {residual_exact:,} is below the floor {residual_floor:,}, "
             f"which is impossible - one of the two is miscounted.")
