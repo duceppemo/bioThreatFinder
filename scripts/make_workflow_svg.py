@@ -185,6 +185,19 @@ def check(g: "Canvas") -> list[str]:
             if inter(a, b):
                 bad.append(f"text {a[4]!r} overlaps {b[4]!r}")
 
+    # Text that STRADDLES a box edge without being centred inside it was invisible to the
+    # containment test above - which is precisely how "hit reads" came to sit across both
+    # marker boxes in an 8 px gap.
+    for t in g.texts:
+        tx, ty, tw, th, label = t
+        cxm, cym = tx + tw / 2, ty + th / 2
+        for r in g.solid:
+            rx, ry, rw, rh = r
+            inside = rx <= cxm <= rx + rw and ry <= cym <= ry + rh
+            if not inside and inter(t, r):
+                bad.append(f"text {label!r} straddles the edge of box "
+                           f"({rx},{ry},{rw},{rh})")
+
     pad = 2.0   # a segment grazing an edge is attachment, not a crossing
     for (x1, y1, x2, y2) in g.segs:
         for (rx, ry, rw, rh) in g.solid:
@@ -212,16 +225,20 @@ def build(theme: str) -> str:
     g.box(40, 44, 190, 40)
     g.text(135, 69, "samplesheet.csv", size=15)
 
-    g.box(cx - 190, 26, 190, 36, fill=c["panel"])
-    g.text(cx - 95, 49, "FASTP", size=15)
-    g.text(cx - 16, 49, "illumina", size=12, fill=c["muted"], anchor="end", font=SANS)
-    g.box(cx - 190, 72, 190, 36, fill=c["panel"])
-    g.text(cx - 95, 95, "CHOPPER", size=15)
-    g.text(cx - 16, 95, "ont", size=12, fill=c["muted"], anchor="end", font=SANS)
+    g.box(cx - 200, 26, 190, 36, fill=c["panel"])
+    g.text(cx - 105, 49, "FASTP", size=15)
+    g.text(cx - 26, 49, "illumina", size=12, fill=c["muted"], anchor="end", font=SANS)
+    g.box(cx - 200, 72, 190, 36, fill=c["panel"])
+    g.text(cx - 105, 95, "CHOPPER", size=15)
+    g.text(cx - 26, 95, "ont", size=12, fill=c["muted"], anchor="end", font=SANS)
 
-    g.path(f"M230 64 H258 V44 H{cx - 190}", arrow="ink")
-    g.path(f"M230 64 H258 V90 H{cx - 190}", arrow="ink")
+    g.path(f"M230 64 H258 V44 H{cx - 200}", arrow="ink")
+    g.path(f"M230 64 H258 V90 H{cx - 200}", arrow="ink")
     g.text(254, 20, "by platform", size=12, fill=c["muted"], anchor="start", font=SANS)
+    # The merge bus runs 30 px clear of the trim boxes' right border (they end at cx-10),
+    # with a stub from each. Drawn at cx it coincided with both box edges.
+    g.line(cx - 10, 44, cx, 44, stroke=c["ink"], sw=1.4)
+    g.line(cx - 10, 90, cx, 90, stroke=c["ink"], sw=1.4)
     g.line(cx, 44, cx, 90, stroke=c["ink"], sw=1.4)
 
     # ---- host depletion + its QC artifact -------------------------------------
@@ -304,21 +321,23 @@ def build(theme: str) -> str:
 
     for i, (name, kind) in enumerate([("MARKER_ALIGN_NT", "nucleotide"),
                                       ("MARKER_SEARCH_AA", "protein")]):
-        g.box(620, 498 + i * 44, 300, 36, fill=c["panel"])
-        g.text(640, 521 + i * 44, name, size=13, anchor="start")
-        g.text(900, 521 + i * 44, kind, size=12, fill=c["muted"], anchor="end", font=SANS)
-    g.box(620, 586, 300, 36, fill=c["panel"])
-    g.text(640, 609, "MARKER_SEARCH_HMM", size=13, anchor="start")
-    g.text(900, 609, "profile", size=12, fill=c["muted"], anchor="end", font=SANS)
-    g.path("M700 578 V586", arrow="muted", stroke=c["muted"], sw=1.2)
-    g.text(712, 584, "hit reads", size=11, fill=c["muted"], anchor="start", font=SANS)
+        g.box(620, 494 + i * 48, 300, 36, fill=c["panel"])
+        g.text(640, 517 + i * 48, name, size=13, anchor="start")
+        g.text(900, 517 + i * 48, kind, size=12, fill=c["muted"], anchor="end", font=SANS)
+    # 22 px of clear air between AA and HMM: the arrow plus its label need it, and at the
+    # old 8 px pitch "hit reads" overlapped both boxes.
+    g.box(620, 612, 300, 36, fill=c["panel"])
+    g.text(640, 635, "MARKER_SEARCH_HMM", size=13, anchor="start")
+    g.text(900, 635, "profile", size=12, fill=c["muted"], anchor="end", font=SANS)
+    g.path("M680 578 V612", arrow="muted", stroke=c["muted"], sw=1.2)
+    g.text(694, 600, "hit reads", size=11, fill=c["muted"], anchor="start", font=SANS)
 
-    g.box(950, 498, 110, 124, fill=c["accent_fill"], stroke=c["accent"])
-    g.text(1005, 540, "PRESENT", size=12, fill=c["ink"])
-    g.text(1005, 562, "ABSENT", size=12, fill=c["ink"])
-    g.text(1005, 584, "UNKNOWN", size=12, fill=c["accent"])
-    g.text(1005, 520, "three-valued", size=11, fill=c["muted"], font=SANS)
-    g.line(920, 560, 950, 560, stroke=c["muted"], sw=1.2, arrow="muted")
+    g.box(950, 494, 110, 154, fill=c["accent_fill"], stroke=c["accent"])
+    g.text(1005, 554, "PRESENT", size=12, fill=c["ink"])
+    g.text(1005, 580, "ABSENT", size=12, fill=c["ink"])
+    g.text(1005, 606, "UNKNOWN", size=12, fill=c["accent"])
+    g.text(1005, 522, "three-valued", size=11, fill=c["muted"], font=SANS)
+    g.line(920, 571, 950, 571, stroke=c["muted"], sw=1.2, arrow="muted")
 
     # Stage 2's two halves take DIFFERENT inputs. The competitive alignment is per
     # candidate and follows PARSE_SCREEN; the marker tier runs once per SAMPLE straight off
