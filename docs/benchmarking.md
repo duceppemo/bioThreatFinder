@@ -229,6 +229,36 @@ neighbour denominator is ~98% background cross-mapping and 0% neighbour - and to
 calibrated pedestal model predicting the cliff at **171-184 RPM**, which the finer grid is
 meant to test. See `docs/validation.md` and D12/D13/D14.
 
+**The Metabuli arm changed nothing on this batch, and the batch cannot test it.**
+`runs/lod_v3_threearm` ran Kraken2 + Metabuli + sylph over the same 21 samples as
+`runs/lod_v2_kraken2`. All 21 Metabuli tasks completed, every report non-empty. Then:
+
+- **Identical limit of detection.** Both classifier arms raised the spike at 10 RPM and
+  above and neither raised it at 1 RPM. sylph only from 100 RPM.
+- **Metabuli raised ZERO candidates Kraken2 did not** (178 candidate rows). Kraken2 raised
+  8 alone, all false positives.
+- **Zero decisions changed.** `findings.tsv` is identical across the two runs in every
+  scored column: 178 rows, same row set, `tier` differing in **0** of them. Only
+  bookkeeping columns move (`n_classifiers`, `classifiers`, `screen_reads`, `reasons`,
+  `mapped_fraction_of_assigned`).
+- **It does not rescue the Toxoplasma false positive, it endorses it.** All 18 `supported`
+  rows - the only false positives reaching an actionable tier - are *T. gondii*, and
+  Metabuli corroborates **14 of 18** (`n_classifiers=2`). A 2-of-N classifier rule would
+  therefore NOT suppress D14. This is worth stating plainly because the opposite is the
+  intuitive guess.
+- **Cost:** 466 CPU-minutes over 21 samples (22.2/sample) and 70 GB peak RSS, against
+  Kraken2's 1.0 CPU-minute/sample - about **22x the CPU for no change in output**. Plus a
+  110 GB index, and it forced `MINIMAP2_HOST_DEPLETE` to `maxForks 1` to fit the box.
+
+THIS IS NOT A VERDICT ON METABULI, because `lod_gram_negative` spikes *Y. pestis* drawn
+from the pack's OWN reference - 100% identity to the database. The arm exists for divergent
+and novel agents where nucleotide k-mers fail and protein space is conserved, and a target
+at 100% identity cannot exercise that. The table above already says to judge
+`plus_metabuli` on the `divergent_*` scenarios; this result is the control arm of that
+comparison, not the comparison. Until `divergent_bundibugyo_filovirus` and
+`divergent_clostridium_bont` are simulated and run, the arm's value proposition is
+UNTESTED - and on identity-matched targets it is pure cost.
+
 **A false positive the benchmark could not see.** *Toxoplasma gondii* was reported
 `supported` in all 21 samples off 100% human reads, and scored `unlisted` rather than
 `false_positive` because the scenario's `truth.absent` listed 11 taxa by hand and omitted
