@@ -408,20 +408,28 @@ Reads at MAPQ>=10 on each TARGET reference, by true origin:
 
 | taxid | taxon | reads on target | dominant true origin |
 |---|---|---|---|
-| 5811 | *Toxoplasma gondii* | **8,318** | **human** NC_060925.1 / 060933.1 / 060943.1 |
-| 487 | *Neisseria meningitidis* | 317 | *H. haemolyticus* (275), *E. coli* (42) |
+| 5811 | *Toxoplasma gondii* | **8,310** | **human** NC_060925.1 / 060933.1 / 060943.1 |
+| 487 | *Neisseria meningitidis* | 319 | *H. haemolyticus* (275), *E. coli* (42), *N. lactamica* (2) |
 | 1392 | *Bacillus anthracis* | 66 | *L. innocua* (64) |
 | 1639 | *Listeria monocytogenes* | 45 | *B. thuringiensis* (45) |
 | 622 | *Shigella dysenteriae* | 61 | *E. coli* (60) |
-| 28901 | *Salmonella enterica* | 23 | *H. haemolyticus* (20) |
+| 28901 | *Salmonella enterica* | 22 | *H. haemolyticus* (20) |
+
+Every cell is `unique_reads` from that sample's coverage TSV, i.e. MAPQ>=10 primary with
+masked-region reads excluded - the quantity the pipeline actually gates on. Earlier versions
+mixed units across the rows: 24,101 (any-MAPQ, with supplementary) for 5811, 317 for 487
+(the sum of two of its three origins) and 23 for 28901 (a value in no replicate).
 
 The *T. gondii* reference is a **human-read sink**: 8,318 host reads that survived depletion
 map to it at MAPQ>=10, **26x** what the worst bacterial reference recruits (319 onto
-*N. meningitidis*). An earlier version of this table put 24,101 in that cell and claimed
+*N. meningitidis*; 8,310/319 = 26.0). An earlier version of this table put 24,101 in that cell and claimed
 "three orders of magnitude" - that figure was counted at ANY MAPQ including supplementary
 alignments while every bacterial row beside it was MAPQ>=10 primary, so the comparison was a
-unit artifact. All rows are now MAPQ>=10 primary. Its neighbour side holds 33 reads, so `neighbour_ratio` is **730** and
-the neighbour gate offers no protection whatsoever. Breadth, occupancy and identity are
+unit artifact. All rows are now MAPQ>=10 primary. Its neighbour side holds **0** reads at MAPQ>=10 primary, so `neighbour_ratio` is
+**`inf`** - which is what the pipeline's own TSVs record in 17 of 18 negative 5811 rows - and
+the neighbour gate offers no protection whatsoever. An earlier version said "33 reads, so
+730"; both halves were any-MAPQ figures left behind when the table cell beside them was
+corrected to MAPQ>=10 primary. Breadth, occupancy and identity are
 what actually hold the line - the specificity table shows 0.000 false positives - so this
 is a redundancy that is doing nothing, not an active false positive.
 
@@ -433,8 +441,12 @@ far less identical stretches than a 200 bp 95%-identity alignment. The result pa
 
 * *T. gondii*: **1,982 bp** host-masked on a 65.7 Mb genome
 * **2 of 359 genomes** have ANY host masking at all, 2,737 bp in total
-* `crossgroup` is **0 bp** for every genome checked, because it compares only across
-  distant groups by design
+* `crossgroup` is **0 bp for the two references this entry turns on** (630 and 632), and
+  pack-wide only 20 of 359 genomes carry any at all (81,565 bp). It compares only across
+  distant GROUPS by design, so bacteria-vs-bacteria recruitment is invisible to it - note
+  *S. dysenteriae* (622), in the table above, does carry 2,204 bp of crossgroup from
+  non-bacterial sources, so "0 bp for every genome checked" as this entry once read was
+  wrong
 
 So the masking step cannot see read-scale recruitment. This is a scale mismatch, not a
 missing source.
@@ -553,15 +565,17 @@ the sample's entire non-host remainder. The replacement then said "residual huma
 code and the filters forced to match:
 
     screened records           1,980,236
-    non-host generated         1,956,528   (978,264 pairs x 2)
-    residual host FLOOR           23,708
+    residual host EXACT           24,708   host-origin primary records in the BAM
     records on ref 5811            8,318   MAPQ>=10, primary, all host-origin
     whole-genome coefficient        5.43%  (150 bp, insert 350, MAPQ>=10)
-    in-pipeline rate CEILING        35.1%
-    enrichment CEILING               6.5x
+    in-pipeline rate EXACT          33.7%
+    enrichment EXACT                 6.2x
 
-Both in-pipeline figures are **ceilings**, because the denominator is a floor. The
-qualitative finding does not depend on the exact value, and it has a mechanism: survivors of host depletion are **not a random sample of host reads**. They are
+A third version of this paragraph reported 35.1% / 6.5x as CEILINGS against a floor of
+23,708, and its script asserted the exact count was unknowable because "the surviving reads
+are not labelled". They are labelled - the numerator depends on that label - and the BAM
+already open holds every screened read as a primary record, so one more pass gives the exact
+denominator. The floor is still computed as a cross-check. The mechanism: survivors of host depletion are **not a random sample of host reads**. They are
 precisely the reads that failed to map to CHM13 - repetitive, divergent, low-complexity -
 which is the same class that cross-maps to a 65 Mb parasite genome.
 `measure_recruitment.py` simulates from the whole host genome with no depletion step, so
@@ -570,22 +584,28 @@ be inverted**, and "recruitment scales linearly with whatever survives" is wrong
 host arm. It holds for *E. coli*, which passes depletion untouched - which is exactly why
 that arm predicts within 1% while the host arm was out by 7x.
 
-**The predictive model holds on both arms.** The neighbour arm is computed by
-`scripts/check_pedestal_model.py` over the 12 of 15 *Y. pestis* samples that have a 632
-coverage TSV - stage 1 never nominated the taxon in the three rpm1 samples, and the script
-now reports that skip rather than hiding it. The target arm is NOT computed by that script:
-the coverage TSV does not separate which of the target's reads came from *E. coli*, so the
-observed value comes from D12's read attribution (4 samples: 191, 202, 222, 230) and must be
-passed in with `--attributed`. An earlier version of this entry said the script computed
-both, which was false.
+**The predictive model holds on both arms**, both computed by
+`scripts/check_pedestal_model.py`. The neighbour arm covers the 12 samples with a 632
+coverage TSV; the script now reports its skips by reason - 9 samples lack one, of which only
+the three `rpm1` are "stage 1 did not nominate it" and the other six are negative controls
+that never contained *Y. pestis*. An earlier version said "3 skipped", a number the script
+never printed. The target arm is counted from the BAMs via `--attributed-bam`, because the
+coverage TSV does not separate which of the target's reads came from *E. coli*; it replaced
+a free-text flag that accepted bare integers with no filter or provenance.
 
     coefficient @150 bp, insert 350, MAPQ>=10, over 10^6 source reads
       E. coli -> ref 630 (neighbour)   3,355 rpm
       E. coli -> ref 632 (target)        256 rpm
     source reads   800,000  (component JSON: 400,000 E. coli PAIRS x 2)
 
-    NEIGHBOUR ARM  predicted 2,684  vs observed 2,581-2,811   mean error  -0.9%  (n=12, script)
-    TARGET ARM     predicted   205  vs attributed 191/202/222/230       -3.0%  (n=4, read attribution)
+    NEIGHBOUR ARM  predicted 2,684  vs observed 2,581-2,811   mean error  -0.9%  (n=12)
+    TARGET ARM     predicted   205  vs observed   188-223      mean error  -0.6%  (n=4)
+
+Both arms are now counted by the script under the coefficient's own `-F 0x904` filter. The
+target arm was previously quoted as -3.0% from four hand-entered values that were measured
+at `-F 0x4` - i.e. including the supplementary alignments the coefficient excludes, the same
+unit error this entry documents for the host numerator. Matched, the figures are 188/214/199/223
+and the error is -0.6%.
 
 So `pedestal = recruitment_rpm x source_reads` is calibrated, within ~3% on both arms. The
 target arm is reported deliberately: an earlier version of this entry quoted only the

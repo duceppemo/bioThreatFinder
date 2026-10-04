@@ -29,7 +29,7 @@ WHAT IT REFUSES TO DO
   entire non-host remainder. The host arm is reported as an OBSERVED rate, never inverted.
 
     python3 scripts/check_pedestal_model.py \\
-        --matrix /media/8tb/bioThreatFinder/benchmarks/recruitment_matrix_150bp.tsv \\
+        --matrix /media/8tb/bioThreatFinder/benchmarks/recruitment_150bp_key.tsv \\
         --batch  /media/8tb/bioThreatFinder/simulated/lod_v1 \\
         --run    /media/8tb/bioThreatFinder/runs/lod_v2_kraken2 \\
         --source 562_Escherichia_coli.fna.gz --bundle 632 --neighbour 630
@@ -72,9 +72,15 @@ def main() -> int:
                     help="component label in the batch JSON for --source")
     ap.add_argument("--bundle", required=True)
     ap.add_argument("--neighbour", required=True)
-    ap.add_argument("--attributed", help="comma-separated observed records on the TARGET "
-                    "reference attributable to --organism, from read attribution. Without "
-                    "it the target arm is reported as not compared.")
+    ap.add_argument("--attributed-bam", action="append", default=[],
+                    help="BAM(s) whose TARGET-reference records attributable to --organism "
+                         "are counted HERE, with the same -F 0x904 filter as the "
+                         "coefficient. Repeatable. Replaces a free-text --attributed that "
+                         "accepted bare integers with no filter or provenance - the values "
+                         "passed through it were -F 0x4 and so overstated the error.")
+    ap.add_argument("--organism-prefix", default="NC_002695.2,NC_002127.1,NC_002128.1",
+                    help="comma-separated read-name prefixes identifying --organism reads")
+    ap.add_argument("--samtools", default="samtools")
     a = ap.parse_args()
 
     refs = load_matrix(a.matrix, a.source, a.bundle)
@@ -108,21 +114,36 @@ def main() -> int:
     inserts = set()
     for c in cmds:
         for line in open(c):
+            if " -m " not in line:
+                continue
             parts = line.split()
-            if "-m" in parts:
-                inserts.add(parts[parts.index("-m") + 1])
-    if inserts and str(cond.get("insert_mean", "")) not in inserts:
+            i = parts.index("-m")
+            if i + 1 < len(parts):            # "-m" as the last token was an IndexError
+                inserts.add(parts[i + 1])
+    # Equality, not membership, and fatal when undeterminable - the read-length guard was
+    # fixed this way and the insert guard was left with both holes: a batch with no -m at
+    # all printed "conditions match", and mixed inserts passed because one of them matched.
+    if not inserts:
+        die(f"no -m (insert size) found in {a.batch / 'logs'}/*.cmds, so the batch's "
+            f"fragment regime is unknown. Insert alone moves coefficients 10-28%.")
+    if {str(cond.get("insert_mean", ""))} != inserts:
         die(f"coefficient measured at insert {cond.get('insert_mean')} but the batch used "
             f"{sorted(inserts)}. That alone moves coefficients by 10-28%.")
     print(f"  batch simulated at {sorted(lens)} bp, insert {sorted(inserts) or ['?']} "
           f"-> conditions match")
 
     rows = []
+    no_organism, no_coverage = 0, []
     for sample_json in sorted(glob.glob(str(a.batch / "logs" / "*.json"))):
         d = json.load(open(sample_json))
         sample = d["sample"]
+        has_org = any(c.get("label") == a.organism for c in d["components"])
+        if not has_org:
+            no_organism += 1
+            continue
         cov = a.run / "confirm" / f"{sample}.{a.bundle}.coverage.tsv"
         if not cov.exists():
+            no_coverage.append(sample)
             continue
         # reads_generated is what ART actually produced; reads_requested is the plan.
         # There is no reads_actual - an earlier version looked for it and so always
@@ -142,7 +163,9 @@ def main() -> int:
                      float(refs[a.neighbour]["rpm_source_reads"]) * src_reads / 1e6,
                      int(obs["best_neighbour_reads"]),
                      float(refs[a.bundle]["rpm_source_reads"]) * src_reads / 1e6))
-    skipped = len(glob.glob(str(a.batch / "logs" / "*.json"))) - len(rows)
+    # Separate reasons. The old count was (all JSONs - rows), so it swept in every sample
+    # that never contained the organism at all and attached "stage 1 never nominated it" to
+    # all of them.
     if not rows:
         die(f"no sample had both a component JSON and {a.bundle}.coverage.tsv")
 
@@ -153,25 +176,42 @@ def main() -> int:
         errs.append(e)
         print(f"{s:<42} {src:>10,} {pred_nb:>8.0f} {obs_nb:>7,} {e:>+6.1%}")
     mean = sum(errs) / len(errs)
-    print(f"\nNEIGHBOUR ARM: mean error {mean:+.1%} over {len(errs)} sample(s)"
-          f"  ({skipped} sample(s) had no {a.bundle} coverage TSV and were skipped - "
-          f"stage 1 never nominated the taxon there)")
+    print(f"\nNEIGHBOUR ARM: mean error {mean:+.1%} over {len(errs)} sample(s)")
+    print(f"  skipped: {no_organism} with no {a.organism} component at all; "
+          f"{len(no_coverage)} with the organism but no {a.bundle} coverage TSV "
+          f"(stage 1 did not nominate it): {', '.join(no_coverage) or 'none'}")
 
     # The target arm is reported too. Quoting only the arm that agrees is how a model gets
     # called calibrated when half of it is not.
     tgt_pred = sum(r[4] for r in rows) / len(rows)
     print(f"TARGET ARM:    predicted {tgt_pred:.0f} records on ref {a.bundle} per sample.")
-    if a.attributed:
-        obs_t = [float(x) for x in a.attributed.split(",")]
+    if a.attributed_bam:
+        import subprocess
+        prefixes = tuple(a.organism_prefix.split(","))
+        obs_t = []
+        for bam in a.attributed_bam:
+            refs = [ln.split("\t")[0] for ln in subprocess.run(
+                [a.samtools, "idxstats", bam], capture_output=True, text=True,
+                check=True).stdout.splitlines()
+                if ln.startswith(f"taxid|{a.bundle}|")]
+            if not refs:
+                die(f"{bam}: no taxid|{a.bundle}| references")
+            # -F 0x904 and -q are the SAME filters measure_recruitment.py uses. The
+            # previous free-text values were -F 0x4, which includes supplementary
+            # alignments the coefficient excludes.
+            lines = subprocess.run(
+                [a.samtools, "view", "-q", str(int(cond["mapq_min"])), "-F", "0x904", bam]
+                + refs, capture_output=True, text=True, check=True).stdout.splitlines()
+            obs_t.append(sum(1 for ln in lines if ln.startswith(prefixes)))
         m = sum(obs_t) / len(obs_t)
-        print(f"               observed {min(obs_t):.0f}-{max(obs_t):.0f} "
-              f"(mean {m:.0f}, n={len(obs_t)}, supplied via --attributed) "
+        print(f"               observed {min(obs_t)}-{max(obs_t)} (mean {m:.1f}, "
+              f"n={len(obs_t)}, counted here at -F 0x904 MAPQ>={cond['mapq_min']}) "
               f"-> {tgt_pred / m - 1:+.1%}")
     else:
         print("               NOT COMPARED: the coverage TSV does not separate which of "
-              "the target's reads came from the background organism, so the observed "
-              "value must come from read attribution and be passed with --attributed. "
-              "Do not quote a target-arm error without it.")
+              "the target's reads came from the background organism. Pass --attributed-bam "
+              "so the observation is counted here under the coefficient's own filter; do "
+              "not quote a target-arm error from a hand-entered number.")
     return 0
 
 

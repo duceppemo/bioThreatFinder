@@ -233,9 +233,18 @@ def build(theme: str) -> str:
     # earlier version drew both as fed by PARSE_SCREEN, which misstated the fan-out.
     g.path(f"M{cx} 396 V432 H300 V458", arrow="ink")
     # Routed outside RESOLVE_WATCHLIST (which ends at x=1080) rather than through it.
-    g.path("M600 184 H1112 V446 H1040 V458", stroke=c["muted"], dash="4 3", arrow="muted")
-    g.text(1106, 300, "per sample,", size=9, fill=c["muted"], anchor="end", font=SANS)
-    g.text(1106, 312, "from clean reads", size=9, fill=c["muted"], anchor="end", font=SANS)
+    # Leaves the host-deplete box from its BOTTOM edge at x=560, not along y=184 where the
+    # dashed qc/host_depletion.tsv box has its border - two coincident dashed strokes made
+    # it readable as leaving the QC box. The vertical sits at x=1096, inside the band rules'
+    # endpoint (W-28 = 1112) rather than exactly on it.
+    # Three things to miss on the way: the dashed qc/ box border (y=184), the band notes
+    # (baseline y=206, right-aligned to x=1104) and the band rules (which end at W-28=1112).
+    # So: leave the host box bottom, run at y=192 ABOVE the notes, and drop at x=1124 beyond
+    # every rule endpoint.
+    g.path("M560 184 V192 H1124 V446 H1040 V458", stroke=c["muted"], dash="4 3",
+           arrow="muted")
+    g.text(1118, 320, "per sample,", size=9, fill=c["muted"], anchor="end", font=SANS)
+    g.text(1118, 332, "from clean reads", size=9, fill=c["muted"], anchor="end", font=SANS)
 
     # ---- decide ---------------------------------------------------------------
     g.band(684, "DECIDE", "gates + marker rules + control subtraction")

@@ -19,12 +19,14 @@ sentence:
 Every one was hand-derived. So the derivation lives here, the inequality direction is in
 the code, and the units are forced to match.
 
-WHAT IT CANNOT TELL YOU
-The exact residual host count. The surviving reads are not labelled, and the classifier
-undercounts them badly - host reads that survive depletion are the ones that failed to map
-to the host reference, which is the same class that evades exact k-mer matching. So this
-reports a FLOOR on residual host and therefore a CEILING on the recruitment rate, and says
-so.
+THE DENOMINATOR IS EXACT, NOT A BOUND
+An earlier version reported a FLOOR on residual host (screened minus non-host generated) and
+therefore a CEILING on the rate, and its docstring asserted the exact count was unknowable
+because "the surviving reads are not labelled". They ARE labelled - this script relies on
+that label for its own numerator - and the BAM already opened holds EVERY screened read as a
+primary record (primary count == total_reads_screened). So one more pass over the same file
+gives the exact denominator. The floor is still computed and printed, as a cross-check: if
+the exact count ever falls below it, something upstream is miscounted.
 
     python3 scripts/check_host_recruitment.py \\
         --batch /media/8tb/bioThreatFinder/simulated/lod_v1 \\
@@ -102,6 +104,24 @@ def main() -> int:
         capture_output=True, text=True, check=True).stdout
     recs = out.splitlines()
     host_recs = sum(1 for ln in recs if ln.startswith(a.host_prefix))
+    if not host_recs:
+        die(f"0 of {len(recs):,} records carry the --host-prefix {a.host_prefix!r}. Either "
+            f"the prefix is wrong for this host assembly (CHM13v2.0 contigs are NC_0609*, "
+            f"but a GRCh38 batch is NC_0000* and chrM is NC_012920.1) or the host truly "
+            f"contributes nothing. Refusing to report 0.0%, which looks identical to a "
+            f"reference that recruits no host at all.")
+
+    # EXACT denominator: every screened read appears once as a primary record in this BAM.
+    allrec = subprocess.run(
+        [a.samtools, "view", "-F", "0x900", str(bam)],
+        capture_output=True, text=True, check=True).stdout.splitlines()
+    if len(allrec) != screened:
+        die(f"BAM holds {len(allrec):,} primary records but total_reads_screened is "
+            f"{screened:,}; they must match for the exact denominator to be valid.")
+    residual_exact = sum(1 for ln in allrec if ln.startswith(a.host_prefix))
+    if residual_exact < residual_floor:
+        die(f"exact residual {residual_exact:,} is below the floor {residual_floor:,}, "
+            f"which is impossible - one of the two is miscounted.")
 
     coef = None
     for r in csv.DictReader(a.matrix.open(), delimiter="\t"):
@@ -115,26 +135,28 @@ def main() -> int:
 
     whole = float(coef["rpm_source_reads"]) / 1e4            # rpm -> percent
     ceiling = 100.0 * host_recs / residual_floor
+    exact = 100.0 * host_recs / residual_exact
 
     print(f"sample                     {a.sample}")
     print(f"bundle                     {a.bundle}")
     print(f"screened records           {screened:,}")
     print(f"non-host generated         {nonhost_reads:,}  ({nonhost_pairs:,} pairs x 2)")
-    print(f"residual host FLOOR        {residual_floor:,}   <- a LOWER bound; fastp and "
-          f"depletion losses on the non-host side make the true value larger")
+    print(f"residual host FLOOR        {residual_floor:,}   (cross-check only)")
+    print(f"residual host EXACT        {residual_exact:,}   <- host-origin primary records "
+          f"in the BAM")
     print(f"records on ref (MAPQ>={a.mapq}, primary)  {len(recs):,}")
     print(f"  of which host-origin     {host_recs:,}")
     print()
     print(f"whole-genome coefficient   {whole:.2f}%  (read_len={coef['read_len']}, "
           f"insert={coef.get('insert_mean','?')}, mapq>={coef['mapq_min']})")
-    print(f"in-pipeline rate CEILING   {ceiling:.1f}%   = {host_recs:,} / {residual_floor:,}")
-    print(f"enrichment CEILING         {ceiling / whole:.1f}x")
+    print(f"in-pipeline rate EXACT     {exact:.1f}%   = {host_recs:,} / {residual_exact:,}"
+          f"   (ceiling against the floor would be {ceiling:.1f}%)")
+    print(f"enrichment EXACT           {exact / whole:.1f}x")
     print()
-    print("Both in-pipeline figures are CEILINGS because the denominator is a floor. The "
-          "qualitative finding - survivors of depletion recruit far above the whole-genome "
-          "rate - does not depend on the exact value; the mechanism is that survivors are "
-          "the reads that failed to map to the host reference, which is the same class "
-          "that cross-maps to a divergent eukaryotic genome.")
+    print("The mechanism: survivors of depletion are the reads that failed to map to the "
+          "host reference, which is the same class that cross-maps to a divergent "
+          "eukaryotic genome - so the whole-genome coefficient must not be inverted to "
+          "estimate them.")
     return 0
 
 
