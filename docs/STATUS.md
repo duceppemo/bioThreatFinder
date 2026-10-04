@@ -109,7 +109,13 @@ Each pair now agrees exactly with its assembly partner (263 and 622), which is t
 invariant the bug violated, and `tests/test_pipeline.py` group `shared_assembly` pins it -
 including a not-vacuous check, so a regression cannot pass by agreeing at zero.
 
-**Known gap, not fixed: the `SHARED_SEQUENCE` flag is empty on all four rows.**
+**Fixed 2026-10-04:** re-masking both pairs in one invocation populated the flag
+(`620 -> SHARED_SEQUENCE:622_Shigella_dysenteriae`, `264 -> SHARED_SEQUENCE:263_...`) and
+made their per-source columns agree; `crossgroup_bp` had differed 1,835 vs 2,204 between two
+rows with identical intervals. The original note follows, since the mechanism still applies
+to any future subset run.
+
+**Known gap (historical): the `SHARED_SEQUENCE` flag is empty on all four rows.**
 `mask_pack_refs.py` detects sharing from RUN-TIME contig collisions (`contig_owner` is
 populated as genomes load), so the flag only appears when both partners are masked in the
 same invocation. A `--only-taxid` run of one partner produces correct numbers with no

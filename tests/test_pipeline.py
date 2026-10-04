@@ -964,7 +964,13 @@ def test_shared_assembly_masking(tmp: Path) -> None:
         if not ra or not rb:
             skip(f"shared_assembly:{label}", f"taxid {a if not ra else b} not in manifest")
             continue
-        fields = ("genome_bp", "masked_bp", "masked_fraction", "n_masked_intervals")
+        # The PER-SOURCE columns are the point. The first version of this test compared
+        # only the four totals, all of which agreed, so it passed green while
+        # crossgroup_bp read 1,835 for taxid 620 and 2,204 for 622 - two rows whose BED
+        # intervals are identical. A guard whose field list omits the columns that
+        # disagree asserts nothing.
+        fields = ("genome_bp", "masked_bp", "masked_fraction", "n_masked_intervals",
+                  "lowcomplexity_bp", "vector_bp", "host_bp", "crossgroup_bp")
         diffs = [f"{f}: {ra.get(f)} vs {rb.get(f)}"
                  for f in fields if ra.get(f) != rb.get(f)]
         record(f"shared_assembly:{label} agree", not diffs, "; ".join(diffs))

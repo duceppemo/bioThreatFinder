@@ -326,12 +326,38 @@ or without a neighbour present. `min_neighbour_ratio` is therefore an undeclared
 whose height is set by background composition and by which reference happens to be more
 *E. coli*-like.
 
-**Falsifiable prediction, now sharper than the one D12 first recorded.** Reads scale
-linearly with spike level (2,114 true reads at 100 rpm), so 3,840 is reached at **~180 rpm**.
-Detection should switch on between 100 and 1000 rpm and specifically near 180 - which is
-exactly why the measured LoD came out as 1000: the series steps 100 -> 1000 and brackets
-the real threshold. A finer grid should find the cliff at ~180 rpm, NOT at 1000. If it is
-found anywhere else, this arithmetic is wrong.
+**Falsifiable prediction, with the interval the replicates actually support.** Reads scale
+linearly with spike level, so 3,840 true reads is reached near 180 rpm - which is why the
+measured LoD came out as 1000: the series steps 100 -> 1000 and brackets the real threshold.
+Computed per replicate from `-F 0x904` data rather than from one anchor (true reads at
+100 rpm 2,114 / 2,233 / 2,166; neighbour pedestals 2,725 / 2,694 / 2,710; target pedestals
+206 / 220 / 207):
+
+    r1  (1.5 x 2725 - 206) / 21.14 = 183.6 rpm
+    r2  (1.5 x 2694 - 220) / 22.33 = 171.2 rpm
+    r3  (1.5 x 2710 - 207) / 21.66 = 178.1 rpm
+
+So the prediction is a **band of 171-184 rpm, centre ~178**, not a point. An earlier version
+read "~180 rpm... if it is found anywhere else, this arithmetic is wrong", which would score
+a cliff at 170 or 190 as a refutation of arithmetic that in fact predicted it. At the cliff
+the per-sample neighbour spread straddles the threshold - (3840+210)/2811 = 1.44 fails while
+(3840+210)/2581 = 1.57 passes - so with three replicates the cliff is a band by construction.
+
+**Three conditions the test batch must meet, or the result cannot be interpreted:**
+
+1. **It must be ART-simulated.** `simulate_benchmark.py:2416` defaults `--illumina-simulator`
+   to `auto`, and `auto` PREFERS InSilicoSeq when installed - which it is, in `btf-sim`.
+   `lod_v1` was built with an explicit `--illumina-simulator art` (138 ART commands, zero
+   iss). iss has NO insert-size parameter and a model-fixed read length, and insert alone
+   moves these coefficients 10-28%, so a cliff measured on an iss batch cannot be compared
+   against this ART-calibrated prediction. Running the finer grid with default flags would
+   therefore refute the arithmetic for a reason that has nothing to do with it.
+   `check_pedestal_model.py` now detects an iss batch and says exactly this.
+2. Same read length (150 bp) and insert (350) as the coefficients were measured at.
+3. **The cliff must be attributable to `neighbour_ratio`.** Detection requires EVERY gate,
+   and D14 documents a case where `depth_cv` binds alone. If another gate binds first near
+   180 rpm, the cliff moves for reasons this arithmetic says nothing about - so the
+   per-sample `reasons` string must be read before the result is called a refutation.
 
 **Masking does not currently touch this.** `mask_pack_refs.py` has a `crossgroup` source,
 but it compares "only across distant groups" (bacteria vs virus/fungus/parasite) by design,
@@ -442,9 +468,20 @@ far less identical stretches than a 200 bp 95%-identity alignment. The result pa
 * *T. gondii*: **1,982 bp** host-masked on a 65.7 Mb genome
 * **2 of 359 genomes** have ANY host masking at all, 2,737 bp in total
 * `crossgroup` is **0 bp for the two references this entry turns on** (630 and 632), and
-  pack-wide only 20 of 359 genomes carry any at all (81,565 bp as the mask manifest totals
-  it; `README.md` reports 79,730 bp over 19 genomes because it excludes `620_Shigella`, whose
-  BED is byte-identical to `622_Shigella_dysenteriae` - same assembly, two watchlist rows). It compares only across
+  pack-wide only 20 of 359 genomes carry any at all, **81,196 bp** as the mask manifest
+  totals it (19 genomes / 79,361 bp if the duplicate `620_Shigella` row is dropped -
+  `README.md`'s convention; its BED is interval-identical to `622_Shigella_dysenteriae`,
+  the same assembly under two watchlist rows, differing only in the header comment).
+
+  The earlier figure of 81,565 bp was quoted from a manifest that disagreed with its own
+  BEDs: `crossgroup_bp` read 1,835 for taxid 620 and 2,204 for 622 although their intervals
+  are identical, because 620 had been masked standalone while 622 was carried forward from a
+  shared-sequence run. Re-masking both pairs together (263/264 and 620/622) made the
+  per-source columns agree and populated the `SHARED_SEQUENCE` flag that had been empty -
+  the provenance marker `docs/STATUS.md` records as a known gap. `tests/test_pipeline.py`
+  group `shared_assembly` now compares the per-source columns too; it previously compared
+  only the four totals, all of which agreed, so it passed green on the inconsistency it is
+  named for. It compares only across
   distant GROUPS by design, so bacteria-vs-bacteria recruitment is invisible to it - note
   *S. dysenteriae* (622), in the table above, does carry 2,204 bp of crossgroup from
   non-bacterial sources, so "0 bp for every genome checked" as this entry once read was

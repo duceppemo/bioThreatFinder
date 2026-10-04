@@ -82,9 +82,9 @@ rather than to the agent; that split is what `neighbour_ratio` measures. Nothing
                                           │
                  ▼
     MINIMAP2_COMPETITIVE [per candidate]            2b. MARKER TIER
-                                                    ▲
-    clean reads (main.nf:340) ──────────────────────┘
-    per sample, not per candidate
+                                                    ▲ per sample,
+                                                    │ not per candidate
+       clean reads (main.nf:506) ───────────────────┘
     target + near neighbours in ONE index           MARKER_ALIGN_NT  (nucleotide)
                  │                                  MARKER_SEARCH_AA (protein)
                  │                                          │ hit reads

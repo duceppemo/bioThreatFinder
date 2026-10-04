@@ -72,6 +72,9 @@ def main() -> int:
                     help="component label in the batch JSON for --source")
     ap.add_argument("--bundle", required=True)
     ap.add_argument("--neighbour", required=True)
+    ap.add_argument("--bundle-taxon", help="taxon NAME for --bundle, e.g. 'Yersinia "
+                    "pestis'. Without it a sample counts as spiked if it holds ANY spike, "
+                    "which mislabels multi-scenario batches.")
     ap.add_argument("--target-arm", action="store_true",
                     help="Also compute the target arm, from the SAME samples the neighbour "
                          "arm used. The BAM set is derived, not supplied: an earlier "
@@ -106,9 +109,21 @@ def main() -> int:
             if i + 1 < len(parts):     # the bounds check added for -m, missing here
                 lens.add(parts[i + 1])
     if not lens:
+        iss = any("iss " in open(c).read() or "iss generate" in open(c).read()
+                  for c in cmds)
         die(f"no ART commands found under {a.batch / 'logs'}/*.cmds, so the batch's read "
-            f"length is unknown. Previously this printed 'conditions match' and continued, "
-            f"which is worse than no guard: it asserts a condition it could not check.")
+            f"length is unknown."
+            + (f"\n       This batch was simulated with InSilicoSeq, not ART. The "
+               f"pedestal coefficients were measured under ART HS25 at a specified read "
+               f"length AND insert size; iss has NO insert parameter and a model-fixed "
+               f"read length, and insert alone moves coefficients 10-28%. A cliff measured "
+               f"on an iss batch cannot be compared against an ART-calibrated prediction."
+               f"\n       simulate_benchmark.py defaults --illumina-simulator to 'auto', "
+               f"and 'auto' PREFERS iss when it is installed (it is). lod_v1 was built "
+               f"with an explicit --illumina-simulator art. Rebuild with that flag."
+               if iss else
+               "\n       Previously this printed 'conditions match' and continued, which "
+               "is worse than no guard: it asserts a condition it could not check."))
     if {str(cond["read_len"])} != lens:
         die(f"coefficient measured at {cond['read_len']} bp but the batch was simulated at "
             f"{sorted(lens)} bp. Recruitment is read-length dependent; this comparison "
@@ -137,7 +152,7 @@ def main() -> int:
           f"-> conditions match")
 
     rows = []
-    no_organism, no_target, no_coverage = 0, 0, []
+    no_organism, no_target, no_reads, no_coverage = 0, 0, 0, []
     for sample_json in sorted(glob.glob(str(a.batch / "logs" / "*.json"))):
         d = json.load(open(sample_json))
         sample = d["sample"]
@@ -147,7 +162,13 @@ def main() -> int:
         # contain E. coli but never contained the target - were all labelled "stage 1 did
         # not nominate it".
         has_org = any(c.get("label") == a.organism for c in d["components"])
-        has_target = any(c.get("kind") in ("spike", "target") for c in d["components"])
+        # ANY spike is not THIS bundle's spike. On a multi-scenario batch (human_core.yaml
+        # spikes Listeria, SARS-CoV-2, monkeypox, P. falciparum...) every such sample would
+        # be labelled "stage 1 did not nominate it" for a bundle that was never in it - the
+        # same mislabel fixed one level down for negative controls. --bundle-taxon narrows
+        # it; without it the label is scoped to "a spike", and says so.
+        spikes = [c.get("label", "") for c in d["components"] if c.get("kind") == "spike"]
+        has_target = bool(spikes) if not a.bundle_taxon else a.bundle_taxon in spikes
         if not has_org:
             no_organism += 1
             continue
@@ -161,9 +182,17 @@ def main() -> int:
         # reads_generated is what ART actually produced; reads_requested is the plan.
         # There is no reads_actual - an earlier version looked for it and so always
         # silently used the planned figure.
-        pairs = sum((c.get("reads_generated") or c.get("reads_requested") or 0)
-                    for c in d["components"] if c.get("label") == a.organism)
+        # NOT an `or` chain. `reads_generated or reads_requested` silently falls back to
+        # the PLAN whenever generated is 0 or absent - reinstating the 800,000 this script
+        # exists to avoid, with no warning. ART under-produces routinely (B. thuringiensis
+        # asked 100,000, got 98,241), so a low enough -f yields 0 and the fallback fires.
+        comps = [c for c in d["components"] if c.get("label") == a.organism]
+        if any("reads_generated" not in c for c in comps):
+            die(f"{sample}: a {a.organism} component has no reads_generated. Falling back "
+                f"to reads_requested would quote the plan as a measurement.")
+        pairs = sum(c["reads_generated"] for c in comps)
         if not pairs:
+            no_reads += 1
             continue
         src_reads = pairs * 2          # components are PAIRS; the pipeline counts RECORDS
         obs = next(csv.DictReader(cov.open(), delimiter="\t"))
@@ -195,8 +224,14 @@ def main() -> int:
     print(f"\nNEIGHBOUR ARM: mean error {mean:+.1%} over {len(errs)} sample(s)")
     print(f"  skipped: {no_organism} with no {a.organism} component; "
           f"{no_target} with no spiked target at all (negative controls); "
+          f"{no_reads} with the component but 0 generated reads; "
           f"{len(no_coverage)} spiked but with no {a.bundle} coverage TSV - stage 1 did not "
           f"nominate it: {', '.join(no_coverage) or 'none'}")
+    total_json = len(glob.glob(str(a.batch / "logs" / "*.json")))
+    accounted = len(rows) + no_organism + no_target + no_reads + len(no_coverage)
+    if accounted != total_json:
+        die(f"accounting does not close: {accounted} of {total_json} samples. A sample "
+            f"vanishing from every counter is how 'skipped 3' came to be printed for 9.")
 
     # The target arm is reported too. Quoting only the arm that agrees is how a model gets
     # called calibrated when half of it is not.
@@ -227,6 +262,11 @@ def main() -> int:
             obs_t.append(sum(1 for ln in lines if ln.startswith(prefixes)))
             used.append(Path(bam).name)
         m = sum(obs_t) / len(obs_t)
+        if m == 0:
+            die(f"no records matched --organism-prefix {a.organism_prefix!r} in any target "
+                f"BAM. The default is O157:H7 Sakai's three accessions; a batch built on a "
+                f"different E. coli assembly (e.g. K-12 NC_000913.3) needs its own. "
+                f"Refusing to divide by zero - the neighbour arm got this guard first.")
         print(f"               observed {min(obs_t)}-{max(obs_t)} (mean {m:.1f}, "
               f"n={len(obs_t)}, same samples as the neighbour arm, counted here at "
               f"-F 0x904 MAPQ>={cond['mapq_min']}) -> {tgt_pred / m - 1:+.1%}")
