@@ -229,6 +229,27 @@ neighbour denominator is ~98% background cross-mapping and 0% neighbour - and to
 calibrated pedestal model predicting the cliff at **171-184 RPM**, which the finer grid is
 meant to test. See `docs/validation.md` and D12/D13/D14.
 
+**The divergent scenarios have now been run, and the pipeline went silent.** Batch
+`simulated/divergent_v1` (Bundibugyo virus 200 RPM x3, *C. butyricum* 300 RPM x3) through
+`run_bakeoff.sh --variants "kraken2_minimizer plus_metabuli"`. The gate
+`divergent_bundibugyo_filovirus / Zaire ebolavirus / min_tier >= screened_only` **FAILED** -
+`no finding` in all three replicates, no filovirus in `findings.tsv` for either variant.
+
+The cause is not sensitivity. Both classifiers assign **3,992 of 3,992** spiked reads correctly
+to *Bundibugyo virus*, identically, rolling up through Filoviridae -> Orthoebolavirus. The
+watchlist is species-level (71 `species`, 18 `no rank`, nothing above), and Bundibugyo is
+registered in Zaire's `near_neighbour_taxids` - i.e. as a stage-2 **suppressor**, not a
+trigger. A correctly classified divergent sibling can therefore only argue against a watchlist
+call. See **D15**.
+
+For the arm under test, this was its nominated best case and it changed nothing: `findings.tsv`
+identical across variants (48 rows, `tier` differing in 0), identical evaluator totals (0 TP,
+0 FN, 6 FP, 0 false confirmations), 153.2 -> 173.7 CPU-minutes. Metabuli has now changed zero
+decisions on every scenario it has been run against. `bakeoff_per_taxon.tsv` is EMPTY for this
+batch - these are `specificity` scenarios whose spiked organisms are not watchlist taxa, so
+there is no per-taxon sensitivity to compare, and the table the section above tells you to read
+first has nothing in it. That is a property of the scenario design, not a bug.
+
 **The Metabuli arm changed nothing on this batch, and the batch cannot test it.**
 `runs/lod_v3_threearm` ran Kraken2 + Metabuli + sylph over the same 21 samples as
 `runs/lod_v2_kraken2`. All 21 Metabuli tasks completed, every report non-empty. Then:

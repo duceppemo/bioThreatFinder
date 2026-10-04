@@ -680,6 +680,77 @@ into a counted false positive and gives the first honest specificity number for 
 
 ---
 
+## D15 — A divergent agent is invisible because it is classified CORRECTLY, and the watchlist registers its sibling as a suppressor ⚠️ *the amino-acid arm does not fix this, and was tested on the scenario built to favour it*
+
+`divergent_bundibugyo_filovirus` and `divergent_clostridium_bont` exist to answer one question:
+does the pipeline raise a lead for a divergent or novel agent, or does it go silent? Batch
+`simulated/divergent_v1` (6 samples: Bundibugyo virus at 200 RPM x3, *C. butyricum* at 300
+RPM x3) was run through `scripts/run_bakeoff.sh --variants "kraken2_minimizer plus_metabuli"`,
+a true minimal pair over one samplesheet.
+
+**The pipeline went silent, and the benchmark's own gate caught it.**
+`divergent_bundibugyo_filovirus / Zaire ebolavirus / min_tier >= screened_only` -> **FAIL**,
+`no finding` in all three replicates. No filovirus appears in `findings.tsv` for either
+variant. Nor does any *Clostridium*.
+
+**It is not a classification failure. Both classifiers are exactly right.**
+Kraken2 and Metabuli each assign all **3,992 of 3,992** spiked reads to *Bundibugyo virus*
+(taxid 565995) and roll them up identically through Filoviridae -> Orthoebolavirus ->
+*Orthoebolavirus bundibugyoense*. Not a single read differs between the two arms. Zaire and
+Sudan ebolavirus receive **zero** reads from either.
+
+**The mechanism is the watchlist's shape, and it is the opposite of a gap in sensitivity.**
+
+  - The resolved watchlist holds 89 entries, **71 `species` and 18 `no rank` - nothing above
+    species**. There is no Filoviridae or Orthoebolavirus entry for a divergent filovirus to
+    trigger.
+  - Zaire ebolavirus (186538) lists `565995` - Bundibugyo - in `near_neighbour_taxids`. The
+    pipeline KNOWS the relationship. But near neighbours are the competitors bundled into the
+    stage-2 index, the organisms a target must out-recruit to earn `neighbour_ratio`. They are
+    **suppressors, not triggers**.
+
+So reads from a divergent sibling are classified correctly to a non-watchlist taxon, and the
+only role that taxon can ever play is to argue AGAINST a watchlist call. The better the
+classifier, the more completely the agent disappears. A tool that was WRONG - that smeared
+those reads onto Zaire - would have raised the lead the scenario expects.
+
+**That also makes the scenario's expectation unsatisfiable as written.** `min_tier:
+screened_only` on *Zaire ebolavirus* presumes detection by cross-mapping onto a sibling, which
+only occurs when the classifier misassigns. The expectation encodes the wrong mechanism, so it
+cannot be met by a correct pipeline. It is kept failing rather than relaxed, because the
+underlying gap is real: the thing it is pointing at should be fixed, not the assertion.
+
+**The amino-acid arm does not address this, and this was its best case.**
+`findings.tsv` is identical between the two variants: same 48 rows, `tier` differing in **0**
+of them, only `n_classifiers`/`classifiers`/`screen_reads`/`reasons`/
+`mapped_fraction_of_assigned` moving. Evaluator totals are identical (0 TP, 0 FN, 6 FP, 0
+false confirmations). Cost: 153.2 -> 173.7 CPU-minutes for 6 samples. Combined with the
+identity-matched result in `docs/benchmarking.md`, Metabuli has now changed **zero decisions
+on every scenario it has been run against**, including the `divergent_*` pair the variant
+table nominated as where its value "should show up". Its remaining untested case is an agent
+absent from the index, which no scenario in `human_core.yaml` constructs, and which cannot be
+built from a database (see the DIVERGENT AGENT PROXY comment).
+
+**Options, none chosen here.**
+
+  1. **Rank-aware watchlist entries.** Allow a genus/family row (Orthoebolavirus, Filoviridae)
+     at lead tiers only, so a sibling assignment raises `screened_only` without ever reaching
+     a confirmation tier. Costs specificity on commensal-rich families; the negative-control
+     scenario sets the price.
+  2. **Promote near neighbours to triggers at lead tier.** `near_neighbour_taxids` already
+     encodes the relationship; a read mass on a near neighbour of a high-consequence taxon
+     could raise a flagged lead naming the neighbour. Keeps the species call honest, but
+     doubles as a second use for a field that currently means "suppressor", which invites
+     exactly the kind of unit confusion D12 and D13 came from.
+  3. **Lean on the marker/HMM tier instead**, which is what the scenario text actually
+     anticipates ("Expect at least a flagged lead via the HMM tier"). `MARKER_SEARCH_HMM` ran
+     on these samples and produced no filovirus lead either; why is unresolved and is the
+     cheapest thing to investigate first, since it needs no watchlist change.
+
+VERIFY: whether `MARKER_SEARCH_HMM` has filovirus profiles at all, and if so why 3,992
+on-target reads produced no marker evidence. That is the next question, and it is independent
+of the classifier arms.
+
 ## D9 — Rejected for now
 
 | Option | Why not yet |
