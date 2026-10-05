@@ -67,20 +67,28 @@ LIST_ONLY=0
 # once cannot attribute the difference to either, which is the commonest way a
 # tool comparison ends up unable to answer the question it was run for.
 # ---------------------------------------------------------------------------
-# NOTE ON --skip_krakenuniq: it DEFAULTS TO TRUE (nextflow.config), so omitting it
-# does not enable KrakenUniq - `--skip_krakenuniq false` does. The matrix originally
-# read `plus_krakenuniq|--skip_metabuli`, which left the arm off and made that variant
-# a byte-for-byte duplicate of the baseline: the comparison it exists to make returned
-# a guaranteed null difference, readable as "KrakenUniq adds nothing". decisions.md D2
-# names this exact variant as what would reverse the Kraken2-primary decision, so D2
-# was unfalsifiable by its own stated test. `all_arms` had the same hole.
+# NOTE ON THE SKIP FLAGS: EVERY VARIANT SPELLS OUT EVERY ARM.
+# Two separate failures here, both of which made a variant silently equal the baseline:
+#
+#  1. DEFAULTS DRIFT. The matrix once read `plus_krakenuniq|--skip_metabuli`, relying on
+#     skip_krakenuniq defaulting false. It defaults TRUE, so that variant was a
+#     byte-for-byte duplicate of the baseline and its null result read as "KrakenUniq adds
+#     nothing". skip_metabuli has since ALSO flipped to true (D15), which would have done
+#     the same thing to plus_metabuli and all_arms.
+#  2. `--flag false` WAS A NO-OP. The repair for (1) was `--skip_krakenuniq false`, and on
+#     the Nextflow CLI that is the string "false", which is truthy - so the repair did not
+#     work either and D2 stayed unfalsifiable by its own named test. Fixed in
+#     lib/BtfBool.groovy; `--skip_X false` now genuinely enables the arm.
+#
+# So: no variant may rely on a default, and none may omit an arm it has an opinion about.
+# If you add a boolean arm, add it to EVERY row here.
 VARIANTS=(
-  "kraken2_minimizer|--skip_krakenuniq true --skip_metabuli|Baseline. Kraken2 with --report-minimizer-data (distinct minimizers + duplicity) plus Bracken and sylph. The cheapest configuration that still has distinct-k-mer-style evidence."
-  "plus_krakenuniq|--skip_krakenuniq false --skip_metabuli|Baseline + KrakenUniq. ISOLATES the question: does HyperLogLog cardinality beat Kraken2 minimizer counts by enough to justify a second index? Needs a built KrakenUniq index."
-  "plus_metabuli|--skip_krakenuniq true|Baseline + Metabuli. Isolates the value of the DNA+amino-acid arm, which should show up on the divergent_* scenarios specifically."
-  "all_arms|--skip_krakenuniq false|Everything on, KrakenUniq included. Upper bound on sensitivity and on cost."
-  "no_sylph|--skip_krakenuniq true --skip_metabuli --skip_sylph|Baseline minus sylph, to check whether ANI/containment is contributing anything the k-mer arms do not."
-  "no_markers|--skip_markers|All arms except KrakenUniq, marker gating OFF. Quantifies what marker gating buys - expect confirm PPV to fall and false confirmations to rise."
+  "kraken2_minimizer|--skip_krakenuniq true --skip_metabuli true|Baseline. Kraken2 with --report-minimizer-data (distinct minimizers + duplicity) plus Bracken and sylph. The cheapest configuration that still has distinct-k-mer-style evidence."
+  "plus_krakenuniq|--skip_krakenuniq false --skip_metabuli true|Baseline + KrakenUniq. ISOLATES the question: does HyperLogLog cardinality beat Kraken2 minimizer counts by enough to justify a second index? Needs a built KrakenUniq index. This is the variant decisions.md D2 names as what would reverse the Kraken2-primary decision."
+  "plus_metabuli|--skip_krakenuniq true --skip_metabuli false|Baseline + Metabuli. Isolates the value of the DNA+amino-acid arm. Run on divergent_v1 (D15) it changed no decision; its untested case is an agent absent from the index."
+  "all_arms|--skip_krakenuniq false --skip_metabuli false|Everything on, KrakenUniq included. Upper bound on sensitivity and on cost."
+  "no_sylph|--skip_krakenuniq true --skip_metabuli true --skip_sylph true|Baseline minus sylph, to check whether ANI/containment is contributing anything the k-mer arms do not."
+  "no_markers|--skip_krakenuniq true --skip_metabuli false --skip_markers true|All arms except KrakenUniq, marker gating OFF. Quantifies what marker gating buys - expect confirm PPV to fall and false confirmations to rise."
 )
 
 usage() {

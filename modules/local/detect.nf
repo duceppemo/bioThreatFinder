@@ -49,7 +49,7 @@ process KRAKEN2 {
 
     script:
     def paired = meta.single_end ? '' : '--paired'
-    def mmap   = params.kraken2_memory_mapping ? '--memory-mapping' : ''
+    def mmap   = BtfBool.of('kraken2_memory_mapping', params.kraken2_memory_mapping) ? '--memory-mapping' : ''
     """
     kraken2 \\
         --db ${db} \\

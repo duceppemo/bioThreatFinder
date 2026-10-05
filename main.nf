@@ -67,9 +67,13 @@ def helpMessage() {
                          F1 once the threshold is shifted. KrakenUniq has had no
                          commit since Dec 2023. Prefer the prebuilt index over a
                          build if you enable this.
-      --skip_metabuli    Disable the DNA+amino-acid arm. Independent benchmarks
-                         rank its precision poorly and several upstream bugs are
-                         open, so treat its calls as leads to confirm.
+      --skip_metabuli    The DNA+amino-acid arm, DEFAULT TRUE (opt in with
+                         `--skip_metabuli false`, not by omitting the flag).
+                         Independent benchmarks rank its precision poorly and
+                         several upstream bugs are open. Measured here it changed
+                         no decision on any scenario run, including the divergent_*
+                         pair meant to favour it (D15); its untested case is an
+                         agent absent from the index. Treat its calls as leads.
       --skip_sylph       Disable ANI/containment.
       --min_distinct_kmers / --max_kmer_dup   stage-1 k-mer quality flags
       --skip_host_depletion
@@ -259,17 +263,29 @@ workflow {
     if (params.help) { helpMessage(); exit 0 }
     if (!params.input) { helpMessage(); exit 1, "ERROR: --input is required" }
 
+    // `--skip_metabuli false` IS A SILENT NO-OP ON THE NEXTFLOW CLI, AND THAT HAS
+    // ALREADY COST THIS PROJECT A FALSIFICATION TEST. See lib/BtfBool.groovy for the
+    // mechanism and the history. params is read-only at runtime - assigning params[k]
+    // is silently ignored - so the coerced values live here and every read below uses
+    // SKIP, never params.skip_*.
+    def SKIP = [:]
+    ['skip_krakenuniq', 'skip_metabuli', 'skip_kraken2', 'skip_sylph',
+     'skip_host_depletion', 'skip_markers', 'skip_marker_hmm'].each { k ->
+        try { SKIP[k] = BtfBool.of(k, params[k]) }
+        catch (IllegalArgumentException e) { exit 1, "ERROR: ${e.message}" }
+    }
+
     def pack = loadPack(params.pack)
 
     def arms = []
-    if (!params.skip_krakenuniq) arms << 'krakenuniq'
-    if (!params.skip_metabuli)   arms << 'metabuli'
-    if (!params.skip_kraken2)    arms << 'kraken2/bracken'
-    if (!params.skip_sylph)      arms << 'sylph'
+    if (!SKIP.skip_krakenuniq) arms << 'krakenuniq'
+    if (!SKIP.skip_metabuli)   arms << 'metabuli'
+    if (!SKIP.skip_kraken2)    arms << 'kraken2/bracken'
+    if (!SKIP.skip_sylph)      arms << 'sylph'
     if (arms.isEmpty()) {
         exit 1, "ERROR: every stage-1 classifier is disabled. Nothing would be screened."
     }
-    if (params.skip_kraken2) {
+    if (SKIP.skip_kraken2) {
         log.warn "Kraken2 is disabled. It is the PRIMARY nucleotide arm and the source " +
                  "of distinct-minimizer evidence (--report-minimizer-data), so without " +
                  "it reads piled on a few conserved k-mers cannot be told apart from " +
@@ -280,7 +296,7 @@ workflow {
     bioThreatFinder v${workflow.manifest.version}
       pack            : ${pack.name}
       stage-1 arms    : ${arms.join(', ')}  (any-classifier OR; consensus recorded, not required)
-      marker gating   : ${params.skip_markers ? 'DISABLED' : 'enabled'}
+      marker gating   : ${SKIP.skip_markers ? 'DISABLED' : 'enabled'}
       outdir          : ${params.outdir}
       report          : ${params.outdir}/report/biothreatfinder_report.html
       findings TSV    : ${params.outdir}/score_evidence/findings.tsv
@@ -319,7 +335,7 @@ workflow {
     // A run with --skip_host_depletion must not inherit the previous run's QC file.
     // storeDir writes outside the work dir and is not cleaned between runs, so without a
     // sentinel, run B (skipped) would present run A's healthy depletion figures as its own.
-    if (params.skip_host_depletion) {
+    if (SKIP.skip_host_depletion) {
         ch_clean = ch_trimmed
         ch_host_stats = Channel.empty()
         Channel.of("sample\tplatform\talignment_records\thost_matching_records\t" +
@@ -380,14 +396,14 @@ workflow {
     // failed classifier never silently drops a sample from the join below.
     ch_arm_base = ch_clean.map { meta, _r -> tuple(meta, []) }
 
-    if (params.skip_krakenuniq) {
+    if (SKIP.skip_krakenuniq) {
         ch_ku = ch_clean.map { meta, _r -> tuple(meta, []) }
     } else {
         KRAKENUNIQ(ch_clean, file(ku_db_path, checkIfExists: true))
         ch_ku = fillMissing(ch_arm_base, KRAKENUNIQ.out.report)
     }
 
-    if (params.skip_metabuli) {
+    if (SKIP.skip_metabuli) {
         ch_mb = ch_clean.map { meta, _r -> tuple(meta, []) }
     } else {
         def mb_db = file(mb_db_path, checkIfExists: true)
@@ -397,7 +413,7 @@ workflow {
         ch_mb = fillMissing(ch_arm_base, METABULI.out.report)
     }
 
-    if (params.skip_kraken2) {
+    if (SKIP.skip_kraken2) {
         ch_k2      = ch_clean.map { meta, _r -> tuple(meta, []) }
         ch_bracken = ch_clean.map { meta, _r -> tuple(meta, []) }
     } else {
@@ -410,7 +426,7 @@ workflow {
         ch_bracken = fillMissing(ch_arm_base, BRACKEN.out.report)
     }
 
-    if (params.skip_sylph) {
+    if (SKIP.skip_sylph) {
         ch_sylph = ch_clean.map { meta, _r -> tuple(meta, []) }
     } else {
         SYLPH_PROFILE(ch_clean, file(sy_db_path, checkIfExists: true))
@@ -497,7 +513,7 @@ workflow {
     // -- Stage 2b: marker tier --------------------------------------------
     // Run per sample, not per candidate: the marker DB is small, so one pass
     // serves every taxon's rule more cheaply than a fan-out.
-    if (params.skip_markers) {
+    if (SKIP.skip_markers) {
         ch_marker_states = Channel.empty()
     } else {
         ch_markers_dir = file(pack.confirm.markers_dir ?: "${pack.confirm.refs_dir}/../markers")
@@ -506,7 +522,7 @@ workflow {
         MARKER_ALIGN_NT(ch_clean, ch_markers_dir)
         MARKER_SEARCH_AA(ch_clean, ch_markers_dir)
 
-        if (params.skip_marker_hmm) {
+        if (SKIP.skip_marker_hmm) {
             ch_hmm = ch_clean.map { meta, _r -> tuple(meta, []) }
         } else {
             MARKER_SEARCH_HMM(MARKER_SEARCH_AA.out.hit_reads, ch_markers_dir)
@@ -533,7 +549,7 @@ workflow {
         ch_watchlist.first(),
         file("${pack.dir}/pack.yaml"),
         ch_marker_states.map { meta, tsv -> tsv }.collect().ifEmpty([]),
-        params.skip_markers ? [] : file("${pack.dir}/marker_rules.yaml", checkIfExists: true)
+        SKIP.skip_markers ? [] : file("${pack.dir}/marker_rules.yaml", checkIfExists: true)
     )
 
     MAKE_REPORT(
