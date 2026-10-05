@@ -59,13 +59,20 @@ def die(msg: str) -> None:
 def measure(bam: Path, samtools: str, mapq: int) -> dict:
     """Per-taxid covered bases, reference length and read count from one bundle BAM.
 
-    `--ff UNMAP,SECONDARY,QCFAIL,DUP` plus `-q` is the same population the pipeline's own
-    gates are computed over: primary, mapped, MAPQ-filtered. Mixing that with an -F 0x4
-    count is the unit error D13/D14 record three times over.
+    SUPPLEMENTARY IS IN THE FILTER LIST BECAUSE samtools coverage DOES NOT EXCLUDE IT.
+    Its default `--ff` is UNMAP,SECONDARY,QCFAIL,DUP (0x704) - supplementary alignments are
+    KEPT - while the pipeline's own gates come from `samtools view -F 0x904` and
+    `samtools depth -G 0x800` (bin/coverage_stats.py:257,330), both of which drop them. The
+    first version of this script passed the default list explicitly and so counted a
+    chimeric read's extra segments in `reads` while the gate it calibrates does not: exactly
+    the units error D13/D14 record three times over, reintroduced in the tool written to
+    avoid it. On the Illumina bundles here it is 24 segments in 5,185 (0.46%), but a split
+    alignment is the signature of the cross-mapping this script exists to detect, and on ONT
+    reads it is not a rounding error.
     """
     proc = subprocess.run(
         [samtools, "coverage", "-q", str(mapq),
-         "--ff", "UNMAP,SECONDARY,QCFAIL,DUP", str(bam)],
+         "--ff", "UNMAP,SECONDARY,QCFAIL,DUP,SUPPLEMENTARY", str(bam)],
         capture_output=True, text=True)
     if proc.returncode != 0:
         die(f"samtools coverage failed on {bam.name}: {proc.stderr.strip()[:300]}")

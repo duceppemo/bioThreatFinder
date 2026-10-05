@@ -188,9 +188,24 @@ for v in "${selected[@]}"; do
   # after four of six runs does not restart from scratch.
   # `-s` is true for a header-only file, which would skip a variant that produced
   # no findings at all and then feed an empty table to the comparison.
-  if [[ -s "$findings" ]] && (( $(grep -vc '^$' "$findings" 2>/dev/null || echo 0) > 1 )); then
-    log "SKIP ${name} (findings already present)"
+  # THE SKIP MUST CHECK WHAT PRODUCED THE FILE, NOT JUST THAT IT EXISTS.
+  # Existence alone reuses a table built under different flags, and that is not
+  # hypothetical here: before lib/BtfBool.groovy, `--skip_metabuli false` was a no-op, so
+  # plus_metabuli/findings.tsv was produced with the arm OFF and is byte-identical to the
+  # baseline. Re-running after the fix would print SKIP, feed the stale table to the
+  # comparison, and reproduce the very conclusion the fix exists to re-test - D15 for
+  # Metabuli, D2 for KrakenUniq. The args are stamped beside the findings and compared.
+  argstamp="${vdir}/.variant_args"
+  stamped=""
+  [[ -r "$argstamp" ]] && stamped="$(cat "$argstamp")"
+  if [[ -s "$findings" ]] && (( $(grep -vc '^$' "$findings" 2>/dev/null || echo 0) > 1 )) \
+     && [[ "$stamped" == "$extra" ]]; then
+    log "SKIP ${name} (findings already present, same flags)"
   else
+    if [[ -s "$findings" ]] && [[ "$stamped" != "$extra" ]]; then
+      log "RERUN ${name}: findings exist but were built with flags ${stamped:-<unrecorded>},"
+      log "      not ${extra:-<none>}. Reusing them would answer a different question."
+    fi
     log "RUN  ${name}  ${extra:-<all arms>}"
     log "     ${rationale}"
     # Word splitting on $extra is INTENTIONAL: it carries several flags
@@ -209,6 +224,8 @@ for v in "${selected[@]}"; do
     else
       # A single variant failing must not abandon the whole bake-off; record it and
       # carry on, so five good comparisons are not lost to one bad configuration.
+      mkdir -p "$vdir"
+      printf '%s' "$extra" > "$argstamp"
       if ! "${cmd[@]}" >"${OUTDIR}/${name}.log" 2>&1; then
         log "WARNING: variant ${name} FAILED - see ${OUTDIR}/${name}.log"
         log "         it will be omitted from the comparison"

@@ -1420,8 +1420,18 @@ def concat_to_gz(sources: Sequence[Path], dest: Path, threads: int = 1) -> None:
                 with src.open("rb") as fh:
                     shutil.copyfileobj(fh, out, length=1 << 20)
             elif pigz:
-                # check=True: a failed compressor must not leave a short FASTQ that
-                # looks like a sample with fewer reads than its manifest claims.
+                # FLUSH FIRST. `out` is a buffered Python writer and pigz writes the SAME
+                # file descriptor directly. Without this, bytes still sitting in the
+                # parent's buffer are written AFTER the child's output, at a later offset:
+                # with a small preceding .gz member the records come out reordered and
+                # still decompress cleanly (silent), and with a large one the first member
+                # is split and zcat fails with "invalid compressed data--format violated".
+                # check=True cannot catch either, because pigz itself exits 0.
+                #
+                # Latent today only because no sample mixes gzipped and plain parts - iss
+                # passes --compress so all its parts are .gz, ART/Badread/NanoSim emit only
+                # plain - but nothing enforces that and the part globs accept both.
+                out.flush()
                 with src.open("rb") as fh:
                     subprocess.run([pigz, "-c", "-6", "-n", "-p", str(threads)],
                                    stdin=fh, stdout=out, check=True)
@@ -1951,6 +1961,22 @@ def build_matrix_blank_plan(sc: Scenario, platform: str, rep: int, bg_refs,
     components, host_frac, notes = _compose(
         mb_sc, None, [], bg_refs, host_fasta, total, None, master_seed, sample)
     notes.append("matrix_blank")
+    # A BLANK THAT RECEIVES HOPPED SPIKE READS POISONS THE WHOLE RUN.
+    # Scenario slots are copied wholesale above, index_hop_fraction included, and
+    # apply_index_hopping bleeds donor SPIKE reads into every non-donor member of the
+    # (scenario, platform, replicate) group - the blank among them. score_evidence.py builds
+    # control_rpm run-globally and suppresses any sample below control_ratio x that value, so
+    # a blank carrying hopped target reads imposes a 5x floor on the TARGET in every sample
+    # of the batch: a true positive scored as suppressed_control, which is a false negative
+    # on a watchlist organism. The two options are individually sensible and jointly
+    # incoherent, so they are refused together rather than documented.
+    if sc.index_hop_fraction:
+        sys.exit(
+            f"ERROR: {sample}: scenario '{sc.sid}' sets controls.index_hop_fraction AND "
+            f"controls.include_matrix_blank. Hopped spike reads would land in the matrix "
+            f"blank, and a control that contains the target suppresses that target in every "
+            f"sample of the run. Use one or the other."
+        )
     if host_fasta is None or host_frac <= 0.0:
         sys.exit(
             f"ERROR: {sample}: a matrix blank with no host is just an NTC, and an NTC is "
