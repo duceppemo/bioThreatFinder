@@ -44,16 +44,13 @@ screen:
   krakenuniq_db: "${btf_db}/krakenuniq/standard"
   # Orthogonal, ANI-based, very low false-positive rate for bacteria/archaea.
   #
-  # Built from THIS PACK'S OWN REFS, not the GTDB distribution.
-  #
-  # ⚠️ NO SCRIPT IN THIS REPO BUILDS THIS INDEX. This comment used to credit
-  # `scripts/build_sylph_db.sh`, which does not exist and never has. The .syldb on disk
-  # (184 MB, 2026-09-29) was produced by a hand-run `sylph sketch` over the refs
-  # directory, so the one database the pipeline depends on that has no builder is also
-  # the one whose provenance is unrecorded - it cannot be rebuilt from this repo, and a
-  # reader following the old comment would have gone looking for a file that was not
-  # there. Writing the builder is the fix; until then this says so rather than implying
-  # otherwise.
+  # Built from THIS PACK'S OWN REFS, not the GTDB distribution, by
+  # scripts/build_sylph_db.sh - which now exists. For most of this project's life this
+  # comment credited that script while no such file was present and the .syldb had been
+  # hand-sketched with no recorded command; the builder was written 2026-10-05 and
+  # reproduces the hand-built index exactly (same 359 genomes, same c/k/min-spacing, same
+  # per-genome k-mer counts, same byte size; only the genome ORDER inside the file differs,
+  # which is sylph's parallel completion order).
   #
   # sylph reports genome FILENAMES rather than taxids, and
   # parse_screen maps a hit back to a watchlist taxon by reading the taxid out of that

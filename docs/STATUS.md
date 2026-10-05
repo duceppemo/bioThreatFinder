@@ -71,6 +71,7 @@ instead.
 | `packs/human/refs/` | 89/89 targets, 359 genomes, 89 competitive bundles + 178 indexes, 43 GB. All bundles verified free of duplicated sequence |
 | `packs/human/refs/masked/` | complete — **20,040,144 bp** over 359 genomes (0.349%); vector 104,404 bp / 45 contigs, crossgroup 81,934 / 50, host 2,737 / 5. The two vacuous rows were re-masked 2026-10-04 and both shared-assembly pairs now agree and carry `SHARED_SEQUENCE` flags. Per-source byte totals in D5 were double-counted and are upper bounds, not a partition |
 | `host/human/` | T2T-CHM13v2.0 + sr and map-ont indexes, 17 GB |
+| `sylph/` | `human_pack_refs.syldb`, 176 MB, 359 genomes at c=200/k=31. Reproducible since 2026-10-05 via `scripts/build_sylph_db.sh` (5 s at 32 threads); it was hand-sketched before that, with no recorded command |
 | `packs/human/markers/` | 163 manifest rows; 18 referenced by rules can only be UNKNOWN (5 failed, 4 curation_required, 9 motif_todo) — see the vaccine/veto note below |
 | `kraken2/pluspf/` | **complete** 2026-10-02. `hash.k2d` 123.5 GB, `opts.k2d`, `taxo.k2d`, `seqid2taxid.map`, and `database{100,150,250}mers.kmer_distrib`. k=35, minimizer 31, full-sensitivity (no `--max-db-size`). Built against the pinned 2026-09-29 taxdump, md5-verified. Includes the 5,413 assemblies `kraken2-build` had silently dropped. `--clean` run 2026-10-03: 614 GB -> 233 GB. The remaining 125.5 GB is `database.kraken`, a Bracken BUILD intermediate - query-time Bracken reads only the `.kmer_distrib` files (measured: 0.6 s, 7.4 MB RSS). Keep it only to derive an extra read length without re-classifying the library |
 | `krakenuniq/` | not built. Opt-in by design (D2) |
@@ -237,11 +238,6 @@ stays offline and fast by design.
   (breadth ÷ uniform expectation) reads 0.114–0.124 for the absent neighbour and
   0.639–0.992 for genuinely present ones, so a threshold in the gap divides them — but no
   gate has been changed pending the fine-grid cliff measurement.
-- **The sylph index has no builder.** `packs/human/pack.yaml` credited
-  `scripts/build_sylph_db.sh`, which does not exist; the 184 MB `.syldb` was hand-built on
-  2026-09-29 with no recorded command. Every other database in the pack has a build script.
-  sylph 1.0.0 is installed (`btf-sylph`), so writing it is small - the gap is that the arm
-  currently cannot be reproduced from this repo.
 - 4 near-neighbour genomes do not exist anywhere (*Giardia ardeae*, *Entamoeba coli*,
   Sandfly fever Naples phlebovirus, rat hepatitis E virus). Recorded with empty paths, so
   the weakened discrimination is visible rather than silent.
