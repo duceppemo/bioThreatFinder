@@ -259,7 +259,7 @@ def build(theme: str) -> str:
     arms = [
         (155, "KRAKEN2", "+ BRACKEN", None),
         (365, "SYLPH_PROFILE", "ANI-based", None),
-        (575, "METABULI", "DNA + AA", None),
+        (575, "METABULI", "DNA + AA", "opt"),
         (785, "KRAKENUNIQ", "distinct k-mers", "opt"),
     ]
     for ax, name, sub, opt in arms:

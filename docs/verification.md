@@ -84,9 +84,12 @@ One-offs against real data, not automated:
   REAL sequencing data - `benchmarks/scenarios/real_mock_communities.yaml` and
   `scripts/fetch_mock_communities.py` exist for that and nothing has been downloaded.
 - **The pipeline HAS run end to end, repeatedly** - `plumbing_001`, `plumbing_v2`,
-  `lod_v1`, `lod_v2_kraken2`, `mmap_test`, `hostqc_test`, `metabuli_smoke` and a three-arm
-  bake-off all sit under `/media/8tb/bioThreatFinder/runs/`. Those runs are where D12, D13
-  and D14 came from, and where the Toxoplasma false positive was found.
+  `lod_v1`, `lod_v2_kraken2`, `mmap_test`, `hostqc_test`, `metabuli_smoke`,
+  `lod_v3_threearm`, `lod_v4`, the `divergent_v1` bake-off and (in progress) `d12fine` all
+  sit under `/media/8tb/bioThreatFinder/runs/` or `simulated/*/bakeoff/`. Those runs are
+  where D12, D13, D14 and D15 came from, and where the Toxoplasma false positive was found
+  and then fixed: `lod_v4` is the first batch carrying a host-matrix control, and its
+  `supported` tier is empty where `lod_v3` had 18 *T. gondii* calls.
 - **No threshold is measured.** Every number in `packs/*/pack.yaml` is a literature
   default (Wright et al., UKHSA mSCAPE, Oskolkov) or a reasoned guess.
 - **Conda environments HAVE been exercised.** 13 `.nextflow-conda/env-*` directories

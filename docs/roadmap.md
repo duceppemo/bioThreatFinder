@@ -47,8 +47,10 @@ interpretable gate breakdown.
 ### DONE - Stage-1 classifier upgrade (v0.3.0)
 Kraken2 with --report-minimizer-data is the primary arm; KrakenUniq is opt-in and off
 by default (this was reversed after reading Kraken2's source and Oskolkov 2026 - see
-docs/decisions.md D2). Metabuli adds the DNA+amino-acid arm for divergent agents,
-Bracken abundance, sylph ANI. Any-classifier OR; concordance and k-mer quality recorded and
+docs/decisions.md D2). Metabuli supplies a DNA+amino-acid arm for divergent agents and is
+likewise opt-in and off by default since 2026-10-05 (D15 - it changed no finding on any
+scenario measured, including the divergent_* pair built to favour it). Bracken abundance,
+sylph ANI. Any-classifier OR; concordance and k-mer quality recorded and
 surfaced in the report. Project DBs moved to NVMe at /media/8tb/bioThreatFinder.
 Remaining stage-1 work:
   * Centrifuger as an ONT-specific arm (low memory, FM-index) - evaluate whether
@@ -153,9 +155,15 @@ failure mode. Still to do:
     Bacillus, insufficient evidence for anthracis" can be emitted
   * triage of the unclassified fraction (assemble it, protein-search it) rather than
     only counting it
-  * keep Metabuli despite its poor independent precision - its role here is RECALL on
-    divergent sequence, and stage 2 supplies the precision. The two reports appear to
-    conflict on Metabuli; they do not, once its role is stated correctly.
+  * ~~keep Metabuli despite its poor independent precision - its role here is RECALL on
+    divergent sequence, and stage 2 supplies the precision.~~ **Settled 2026-10-05 by
+    measurement, and not the way this bullet assumed.** The recall argument was never
+    tested when it was written; it has been now, on the two `divergent_*` scenarios built
+    for exactly this question, and the arm recovered nothing the nucleotide arm missed -
+    both assign all 3,992 spiked reads to the same taxon, read for read. Across every
+    scenario run it changed zero findings at ~22x Kraken2's CPU. Kept but defaulted OFF,
+    because its one untested case - an agent absent from the index - cannot be simulated
+    from a database. See D15.
 
 ### A. Mask the reference database before tuning any threshold
 Now confirmed by two independent reviews. VirMask-style removal of recurrent

@@ -71,7 +71,7 @@ rather than to the agent; that split is what `neighbour_ratio` measures. Nothing
                     ▼              ▼              ▼              ▼        │
                  KRAKEN2        SYLPH_PROFILE  METABULI      KRAKENUNIQ   │
                  + BRACKEN      ANI-based      DNA + AA      distinct     │
-                 (illumina)                                  k-mers [opt] │
+                 (illumina)                    [opt]         k-mers [opt] │
                     └──────────────┴──────────────┴──────────────┘        │
                                           │                              │
                                           ▼                              │
@@ -134,7 +134,7 @@ So the pipeline splits the question:
 
 | Stage | Question | Tooling | Posture |
 |---|---|---|---|
-| 1 | What *might* be here? | KrakenUniq, Metabuli, Kraken2/Bracken, sylph | Deliberately permissive — missing a lead is worse than carrying a false one forward |
+| 1 | What *might* be here? | Kraken2/Bracken + sylph by default; Metabuli and KrakenUniq opt-in | Deliberately permissive — missing a lead is worse than carrying a false one forward |
 | 2 | Does the alignment evidence hold up? | Competitive minimap2 + coverage geometry | Strict — this is what decides |
 
 Stage 2 is where the tool earns its keep. For every watchlist candidate it maps
@@ -170,15 +170,20 @@ gate decided it. Nothing is a bare verdict.
 ## Stage 1: classifier arms
 
 One classifier is not good enough for an "is organism X present" question, and the
-arms fail in different directions. **Three run by default; KrakenUniq is a fourth,
+arms fail in different directions. **Two run by default; Metabuli and KrakenUniq are
 opt-in.**
 
 | Arm | Default | What it contributes |
 |---|---|---|
 | **Kraken2 + Bracken** *(primary)* | on | Distinct **minimizer** count and duplicity via `--report-minimizer-data`, plus Bracken abundance |
-| **Metabuli** | on | Joint DNA + amino-acid k-mers — sees divergent and novel agents |
 | sylph | on | ANI/containment; very low FP for bacteria and fungi |
+| Metabuli | **off** (`--skip_metabuli` defaults true) | Joint DNA + amino-acid k-mers, for divergent and novel agents. Measured, it has changed no decision on any scenario yet run — see below |
 | KrakenUniq | **off** (`--skip_krakenuniq` defaults true) | Distinct **k-mer** cardinality. A second opinion, not a dependency — see below |
+
+Both opt-in flags take an explicit value: `--skip_metabuli false` enables the arm, and
+omitting the flag leaves it off. On the Nextflow CLI a bare `--flag false` arrives as the
+string `"false"`, which is truthy in Groovy, so these spellings were silent no-ops until
+`lib/BtfBool.groovy` began coercing them — see D2 and D15.
 
 **Kraken2 is primary; KrakenUniq is opt-in.** An earlier version of this design made
 KrakenUniq primary on the grounds that "Kraken2 only counts reads." That was wrong.
@@ -210,10 +215,18 @@ and depth, which is what the benchmark is for:
 |---|---|---|---|---|---|
 | *Y. pestis* | 800 | 45,000 | 1.2 | 4 | clean |
 | *B. anthracis* | 600 | **78** | **41.2** | 2 | flagged at stage 1 |
-| Zaire ebolavirus | 120 | 3,100 | 1.1 | 2 | clean — and Metabuli found 3× what the nucleotide arm did |
+| Zaire ebolavirus | 120 | 3,100 | 1.1 | 2 | clean |
 
-That last row is the divergence arm earning its place: an amino-acid-aware screen
-recovering signal a nucleotide screen under-calls.
+⚠️ **That last row used to read "and Metabuli found 3× what the nucleotide arm did",
+glossed as "the divergence arm earning its place". It is removed because the project
+then measured it and found the opposite.** These are FIXTURE numbers, written to
+illustrate the k-mer columns; the divergence claim attached to them was never measured. On
+the real divergent-agent proxy (`divergent_bundibugyo_filovirus`, Bundibugyo virus at
+200 RPM) Kraken2 and Metabuli each assign **all 3,992 spiked reads to the same taxon, read
+for read**, and across every scenario run so far the amino-acid arm has changed **zero**
+findings. See D15 and `docs/benchmarking.md`. The arm is kept because its untested case —
+an agent absent from the index — cannot be simulated from a database, not because this
+table ever supported it.
 
 **Combining rule: any-classifier OR.** Any arm raises a candidate; stage 2
 discriminates. Requiring consensus would discard the sensitivity that running four

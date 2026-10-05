@@ -44,8 +44,18 @@ screen:
   krakenuniq_db: "${btf_db}/krakenuniq/standard"
   # Orthogonal, ANI-based, very low false-positive rate for bacteria/archaea.
   #
-  # Built from THIS PACK'S OWN REFS, not the GTDB distribution
-  # (scripts/build_sylph_db.sh). sylph reports genome FILENAMES rather than taxids, and
+  # Built from THIS PACK'S OWN REFS, not the GTDB distribution.
+  #
+  # ⚠️ NO SCRIPT IN THIS REPO BUILDS THIS INDEX. This comment used to credit
+  # `scripts/build_sylph_db.sh`, which does not exist and never has. The .syldb on disk
+  # (184 MB, 2026-09-29) was produced by a hand-run `sylph sketch` over the refs
+  # directory, so the one database the pipeline depends on that has no builder is also
+  # the one whose provenance is unrecorded - it cannot be rebuilt from this repo, and a
+  # reader following the old comment would have gone looking for a file that was not
+  # there. Writing the builder is the fix; until then this says so rather than implying
+  # otherwise.
+  #
+  # sylph reports genome FILENAMES rather than taxids, and
   # parse_screen maps a hit back to a watchlist taxon by reading the taxid out of that
   # filename. The pack's refs are named <taxid>_<name>.fna.gz so this works; GTDB names
   # its files by GTDB accession, so every lookup missed and the arm silently contributed

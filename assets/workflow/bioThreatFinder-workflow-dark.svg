@@ -43,6 +43,7 @@
   <rect x="575" y="248" width="190" height="48" rx="6" fill="#16302B" stroke="#2C4A43" stroke-width="1.3"/>
   <text x="670" y="268" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" font-weight="400" fill="#EEF2EF" text-anchor="middle">METABULI</text>
   <text x="670" y="285" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, sans-serif" font-size="12" font-weight="400" fill="#9FB3AD" text-anchor="middle">DNA + AA</text>
+  <text x="758" y="263" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, sans-serif" font-size="11" font-weight="400" fill="#D9A54A" text-anchor="end">[opt]</text>
   <path d="M670 296 V318" fill="none" stroke="#9FB3AD" stroke-width="1.2"/>
   <rect x="785" y="248" width="190" height="48" rx="6" fill="#16302B" stroke="#2C4A43" stroke-width="1.3"/>
   <text x="880" y="268" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" font-weight="400" fill="#EEF2EF" text-anchor="middle">KRAKENUNIQ</text>

@@ -16,7 +16,10 @@ tail -f /media/8tb/bioThreatFinder/logs/build_kraken2_<latest>.log
 |---|---|---|
 | **Kraken2 PlusPF build** | **DONE** 2026-10-02 — index + all three Bracken distributions | — |
 | **Marker DB full pass** | **DONE** — 163 rows, `bmand_18S` is `built` | — |
-| **Three-arm bake-off** | **RUNNING** as `systemd --user` unit `btf-lodv3` → `runs/lod_v3_threearm`. Kraken2 + Metabuli + sylph over the same `lod_v1` reads as `runs/lod_v1` (sylph only) and `runs/lod_v2_kraken2`, so all three are comparable | `systemctl --user is-active btf-lodv3`; log path in the unit's output |
+| **Three-arm bake-off** | **DONE** 2026-10-04 → `runs/lod_v3_threearm`. Metabuli changed no finding: `findings.tsv` identical to the Kraken2-only run in every scored column, `tier` differing in 0 of 178 rows | — |
+| **Divergent-agent bake-off** | **DONE** 2026-10-04 → `simulated/divergent_v1/bakeoff`. The scenarios built to favour the amino-acid arm; it changed nothing there either, and the pipeline went silent on the divergent filovirus for a reason neither arm can fix (D15) | — |
+| **lod_v4 (matrix blank)** | **DONE** 2026-10-05 → `runs/lod_v4`. 24 samples, the first batch to carry a host-matrix control. `supported` 18 → 0, LoD unchanged at 1000 RPM (D14) | — |
+| **D12 fine grid** | **RUNNING** as `systemd --user` units `btf-d12sim` → `btf-d12pipe` → `runs/d12fine`. 120/150/170/190/210/250 RPM ×3, testing D12's predicted 171–184 RPM cliff | `systemctl --user is-active btf-d12sim btf-d12pipe` |
 
 **Do not start a second build against a live one.** I did, and the two
 `kraken2-build --download-library bacteria` processes collided on the same staging
@@ -70,7 +73,8 @@ instead.
 | `host/human/` | T2T-CHM13v2.0 + sr and map-ont indexes, 17 GB |
 | `packs/human/markers/` | 163 manifest rows; 18 referenced by rules can only be UNKNOWN (5 failed, 4 curation_required, 9 motif_todo) — see the vaccine/veto note below |
 | `kraken2/pluspf/` | **complete** 2026-10-02. `hash.k2d` 123.5 GB, `opts.k2d`, `taxo.k2d`, `seqid2taxid.map`, and `database{100,150,250}mers.kmer_distrib`. k=35, minimizer 31, full-sensitivity (no `--max-db-size`). Built against the pinned 2026-09-29 taxdump, md5-verified. Includes the 5,413 assemblies `kraken2-build` had silently dropped. `--clean` run 2026-10-03: 614 GB -> 233 GB. The remaining 125.5 GB is `database.kraken`, a Bracken BUILD intermediate - query-time Bracken reads only the `.kmer_distrib` files (measured: 0.6 s, 7.4 MB RSS). Keep it only to derive an extra read length without re-classifying the library |
-| `krakenuniq/`, `metabuli/` | not built. KrakenUniq is opt-in by design; Metabuli still pending a decision |
+| `krakenuniq/` | not built. Opt-in by design (D2) |
+| `metabuli/refseq` | **built** 2026-10-03, 110 GB, NCBI-namespaced. The arm is now opt-in too (`--skip_metabuli` defaults true): measured, it changed zero findings on every scenario run, including the `divergent_*` pair meant to favour it. Kept, not removed, because its untested case — an agent absent from the index — cannot be simulated from a database. See D15 |
 
 ## Outstanding DATA fix: two reference genomes were never masked
 
@@ -223,9 +227,21 @@ stays offline and fast by design.
 
 ## Still unresolved
 
-- Metabuli: keep as a recall arm or drop? Independent benchmarks rank its precision
-  lowest; the divergence review says it mitigates Kraken2's ~50% family-exclusion
-  mis-assignment rate. Both can be true — decide with the bake-off.
+- ~~Metabuli: keep as a recall arm or drop?~~ **Decided 2026-10-05: kept, defaulted OFF.**
+  The bake-off ran on both the identity-matched LoD batch and the `divergent_*` pair, and
+  the arm changed no finding in either — `findings.tsv` identical in every scored column,
+  at ~22× Kraken2's CPU per sample. It is not removed because the one case that would
+  favour it, an agent genuinely absent from the index, cannot be simulated from a
+  database. Turn it on deliberately for a novel-agent question (D15).
+- D12's remedy is still unchosen. Option 2 is now calibrated — neighbour "uniformity"
+  (breadth ÷ uniform expectation) reads 0.114–0.124 for the absent neighbour and
+  0.639–0.992 for genuinely present ones, so a threshold in the gap divides them — but no
+  gate has been changed pending the fine-grid cliff measurement.
+- **The sylph index has no builder.** `packs/human/pack.yaml` credited
+  `scripts/build_sylph_db.sh`, which does not exist; the 184 MB `.syldb` was hand-built on
+  2026-09-29 with no recorded command. Every other database in the pack has a build script.
+  sylph 1.0.0 is installed (`btf-sylph`), so writing it is small - the gap is that the arm
+  currently cannot be reproduced from this repo.
 - 4 near-neighbour genomes do not exist anywhere (*Giardia ardeae*, *Entamoeba coli*,
   Sandfly fever Naples phlebovirus, rat hepatitis E virus). Recorded with empty paths, so
   the weakened discrimination is visible rather than silent.
