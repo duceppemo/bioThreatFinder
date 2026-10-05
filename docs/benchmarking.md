@@ -229,6 +229,28 @@ neighbour denominator is ~98% background cross-mapping and 0% neighbour - and to
 calibrated pedestal model predicting the cliff at **171-184 RPM**, which the finer grid is
 meant to test. See `docs/validation.md` and D12/D13/D14.
 
+**The batch has been regenerated with a matrix blank, and the `supported` tier is now
+empty.** `runs/lod_v4`, the lod_v1 command re-run after both halves of D14 landed: 24 samples
+(15 LoD + 3 negative + 3 NTC + 3 BLANK), pipeline exit 0, 202 findings, default configuration
+(so Metabuli off, per D15).
+
+| | lod_v3 (no blank) | lod_v4 (blank) |
+|---|---|---|
+| `supported` | 18, all *T. gondii*, PPV 0.000 | **0 calls** |
+| `confirmed_in_silico` | 6 | **6**, PPV **1.000** |
+| `suppressed_control` | 18 | 36 |
+| LoD / detection rate | 1000 RPM, 1.000 | **1000 RPM, 1.000** |
+
+*T. gondii* is now in `specificity.tsv` with `false_positive_rate` 0.000 and `worst_tier`
+`suppressed_control`. The figure matches the one D14 retracted and means something different:
+0.000 because the artefact is counted and suppressed, rather than because it was never in the
+table. The reads are the same reads - rep 1 regenerated at `--seed 7` is md5-identical after
+decompression to lod_v1's - so this replaces the old numbers rather than sitting beside them.
+
+`min_tier_at_rpm[100] >= supported` for *Y. pestis* still FAILS at `attributed_to_neighbour`.
+lod_v3 recorded the same tier at that level before any blank existed, so it is D12, not this
+change.
+
 **The divergent scenarios have now been run, and the pipeline went silent.** Batch
 `simulated/divergent_v1` (Bundibugyo virus 200 RPM x3, *C. butyricum* 300 RPM x3) through
 `run_bakeoff.sh --variants "kraken2_minimizer plus_metabuli"`. The gate

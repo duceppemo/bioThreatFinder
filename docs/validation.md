@@ -229,6 +229,37 @@ driven by 100% human reads - were scored `unlisted` and excluded from the specif
 entirely. The 0.000 is real for *B. anthracis* and *F. tularensis*; it is not a pack-wide
 specificity figure, and this file should not have implied otherwise.
 
+### Superseded 2026-10-05 by `runs/lod_v4` — the qualifier is gone
+
+`lod_v4` is the `lod_v1` command re-run after both halves of D14 landed: `truth.absent`
+derived from the whole watchlist, and `controls.include_matrix_blank` giving the batch a
+host-matrix control it never had. 24 samples (15 LoD + 3 negative + 3 NTC + **3 BLANK**),
+pipeline exit 0, 202 findings. The reads are verifiably the same reads - rep 1 of
+`negative_host_only` regenerated at the original `--seed 7` is md5-identical after
+decompression to lod_v1's - so this is a like-for-like replacement, not a different batch.
+
+| | lod_v3 (no blank) | lod_v4 (blank) |
+|---|---|---|
+| `supported` | 18, all *T. gondii*, PPV 0.000 | **0** |
+| `confirmed_in_silico` | 6 | **6**, PPV **1.000** |
+| `suppressed_control` | 18 (*E. coli*) | 36 (*E. coli* 18, *T. gondii* 18) |
+| LoD | 1000 RPM | **1000 RPM** |
+
+*T. gondii* is now IN `specificity.tsv` - 15 and 9 samples across the two scenarios, all
+assessable, `false_positive_rate` **0.000**, `worst_tier` `suppressed_control`. The number
+reads the same as the figure this section retracts, and it means something different: it is
+0.000 because the artefact is counted and suppressed, not because it was omitted from the
+table. The `supported` tier has no calls at all in this batch.
+
+Nothing true was suppressed, which is the half that would have made this a bad trade: the
+only suppressed taxa are *E. coli*, legitimately a third of the NTC, and *T. gondii*. Every
+*Y. pestis* tier is identical to lod_v3's, level for level.
+
+**One expectation still fails, and it is not this fix:** `min_tier_at_rpm[100] >= supported`
+for *Y. pestis*, observed `attributed_to_neighbour` in all three replicates. lod_v3 recorded
+the same tier at that level (`neighbour_ratio` 0.8553), before any matrix blank existed. That
+is D12 - the neighbour denominator - and it is unresolved.
+
 ## Kraken2 memory mapping — verified 2026-10-03
 
 Two samples, `params.kraken2_memory_mapping = true`, `maxForks = 2`:

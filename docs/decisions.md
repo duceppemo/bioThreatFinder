@@ -740,8 +740,17 @@ scenario that trips it, not assumed.
 leaves the artefact at `supported` (reproducing this entry's bug, so the test fails if the
 control type is removed) and that a matrix blank moves it to `suppressed_control`.
 
-**Still open.** No regenerated batch yet carries a blank, so the published specificity
-numbers still come from runs without one; the next simulated batch gets it automatically.
+**Confirmed end to end 2026-10-05 by `runs/lod_v4`.** The batch was regenerated with the
+lod_v1 command (24 samples: 15 LoD + 3 negative + 3 NTC + 3 BLANK), and rep 1 of
+`negative_host_only` regenerated at the original `--seed 7` is md5-identical after
+decompression to lod_v1's, so the comparison is like for like. `supported` went 18 -> **0**,
+`confirmed_in_silico` stayed at 6 with PPV **1.000**, the LoD stayed at **1000 RPM**, and
+*T. gondii* now appears in `specificity.tsv` at `false_positive_rate` 0.000 with `worst_tier`
+`suppressed_control` - counted and suppressed, where the table used to hold no Toxoplasma row
+at all. The only suppressed taxa are *E. coli* (a third of the NTC) and *T. gondii*, so no
+true positive was traded away. See docs/validation.md.
+
+**Still open.**
 `depth_cv` remains the only confirmation gate this artefact fails, and D13's read-scale
 masking - which would attack the recruitment itself rather than suppress its product - is
 still deferred pending the Zymo measurement. Suppression is the right control for a *known*
