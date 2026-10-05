@@ -678,6 +678,75 @@ see the failure before any threshold is tuned against it, or the tuning is unfal
 **Would resolve it:** re-running the batch after (1), which turns an invisible `unlisted`
 into a counted false positive and gives the first honest specificity number for the pack.
 
+### RESOLVED 2026-10-05 — the batch had no control that could contain the artefact
+
+Step (1) landed and is confirmed working: the 2026-10-04 `divergent_v1` bake-off scores
+*T. gondii* as `supported: 6 calls, 0 truth present, 6 truth absent, PPV 0.000`. It is
+counted now, where it used to be `unlisted`. That made the real cause visible.
+
+**The suppression machinery was never broken. It had nothing to compare against.**
+`score_evidence.py` already has the right path - a taxon present in a negative control at a
+comparable level is tiered `suppressed_control` - and it demonstrably works, suppressing
+*E. coli* in all 18 samples of `lod_v3_threearm`. It never fired for *T. gondii* because
+`build_ntc_plan` sets `host_fraction = 0.0`:
+
+| | host reads | *T. gondii* finding |
+|---|---|---|
+| sample | 19,019,995 | 8,447 reads, 4,267 RPM, `supported` |
+| `*_NTC` (role=control) | **0** | none possible |
+
+An NTC is a *reagent* control: it models kit and index contamination. The dominant false
+positive here is host-derived, so no quantity of NTC can ever contain it, `control_rpm`
+stays 0 for taxid 5811, and the gate is unreachable. The pack had a no-template control and
+no **matrix blank** - the negative extraction control that is the host matrix itself,
+processed identically. In `divergent_v1` the gap is even starker: no control at all, and
+the findings say so in their own reason string, `NO NEGATIVE CONTROL`.
+
+**Demonstrated on data already on disk, before changing anything.** Re-running
+`score_evidence.py` over `lod_v3_threearm`'s own coverage TSVs with the three
+`negative_host_only_illumina_r[123]` samples relabelled `role=control` - they are already
+host+background with no watchlist target, i.e. a matrix blank wearing the wrong label. The
+offline baseline reproduces the pipeline exactly first (178 rows, **0** tier mismatches), so
+the delta is attributable to the relabel alone:
+
+| tier | before | after |
+|---|---|---|
+| `supported` | **18** | **0** |
+| `suppressed_control` | 18 | 30 |
+| `control_background` | 3 | 9 |
+| `confirmed_in_silico` | **6** | **6** |
+| `attributed_to_neighbour` | 74 | 74 |
+| `screened_only` | 59 | 59 |
+
+All 18 `supported` rows were *T. gondii*; 15 became `suppressed_control` and the 3 control
+rows `control_background`. **Every *Y. pestis* call is untouched** - 6 `confirmed_in_silico`,
+6 `attributed_to_neighbour` - so the fix costs no sensitivity on the one true positive the
+batch contains. One matrix blank per BATCH is sufficient: `control_rpm` is built across the
+whole run, not per scenario, which is why relabelling three samples suppressed the artefact
+in twelve others from a different scenario.
+
+**The fix:** `controls.include_matrix_blank`, implemented in
+`scripts/simulate_benchmark.py:build_matrix_blank_plan` and enabled on `negative_host_only`.
+It is the scenario's own host+background composition with no spike, `role=control`, at full
+sample depth - the comparison is RPM against RPM and a shallow blank gives a noisy
+denominator for exactly the trace artefacts it exists to catch. It does not replace the NTC
+and does not make the negative scenario's own samples redundant: the NTC isolates reagent
+contamination, the negative samples MEASURE the false-positive rate, and the blank is what
+they are measured against. Asking for a blank on a scenario with no host is refused outright,
+because that is an NTC under a different name - the guard was tested by constructing a
+scenario that trips it, not assumed.
+
+`tests/test_pipeline.py` group `matrix_blank` asserts BOTH halves: that a host-free NTC
+leaves the artefact at `supported` (reproducing this entry's bug, so the test fails if the
+control type is removed) and that a matrix blank moves it to `suppressed_control`.
+
+**Still open.** No regenerated batch yet carries a blank, so the published specificity
+numbers still come from runs without one; the next simulated batch gets it automatically.
+`depth_cv` remains the only confirmation gate this artefact fails, and D13's read-scale
+masking - which would attack the recruitment itself rather than suppress its product - is
+still deferred pending the Zymo measurement. Suppression is the right control for a *known*
+matrix; it does nothing for a specimen type whose matrix was never blanked.
+
 ---
 
 ## D15 — A divergent agent is invisible because it is classified CORRECTLY, and the watchlist registers its sibling as a suppressor ⚠️ *the amino-acid arm does not fix this, and was tested on the scenario built to favour it*

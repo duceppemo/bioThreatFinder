@@ -130,6 +130,18 @@ DEFAULT_LEVEL_RPM = 100.0
 # doubling the cost of the batch.
 NTC_READ_FRACTION = 0.01
 NTC_MIN_READS = 2000
+# A MATRIX BLANK IS NOT AN NTC, AND THE DIFFERENCE IS WHY D14 HAPPENED.
+# The NTC carries host_fraction 0.0 - reagents only - so it models reagent and index
+# contamination and nothing else. The dominant false positive measured in this pipeline is
+# host-derived: human reads that survive depletion pile onto a large eukaryotic reference
+# (D13/D14). An NTC with no human in it cannot contain that artefact, so control subtraction
+# could never suppress it, and *T. gondii* was reported `supported` in every sample of two
+# unrelated batches. The matrix blank is the specimen matrix - host plus background, no
+# spike - processed identically, which is what a negative extraction control is in the lab.
+# Full sample depth by default: the comparison score_evidence.py makes is RPM against RPM,
+# and a shallow blank gives a noisy denominator for exactly the trace-level artefacts this
+# exists to catch.
+MATRIX_BLANK_READ_FRACTION = 1.0
 
 # InSilicoSeq's read length is baked into its error model, so the model is chosen
 # from the requested read_length rather than passed alongside it.
@@ -378,7 +390,8 @@ class Spike:
 
 class Scenario:
     __slots__ = ("sid", "description", "kind", "spikes", "present", "absent",
-                 "vaccine", "include_ntc", "index_hop_fraction", "replicates",
+                 "vaccine", "include_ntc", "include_matrix_blank",
+                 "index_hop_fraction", "replicates",
                  "platforms", "host", "host_fraction", "total_reads",
                  "ont_total_reads", "read_length", "ont_mean_length", "background",
                  "downsample_total_reads")
@@ -426,7 +439,7 @@ SCENARIO_KEYS = {"id", "description", "kind", "spikes", "truth", "controls",
                  "nysdoh_category"}
 SPIKE_KEYS = {"taxon", "source", "genome", "levels_rpm", "exclude_loci"}
 TRUTH_KEYS = {"present", "absent", "vaccine"}
-CONTROLS_KEYS = {"include_ntc", "index_hop_fraction"}
+CONTROLS_KEYS = {"include_ntc", "include_matrix_blank", "index_hop_fraction"}
 
 
 def reject_unknown_keys(mapping, allowed: set, where: str) -> None:
@@ -651,6 +664,8 @@ def load_scenarios(path: Path) -> Tuple[Scenario, ...]:
             vaccine=as_name_list(truth.get("vaccine"), f"{where}.truth.vaccine"),
             include_ntc=as_bool(controls.get("include_ntc"),
                                 f"{where}.controls.include_ntc", False),
+            include_matrix_blank=as_bool(controls.get("include_matrix_blank"),
+                                         f"{where}.controls.include_matrix_blank", False),
             index_hop_fraction=hop,
             replicates=as_int(s.get("replicates"), f"{where}.replicates",
                               base["replicates"]),
@@ -1565,6 +1580,10 @@ def plan_batch(scenarios: Sequence[Scenario], genomes: GenomeIndex,
                         mine.append(build_ntc_plan(
                             sc, platform, rep, bg_refs, reads_dir, master_seed,
                             watchlist=watchlist))
+                    if sc.include_matrix_blank:
+                        mine.append(build_matrix_blank_plan(
+                            sc, platform, rep, bg_refs, host_fasta, reads_dir,
+                            master_seed, watchlist=watchlist))
         except SystemExit as exc:
             problems.append(f"{sc.sid}: {exc}")
             continue
@@ -1872,6 +1891,65 @@ def build_ntc_plan(sc: Scenario, platform: str, rep: int, bg_refs,
         fastq_2=(reads_dir / f"{sample}_R2.fastq.gz") if platform == "illumina" else None,
         host_fraction=host_frac, total_reads=total,
         truth_present=[c.label for c in components if c.kind == "background"],
+        truth_absent=absent, truth_vaccine=[], excluded_loci=[], notes=notes)
+
+
+def build_matrix_blank_plan(sc: Scenario, platform: str, rep: int, bg_refs,
+                            host_fasta: Optional[Path], reads_dir: Path,
+                            master_seed: int,
+                            watchlist: Optional[List[str]] = None) -> SamplePlan:
+    """A MATRIX BLANK: host plus background at the scenario's own fractions, no spike.
+
+    THE CONTROL THAT D14 NEEDED AND THE BATCH DID NOT HAVE.
+    `build_ntc_plan` sets host_fraction 0.0, so an NTC contains no human sequence at all.
+    Host-derived recruitment - human reads surviving depletion and piling onto a large
+    eukaryotic reference - therefore cannot appear in it, control_rpm stays 0 for the
+    affected taxon, and score_evidence.py's `suppressed_control` path can never fire
+    against the commonest false positive this pipeline produces. Measured consequence:
+    *Toxoplasma gondii* at `supported` in 18/18 samples of lod_v1 and 6/6 of divergent_v1,
+    off reads that read attribution showed were 100% human.
+
+    Re-scoring lod_v3_threearm with these three samples relabelled as controls moved all 18
+    `supported` rows to `suppressed_control`/`control_background` and left every
+    `confirmed_in_silico` *Y. pestis* call untouched - the suppression machinery was always
+    correct, it just had nothing to compare against.
+
+    This is NOT a replacement for the NTC and does not make the negative scenario's own
+    samples redundant: the NTC isolates reagent contamination, the negative samples MEASURE
+    the false-positive rate, and this blank is what they are measured against.
+    """
+    sample = f"{sc.sid}_{platform}_r{rep}_BLANK"
+    # Same per-platform depth rule as build_sample_plan and build_ntc_plan.
+    sample_depth = sc.ont_total_reads if platform == "ont" else sc.total_reads
+    total = max(NTC_MIN_READS, int(sample_depth * MATRIX_BLANK_READ_FRACTION))
+    seed = derive_seed(master_seed, sc.sid, rep, platform, "BLANK")
+    mb_sc = Scenario(**{k: getattr(sc, k) for k in Scenario.__slots__})
+    mb_sc.spikes = []
+    mb_sc.total_reads = total
+    # host_fraction is deliberately NOT zeroed - that is the entire point.
+    components, host_frac, notes = _compose(
+        mb_sc, None, [], bg_refs, host_fasta, total, None, master_seed, sample)
+    notes.append("matrix_blank")
+    if host_fasta is None or host_frac <= 0.0:
+        sys.exit(
+            f"ERROR: {sample}: a matrix blank with no host is just an NTC, and an NTC is "
+            f"what failed to catch D14. Scenario '{sc.sid}' resolved host_fraction="
+            f"{host_frac} (host={sc.host!r}). Give the scenario a host, or drop "
+            f"controls.include_matrix_blank."
+        )
+    bg_present = [c.label for c in components if c.kind == "background"]
+    absent = list(dict.fromkeys(list(sc.absent) + [sp.taxon for sp in sc.spikes]))
+    if watchlist:
+        absent = list(dict.fromkeys(
+            absent + exhaustive_absent(sc, bg_present, watchlist, components)))
+    return SamplePlan(
+        sample=sample, scenario=mb_sc, platform=platform, replicate=rep,
+        level_rpm=None, role="control", seed=seed, components=components,
+        fastq_1=reads_dir / (f"{sample}_R1.fastq.gz" if platform == "illumina"
+                             else f"{sample}.fastq.gz"),
+        fastq_2=(reads_dir / f"{sample}_R2.fastq.gz") if platform == "illumina" else None,
+        host_fraction=host_frac, total_reads=total,
+        truth_present=bg_present,
         truth_absent=absent, truth_vaccine=[], excluded_loci=[], notes=notes)
 
 

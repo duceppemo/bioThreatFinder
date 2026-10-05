@@ -713,6 +713,23 @@ scenarios:
           absent: [Bacillus anthracis, Yersinia pestis, Francisella tularensis, Burkholderia pseudomallei, Variola virus, Zaire ebolavirus, Mycobacterium tuberculosis, Entamoeba histolytica, Listeria monocytogenes, Neisseria meningitidis, Haemophilus influenzae]
       controls:
           include_ntc: true
+          # THE CONTROL D14 NEEDED. The NTC has host_fraction 0.0, so no host-derived
+          # false positive can ever appear in it and control subtraction cannot suppress
+          # one - which is how T. gondii reached `supported` in every sample of two
+          # unrelated batches off 100% human reads. The matrix blank is this scenario's
+          # own host+background composition with no spike, role=control.
+          #
+          # ONE PER BATCH IS ENOUGH, and it belongs here rather than on every scenario:
+          # score_evidence.py builds control_rpm across the whole RUN, not per scenario,
+          # so this blank is what every sample in the batch is compared against. Verified
+          # by re-scoring lod_v3_threearm with these samples relabelled control - all 15
+          # remaining samples' T. gondii rows moved to suppressed_control, including the
+          # lod_gram_negative ones from a different scenario.
+          #
+          # A batch that does NOT include this scenario therefore has no matrix blank:
+          # divergent_v1 is exactly that case, and its findings carry the reason string
+          # "NO NEGATIVE CONTROL".
+          include_matrix_blank: true
 
     - id: contamination_index_hop
       description: >

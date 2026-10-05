@@ -1035,6 +1035,67 @@ def test_exhaustive_absent(tmp: Path) -> None:
            "mycobacterium bovis" not in low, f"got {sorted(got)}")
 
 
+def test_matrix_blank_suppresses_host_artifact(tmp: Path) -> None:
+    """A host-derived false positive is only suppressible if a control CONTAINS host.
+
+    D14: *Toxoplasma gondii* was reported `supported` in 18/18 samples of lod_v1 and 6/6
+    of divergent_v1, off reads that attribution showed were 100% human. The suppression
+    machinery was never broken - the batch's only control was an NTC built with
+    host_fraction 0.0, so a human-derived artefact could not appear in it, control_rpm
+    stayed 0 for that taxon, and `suppressed_control` could never fire.
+
+    Both halves are asserted, because only the pair distinguishes the fix from a tier
+    that happens to be right. With an NTC that has no such row the finding must remain
+    `supported` - reproducing the bug - and with a matrix blank carrying the artefact at
+    a comparable level it must become `suppressed_control`. A test that checked only the
+    second would also pass if everything were suppressed unconditionally.
+    """
+    shape = dict(taxid="5811", taxon="Toxoplasma gondii", group="parasite",
+                 reference_bp=65000000, breadth=0.4410, mean_depth=0.02,
+                 window_bp=1000, windows_expected=65000, windows_occupied=62725,
+                 window_occupancy=0.9650, mean_identity=0.9815,
+                 neighbour_ratio="inf", mapped_fraction_of_assigned="1.0000",
+                 total_reads_screened=2000000, mapq_min=10)
+
+    # (a) NTC present but, having no host, carrying no T. gondii row at all.
+    cov_a = tmp / "blank_absent.tsv"
+    write_cov(cov_a, [
+        cov_row(sample="SPECIMEN", role="sample", unique_reads=8310,
+                reads_per_million=4155.0, depth_cv=5.44, screen_assigned_reads=8400,
+                **shape),
+        cov_row(sample="NTC", role="control", taxid="562", taxon="Escherichia coli",
+                group="bacteria", reference_bp=4600000, unique_reads=900,
+                reads_per_million=4500.0, breadth=0.2000, mean_depth=0.03,
+                depth_cv=1.20, window_bp=1000, windows_expected=4600,
+                windows_occupied=920, window_occupancy=0.2000, mean_identity=0.9990,
+                neighbour_ratio="inf", screen_assigned_reads=950,
+                mapped_fraction_of_assigned="0.9474",
+                total_reads_screened=200000, mapq_min=10),
+    ])
+    got_a = score(tmp, cov_a).get("SPECIMEN", {}).get("tier", "<missing>")
+    record("matrix_blank:host artefact is NOT suppressed by a host-free NTC",
+           got_a == "supported", f"got {got_a}, want supported (the D14 bug)")
+
+    # (b) Same specimen, plus a matrix blank that DOES carry the artefact.
+    cov_b = tmp / "blank_present.tsv"
+    write_cov(cov_b, [
+        cov_row(sample="SPECIMEN", role="sample", unique_reads=8310,
+                reads_per_million=4155.0, depth_cv=5.44, screen_assigned_reads=8400,
+                **shape),
+        cov_row(sample="BLANK", role="control", unique_reads=8447,
+                reads_per_million=4267.0, depth_cv=5.50, screen_assigned_reads=8500,
+                **shape),
+    ])
+    f_b = score(tmp, cov_b)
+    got_b = f_b.get("SPECIMEN", {}).get("tier", "<missing>")
+    record("matrix_blank:host artefact IS suppressed by a matrix blank",
+           got_b == "suppressed_control", f"got {got_b}, want suppressed_control")
+    # The blank's own content is QC, never a finding about a specimen.
+    got_c = f_b.get("BLANK", {}).get("tier", "<missing>")
+    record("matrix_blank:the blank's own row is control_background",
+           got_c == "control_background", f"got {got_c}")
+
+
 def test_platform_carried(tmp: Path) -> None:
     """Every finding must carry ITS OWN row's platform, whatever tier it landed in.
 
@@ -1098,6 +1159,7 @@ CASES = {
     "platform": test_platform_carried,
     "absent": test_exhaustive_absent,
     "shared_assembly": test_shared_assembly_masking,
+    "matrix_blank": test_matrix_blank_suppresses_host_artifact,
 }
 
 
