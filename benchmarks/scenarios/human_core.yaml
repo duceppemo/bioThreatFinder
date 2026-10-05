@@ -222,6 +222,40 @@ scenarios:
           - taxon: Yersinia pestis
             min_tier_at_rpm: {100: supported, 1000: confirmed_in_silico}
 
+    - id: lod_gram_negative_fine
+      description: >
+        THE FALSIFIABLE TEST FOR D12. The decade series steps 100 -> 1000 and so brackets
+        the real threshold without locating it. D12 predicts, from per-replicate pedestals
+        measured by read attribution, that neighbour_ratio crosses 1.5 at 171-184 rpm
+        (centre ~178) - not because Y. pestis becomes detectable there, but because
+        min_neighbour_ratio is an undeclared read floor set by background composition.
+        This grid brackets that band with points clearly below and above.
+
+        THE OBSERVABLE IS THE TIER LEAVING attributed_to_neighbour, not reaching
+        confirmed_in_silico. At 100 rpm lod_v4 records attributed_to_neighbour with
+        neighbour_ratio 0.8553, so the neighbour gate binds FIRST; the prediction is about
+        that gate's crossing. Other gates (depth_cv especially, see D14) may still fail just
+        above the crossing, which would land the finding at `supported` - that is consistent
+        with the prediction, not a refutation of it. D12 condition 3 requires reading the
+        per-sample `reasons` string before calling any result a refutation.
+
+        MUST be simulated with --illumina-simulator art at 150 bp / insert 350, because the
+        coefficients the prediction rests on were measured there and iss has no insert
+        parameter (D12 conditions 1 and 2). check_pedestal_model.py refuses an iss batch.
+      kind: lod_series
+      nysdoh_category: gram_negative_bacteria
+      spikes:
+          - taxon: Yersinia pestis
+            source: target
+            levels_rpm: [120, 150, 170, 190, 210, 250]
+      truth:
+          present: [Yersinia pestis]
+      controls:
+          # So this batch can be scored on its own, and so the host-derived pedestal D14
+          # describes is suppressed rather than reported (the blank is run-global).
+          include_ntc: true
+          include_matrix_blank: true
+
     - id: lod_gram_positive
       description: >
         L. monocytogenes decade series. Gram-positive, 2.9 Mb, and its near

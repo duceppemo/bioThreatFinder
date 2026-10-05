@@ -384,6 +384,54 @@ remedy, and the options differ in what they would cost every one of the 89 taxa:
    mechanism and uses data already produced every run, but the estimate is specimen- and
    background-dependent, so it is the least portable.
 
+### Option 2 is now calibrated, 2026-10-05 — the neighbour's SHAPE separates the two cases
+
+Option 2 ("require the neighbour to be credible before it can out-vote") carried the
+objection that it "adds a second threshold to calibrate". That threshold has now been
+measured rather than argued about, by `scripts/measure_neighbour_uniformity.py` over the
+`runs/lod_v4` bundle BAMs. The coverage TSV carries `best_neighbour_reads` but no breadth for
+the neighbour, so the quantity cannot be read off an existing artifact.
+
+    uniformity = observed_breadth / breadth_expected_if_the_same_reads_were_uniform
+
+A present organism's reads cover its genome, so uniformity approaches 1. Cross-mapped reads
+pile onto the conserved fraction two genomes share, covering far less than their bulk
+implies. It is a SHAPE statistic, near-independent of abundance, which is what lets one
+threshold serve every spike level.
+
+| bundle | declared neighbour | in the specimen? | neighbour uniformity |
+|---|---|---|---|
+| 632 *Y. pestis* | 630 *Y. enterocolitica* | **no** | **0.114 - 0.124** |
+| 1392 *B. anthracis* | 1428 *B. thuringiensis* | yes | 0.639 - 0.973 |
+| 1639 *L. monocytogenes* | 1642 *L. innocua* | yes | 0.935 - 0.992 |
+| 487 *N. meningitidis* | 486 *N. lactamica* | yes | 0.970 - 0.979 |
+| 28901 *S. enterica* | 562 *E. coli* | yes | 0.956 - 0.974 |
+
+The gap runs from 0.124 to 0.639, so any threshold in between divides them, and the split
+reproduces the scope this entry states independently: one defective bundle, four where the
+gate does the job it claims. The 630 figure is constant across all four spike levels and
+all three replicates, which is the pedestal signature - ~2,700 reads covering ~1% of a
+4.6 Mb genome, about 8.5x more concentrated than uniform.
+
+Why raw breadth cannot do this: breadth scales with abundance, so a trace true positive and
+a fat pedestal can share one. At 100 rpm the target holds 2,336 reads and the absent
+neighbour 2,731 - close enough that the raw ratio attributes the sample to the neighbour -
+while their uniformities are 0.86 and 0.12.
+
+⚠️ **The script's first verdict logic asked the wrong question** and is recorded because the
+shape of the error matters: it tested "are the neighbours below the targets?", which assumes
+the defective case. On a bundle whose declared neighbour IS present the ordering simply
+inverts - the neighbour is credible and the unspiked target is the pedestal - so it printed
+NOT SEPARATED for three bundles that are cleanly separated the other way round. The gate
+under consideration asks only whether the NEIGHBOUR deserves to out-vote, so the neighbour's
+own shape is the entire input; the comparison was a leftover from how the defect was first
+seen.
+
+**Not implemented.** This calibrates option 2; it does not choose it, and no gate has been
+changed. The cliff measurement below is what confirms the mechanism the remedy would be
+built on, and it is running as `d12fine`. Implementing a threshold before that lands would be
+tuning against an unconfirmed model.
+
 **SCOPE, measured 2026-10-03 and narrower than first stated.** The same read attribution
 applied to the negative-control bundles shows the defect is NOT general. For five of the six
 other taxa that stage 1 nominated, the declared near-neighbour is genuinely present in the
