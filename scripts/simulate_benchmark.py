@@ -1383,16 +1383,31 @@ def count_fastq_reads(path: Path) -> int:
     return lines // 4
 
 
-def concat_to_gz(sources: Sequence[Path], dest: Path) -> None:
+def concat_to_gz(sources: Sequence[Path], dest: Path, threads: int = 1) -> None:
     """Concatenate FASTQ parts (plain or gzipped) into one .fastq.gz.
 
     Gzip members concatenate byte-wise into a valid stream, so an already-gzipped
     part is copied verbatim instead of being decompressed and recompressed. Plain
     parts get their own member. Every reader we care about (zcat, seqkit,
     fastp, minimap2) handles multi-member gzip.
+
+    COMPRESSION IS THE WHOLE COST OF A BATCH, SO IT IS PARALLEL WHEN IT CAN BE.
+    Measured on divergent_v1 (2026-10-04), one 20 M-read sample took 44 minutes: 11
+    generating and 33 compressing, single-threaded, on a 64-core box. pigz does the
+    same work across `threads` cores and writes an ordinary gzip stream, so a batch
+    stops being dominated by one core. gzip is the fallback when pigz is absent, which
+    keeps the script dependency-free.
+
+    THE OUTPUT IS NOT BYTE-IDENTICAL BETWEEN THE TWO PATHS, AND MUST NOT NEED TO BE.
+    pigz and zlib make different block choices at the same level, so the .gz bytes
+    differ while the DECOMPRESSED bytes are identical - which is the only thing any
+    consumer of this file, or any figure computed from it, depends on. `-n` suppresses
+    the name/mtime header fields, matching mtime=0 on the gzip path, so neither route
+    embeds a timestamp that would make a rebuild differ from itself.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
+    pigz = shutil.which("pigz") if threads > 1 else None
     with tmp.open("wb") as out:
         if not sources:
             # A genuinely empty library (a blank NTC with no background panel) is a
@@ -1404,6 +1419,12 @@ def concat_to_gz(sources: Sequence[Path], dest: Path) -> None:
             if str(src).endswith(".gz"):
                 with src.open("rb") as fh:
                     shutil.copyfileobj(fh, out, length=1 << 20)
+            elif pigz:
+                # check=True: a failed compressor must not leave a short FASTQ that
+                # looks like a sample with fewer reads than its manifest claims.
+                with src.open("rb") as fh:
+                    subprocess.run([pigz, "-c", "-6", "-n", "-p", str(threads)],
+                                   stdin=fh, stdout=out, check=True)
             else:
                 with gzip.GzipFile(fileobj=out, mode="wb", compresslevel=6, mtime=0) as gz:
                     with src.open("rb") as fh:
@@ -2172,9 +2193,9 @@ def generate_sample(plan: SamplePlan, sim: Simulator, work_dir: Path,
                 "reads_generated": got,
             })
 
-        concat_to_gz(parts_1, plan.fastq_1)
+        concat_to_gz(parts_1, plan.fastq_1, threads=threads)
         if plan.fastq_2:
-            concat_to_gz(parts_2, plan.fastq_2)
+            concat_to_gz(parts_2, plan.fastq_2, threads=threads)
         log_fh.write(f"# wrote {plan.fastq_1}"
                      + (f" and {plan.fastq_2}\n" if plan.fastq_2 else "\n"))
 
