@@ -343,6 +343,51 @@ a cliff at 170 or 190 as a refutation of arithmetic that in fact predicted it. A
 the per-sample neighbour spread straddles the threshold - (3840+210)/2811 = 1.44 fails while
 (3840+210)/2581 = 1.57 passes - so with three replicates the cliff is a band by construction.
 
+### CONFIRMED 2026-10-06 — the cliff is at 176.6 rpm, inside the predicted 171-184 band
+
+`runs/d12fine`: 120/150/170/190/210/250 rpm x3 replicates, ART at 150 bp / insert 350, batch
+gated on 183 ART commands and **0 iss** before the pipeline was allowed to start (condition 1).
+Pipeline exit 0.
+
+| level | tier | mean neighbour_ratio |
+|---|---|---|
+| 120 | 3/3 `attributed_to_neighbour` | 1.038 |
+| 150 | 3/3 `attributed_to_neighbour` | 1.290 |
+| **170** | **3/3 `attributed_to_neighbour`** | **1.448** |
+| **190** | **0/3 - all `supported`** | **1.604** |
+| 210 | 0/3 | 1.722 |
+| 250 | 0/3 | 2.087 |
+
+Linear interpolation of the 1.5 crossing between the bracketing levels gives **176.6 rpm**,
+against a prediction of 171-184 with centre ~178 - inside the band and 1.4 rpm from its
+centre. The per-replicate spread behaves as predicted too: at 170 rpm one replicate sits at
+1.4989, which is the threshold to four decimal places.
+
+**Condition 3 is satisfied explicitly, not by inference.** The `reasons` strings name the
+deciding gate at each side of the cliff:
+
+    170 rpm: reads favour neighbour taxid 630 (ratio 1.4989 < 1.5)
+    190 rpm: read threshold met; failed: depth_cv 3.62 <= 2.50
+
+So `neighbour_ratio` is what binds below the cliff and releases above it, and `depth_cv`
+takes over afterwards - which is why the tier above 190 rpm is `supported` rather than
+`confirmed_in_silico`. That is consistent with the prediction, which was only ever about the
+neighbour gate's crossing.
+
+**What this establishes.** The mechanism is no longer inferred from one batch's pedestals: a
+quantitative prediction made before the data existed, from read attribution on a different
+batch, located a threshold crossing to within 1.4 rpm. `min_neighbour_ratio` is therefore an
+undeclared read floor whose height is set by background composition - about 3,840 true target
+reads in this background - and the measured "limit of detection" of 1000 rpm was an artefact
+of a decade grid straddling it. The real detection limit is far lower than the LoD series
+could show.
+
+**Not affected by the 2026-10-06 `samtools depth -aa` correction.** That bug inflates breadth
+and occupancy on FRAGMENTED references; *Y. pestis* has 4 complete replicons and every one was
+emitted under `-a`, verified by re-running the patched `coverage_stats.py` over these bundles
+(breadth and neighbour_ratio identical to the last decimal, depth_cv differing only in the
+fourth). The numbers above stand.
+
 **Three conditions the test batch must meet, or the result cannot be interpreted:**
 
 1. **It must be ART-simulated.** `simulate_benchmark.py:2416` defaults `--illumina-simulator`
