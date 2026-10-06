@@ -637,10 +637,24 @@ process MARKER_SEARCH_HMM {
         # missing a frame would silently lose the hit the HMM tier exists for.
         seqkit translate -f 6 --allow-unknown-codon ${hit_reads} -o translated.faa 2>> seqkit.log
         if [ -s translated.faa ]; then
+            # NO `|| true`. A swallowed hmmsearch failure is INDISTINGUISHABLE from
+            # "searched the profiles and confidently found nothing": the domtbl is
+            # pre-touched and non-optional, so the task always succeeded with a file,
+            # marker_evidence.py recorded the hmm tier as SUPPLIED, every hmm marker took
+            # the "tried, nothing met thresholds" branch, and with a manifest present each
+            # was written ABSENT. A missing or corrupt markers.hmm, an OOM, or a bad
+            # profile therefore produced confident absences.
+            #
+            # That is load-bearing in the worst direction: `absent(mtb_RD1) and mtb_rpoB`
+            # evaluates TRUE on those absences, and a genuine M. tuberculosis detection is
+            # reported as a BCG vaccine strain - an actionable stand-down. Letting the task
+            # fail means errorStrategy 'ignore' emits no domtbl, the hmm tier is recorded
+            # as NOT supplied, and its markers fall to UNKNOWN, which caps the tier instead
+            # of asserting absence.
             hmmsearch --cpu ${task.cpus} \\
                 --domtblout ${meta.id}.markers.hmm.domtbl \\
                 -E 1e-3 --domE 1e-3 \\
-                ${markers_dir}/markers.hmm translated.faa > hmmsearch.log 2>&1 || true
+                ${markers_dir}/markers.hmm translated.faa > hmmsearch.log 2>&1
         fi
     fi
     """

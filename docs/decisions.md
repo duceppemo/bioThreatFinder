@@ -908,6 +908,61 @@ matrix; it does nothing for a specimen type whose matrix was never blanked.
 
 ---
 
+## D17 — The marker tier is permissive by omission, found 2026-10-06
+
+Three findings from the third adversarial review. All change behaviour across many taxa, so
+they are recorded rather than patched.
+
+### D17a — 31 of 89 watchlist taxa bypass marker gating entirely, and curating a rule makes the pipeline STRICTER
+
+`score_evidence.py` reaches `confirmed_in_silico` from the alignment gates alone, then runs
+the veto / vaccine / `confirm_requires` block only `if spec and mr is not None`. When a taxon
+has NO block in `marker_rules.yaml`, the whole block is skipped silently - nothing is appended
+to `reasons`.
+
+Measured on the shipped pack: 58 rule blocks against 89 watchlist entries, so **31 taxa have
+no block**, 29 of them `notifiable` and 2 `emerging` - Monkeypox virus, Dengue, Zika, West
+Nile, Japanese encephalitis, three orthohantaviruses, *Salmonella enterica*, *Plasmodium
+vivax*, *Trypanosoma cruzi*, *Histoplasma capsulatum*, *Cryptococcus neoformans* among them.
+
+The incentive is backwards, and the file says so about the other case: a taxon that HAS a
+block but no `confirm_requires` is capped at `supported` with "no confirm_requires rule for
+this taxon - cannot reach confirmed_in_silico by design". A taxon with no block at all is
+confirmed on alignment alone, with no such line and no caveat. Curating a rule can only make
+the pipeline stricter; omitting one makes it permissive.
+
+Options: cap every taxon without a block at `supported` (honest, and would reclassify
+confirmations across 31 notifiable taxa at once); or require a block per watchlist entry and
+fail the run without one (loud, and blocks the pipeline on a curation backlog); or add an
+explicit `no_markers_available: true` so the omission has to be deliberate and is visible in
+`reasons`.
+
+### D17b — the HMM tier ignores the catalogue's own thresholds
+
+`marker_evidence.py` gates the HMM tier on `hmm_bits >= --hmm-min-bits` (default 25.0) alone.
+`hmm_coverage` is computed and recorded but never gated, and the per-marker `min_coverage` /
+`min_identity` the catalogue curates are not applied to this tier at all. Since a marker is
+PRESENT if ANY applicable tier passes, one 25-bit domain hit makes the marker PRESENT
+regardless of its curated thresholds - and 25 bits on a six-frame translation of short reads
+is a weak bar. Direction of harm is false PRESENT, which fires a wrong veto or a wrong
+`vaccine_if`.
+
+Same file: the protein tier's coverage gate is skipped entirely when `aa_length == 0`, which
+happens for any marker whose header in `markers.aa.faa` does not follow `marker|<id>|...`,
+leaving identity as its only threshold.
+
+### D17c — `resolution_note` is write-only
+
+`resolve_watchlist.py` records synonym matches and RANK MISMATCHES as a note and writes it to
+`watchlist.resolved.tsv`, where nothing reads it. A watchlist row whose name resolves to a
+genus instead of the declared species silently expands `descendants()` over the whole genus,
+so every species in it feeds that taxon's `assigned_reads`. The shipped pack is currently
+benign - 13 synonym matches, no rank mismatch - but the guard rail is write-only. Note also
+that `resolve_one`'s tie-break puts the rank test ahead of the scientific-name test, so a
+synonym-matched node can beat the scientific-name node when their ranks differ.
+
+---
+
 ## D16 — Two defects that need a decision rather than a patch, found 2026-10-06
 
 Both surfaced in an adversarial review of the core scoring code. Neither is fixed, because

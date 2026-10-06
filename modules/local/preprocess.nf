@@ -96,9 +96,21 @@ process MINIMAP2_HOST_DEPLETE {
         ? "samtools fastq -f 4 -0 ${meta.id}.dehost.fastq.gz -"
         : "samtools fastq -f 12 -F 256 -1 ${meta.id}.dehost_1.fastq.gz -2 ${meta.id}.dehost_2.fastq.gz -0 /dev/null -s /dev/null -"
     """
+    # AN EXPLICIT FIFO, NOT A PROCESS SUBSTITUTION. `tee >(samtools flagstat - > f)` is
+    # not a job bash waits for, so the shell proceeded to the next command while flagstat
+    # was still writing - and the next commands READ that file. The `echo >>` could land
+    # mid-stream and host_depletion_stats.py could parse a truncated flagstat. It fails
+    # loudly when it happens (total == 0 is fatal there), which makes it an intermittent
+    # run failure in the step D14 makes load-bearing, not a silent wrong number - but it
+    # is a race either way. With a named pipe the PID is ours and `wait` is real.
+    mkfifo flagstat.fifo
+    samtools flagstat flagstat.fifo > ${meta.id}.host_stats.txt &
+    flagstat_pid=\$!
     minimap2 -ax ${preset} -t ${task.cpus} --secondary=no ${index} ${reads} 2> ${meta.id}.minimap2.log \\
-      | tee >(samtools flagstat - > ${meta.id}.host_stats.txt) \\
+      | tee flagstat.fifo \\
       | ${extract}
+    wait \$flagstat_pid
+    rm -f flagstat.fifo
 
     echo "# host index: ${index}" >> ${meta.id}.host_stats.txt
 

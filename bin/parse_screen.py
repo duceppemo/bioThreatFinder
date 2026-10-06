@@ -405,7 +405,14 @@ def main() -> int:
             # it is now the best evidence across classifiers rather than kraken2's.
             "assigned_reads": max(ku_reads, k2_reads, mb_reads),
             "krakenuniq_reads": ku_reads,
-            "krakenuniq_distinct_kmers": ku_kmers,
+            # BLANK, NOT 0, WHEN THERE IS NO K-MER BASIS. `0` reads as "zero distinct
+            # k-mers were observed" - evidence AGAINST the taxon - where the truth is that
+            # no arm supplying distinct k-mers ran. KrakenUniq is off by default, so in the
+            # default configuration every row of the HTML table rendered "Distinct k-mers:
+            # 0", and screen_flags (which carries krakenuniq_not_run) is in the summary TSV
+            # but is not a column in that table, so nothing on the page said otherwise.
+            # krakenuniq_dup and krakenuniq_cov were already blanked here; this was not.
+            "krakenuniq_distinct_kmers": ku_kmers if kmer_basis != "none" else "",
             "krakenuniq_dup": f"{ku_dup:.3f}" if kmer_basis != "none" else "",
             "krakenuniq_cov": f"{ku_cov:.6f}" if kmer_basis != "none" else "",
             "kmer_basis": kmer_basis,

@@ -478,10 +478,18 @@ def main() -> int:
         # protein floor is already derived from min_id with its own allowance, and
         # translated identity is far less sensitive to basecalling error.
         id_note = ""
+        # The catalogue value is KEPT, because the protein floor below is derived from it
+        # and the comment above promises only the nucleotide tier moves. It did not: the
+        # relaxation assigned to min_id in place and `aa_min_id = max(0.50, min_id - 0.15)`
+        # then read the relaxed number, so an ONT run at a catalogue floor of 0.95 got a
+        # protein floor of 0.75 instead of the documented 0.80 - widening a false-PRESENT
+        # route on the tier that has no bitscore or coverage-independent floor of its own,
+        # and false PRESENT on a marker is what fires a wrong veto or vaccine call.
+        min_id_catalogue = min_id
         if (args.platform or "").strip().lower() == "ont" and min_id > 0:
             relaxed = max(0.70, min_id - max(0.0, args.ont_identity_slack))
             if relaxed < min_id:
-                id_note = f" [ont: floor {min_id:g} -> {relaxed:g}]"
+                id_note = f" [ont: floor {min_id:g} -> {relaxed:g}, nucleotide tier only]"
                 min_id = relaxed
 
         rec = {
@@ -580,7 +588,7 @@ def main() -> int:
                 # Protein identity floors are lower than nucleotide by nature;
                 # scale rather than reusing min_identity directly, since a
                 # synonymous-divergent allele is the case this tier exists for.
-                aa_min_id = max(0.50, min_id - 0.15)
+                aa_min_id = max(0.50, min_id_catalogue - 0.15)
                 if e["aa_identity"] >= aa_min_id and (
                         e["aa_coverage"] >= min_cov or e["aa_length"] == 0):
                     passed.append(

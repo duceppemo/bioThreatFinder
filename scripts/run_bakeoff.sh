@@ -196,15 +196,22 @@ for v in "${selected[@]}"; do
   # comparison, and reproduce the very conclusion the fix exists to re-test - D15 for
   # Metabuli, D2 for KrakenUniq. The args are stamped beside the findings and compared.
   argstamp="${vdir}/.variant_args"
+  # THE FLAGS ALONE ARE NOT WHAT MAKES A RESULT REUSABLE. The motivating case for this
+  # stamp was a CODE fix (--skip_metabuli false being a no-op), after which $extra is
+  # unchanged, the stamp matches, SKIP fires and the stale table is fed to the comparison
+  # anyway - the bug intact. Every fix since has the same property: a breadth metric that
+  # was 1000x wrong does not change a variant's flags. The pack and profile matter too,
+  # because `--pack animal` over the same --batch resolves to the same OUTDIR.
+  stamp_now="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo nogit)|${PACK}|${PROFILE}|${extra}"
   stamped=""
   [[ -r "$argstamp" ]] && stamped="$(cat "$argstamp")"
   if [[ -s "$findings" ]] && (( $(grep -vc '^$' "$findings" 2>/dev/null || echo 0) > 1 )) \
-     && [[ "$stamped" == "$extra" ]]; then
+     && [[ "$stamped" == "$stamp_now" ]]; then
     log "SKIP ${name} (findings already present, same flags)"
   else
-    if [[ -s "$findings" ]] && [[ "$stamped" != "$extra" ]]; then
-      log "RERUN ${name}: findings exist but were built with flags ${stamped:-<unrecorded>},"
-      log "      not ${extra:-<none>}. Reusing them would answer a different question."
+    if [[ -s "$findings" ]] && [[ "$stamped" != "$stamp_now" ]]; then
+      log "RERUN ${name}: findings exist but were built as ${stamped:-<unrecorded>},"
+      log "      not ${stamp_now}. Reusing them would answer a different question."
     fi
     log "RUN  ${name}  ${extra:-<all arms>}"
     log "     ${rationale}"
@@ -239,7 +246,7 @@ for v in "${selected[@]}"; do
         log "         findings.tsv survived this failure"
         continue
       fi
-      printf '%s' "$extra" > "$argstamp"
+      printf '%s' "$stamp_now" > "$argstamp"
     fi
   fi
 
