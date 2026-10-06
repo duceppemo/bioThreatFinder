@@ -908,6 +908,63 @@ matrix; it does nothing for a specimen type whose matrix was never blanked.
 
 ---
 
+## D16 — Two defects that need a decision rather than a patch, found 2026-10-06
+
+Both surfaced in an adversarial review of the core scoring code. Neither is fixed, because
+each changes behaviour across all 89 taxa and the right setting is not obvious from one
+simulated batch.
+
+### D16a — a deliberately contaminated NTC poisons every OTHER scenario in the same batch
+
+`contamination_index_hop` (benchmarks/scenarios/human_core.yaml) ships with `include_ntc:
+true` AND `index_hop_fraction: 0.001`, which is exactly what the scenario is for: it exists to
+test the `suppressed_control` path, and its own expectation asserts the control shows the
+target at `control_background`. That is correct in isolation.
+
+It is not correct in company. `score_evidence.py` builds `control_rpm` across the WHOLE RUN,
+scenario-agnostic. The NTC is 200,000 reads with no host, so ~200 hopped *Y. pestis* pairs
+land at roughly **1,000 RPM** in a `role=control` row, and `control_rpm[632]` becomes 1,000
+for every sample in the batch. A post-depletion sample sits near 16.7x its pre-depletion
+level, so anything below about **300 RPM** pre-depletion is tiered `suppressed_control` -
+including `lod_gram_negative` at 10 and 100 RPM, in a different scenario, whose *Y. pestis*
+is genuinely present. The LoD would read 1000 RPM for a reason that has nothing to do with
+detection, while the hop scenario's own expectation passes.
+
+Not yet observed because every batch built so far used `--scenario` subsets that never put
+the two together. A batch built from the whole file would show it.
+
+The 2026-10-06 guard refuses `include_matrix_blank` + `index_hop_fraction` for the same
+reason, but refusing `include_ntc` + `index_hop_fraction` would delete the scenario's purpose.
+The options differ in what they cost:
+
+  1. **Scope `control_rpm` by scenario.** Correct, and the coverage TSV has no scenario
+     column - it would have to be threaded from the samplesheet through meta, or parsed out
+     of sample names, which is the fragile option.
+  2. **Exclude deliberately-hopped controls from `control_rpm`** for the hopped taxon only.
+     Needs the simulator to mark them, so the pipeline would be trusting a benchmark-only
+     annotation.
+  3. **Refuse to build a batch that mixes a hop scenario with others**, leaving the scenario
+     runnable alone. Cheapest, and narrows what a single batch can test.
+
+### D16b — `mapped_fraction_of_assigned` mixes mates with pairs, so its floor is 0.25 on Illumina and 0.50 on ONT
+
+KRAKEN2 runs `--paired` and METABULI `--seq-mode 2`, so stage-1 `assigned_reads` counts
+PAIRS. `coverage_stats.py` counts primary records, which are MATES. The ratio is therefore
+~2x inflated on Illumina and correct on ONT, so the pack's `min_mapped_fraction_of_assigned
+= 0.50` is effectively 0.25 for paired data. The gate is live - 111 of 202 rows in `lod_v4`
+fall below it - so this is a miscalibration by platform, not a dead threshold. RPM is
+unaffected (mates over mates) and control-vs-sample comparisons stay like-for-like within a
+platform. `parse_screen --min-reads 10` has the same shape: 10 pairs on Illumina, 10 reads on
+ONT.
+
+Fixing it means either halving the mate count for paired data or doubling the pair count, and
+either way the 0.50 floor was CALIBRATED against the inflated figure - so correcting the units
+without re-deriving the threshold would tighten the gate by 2x on every Illumina sample at
+once. The units fix and the threshold re-derivation have to land together, against a batch
+that can measure what the new floor rejects.
+
+---
+
 ## D15 — A divergent agent is invisible because it is classified CORRECTLY, and the watchlist registers its sibling as a suppressor ⚠️ *the amino-acid arm does not fix this, and was tested on the scenario built to favour it*
 
 `divergent_bundibugyo_filovirus` and `divergent_clostridium_bont` exist to answer one question:
@@ -952,7 +1009,12 @@ underlying gap is real: the thing it is pointing at should be fixed, not the ass
 `findings.tsv` is identical between the two variants: same 48 rows, `tier` differing in **0**
 of them, only `n_classifiers`/`classifiers`/`screen_reads`/`reasons`/
 `mapped_fraction_of_assigned` moving. Evaluator totals are identical (0 TP, 0 FN, 6 FP, 0
-false confirmations). Cost: 153.2 -> 173.7 CPU-minutes for 6 samples. Combined with the
+false confirmations). Cost, CORRECTED 2026-10-06: **2,756.3 -> 3,041.0 cpu-minutes** for 6
+samples, Metabuli contributing 137.6. The figures first recorded here, "153.2 -> 173.7
+CPU-minutes", were wall-clock: `evaluate_benchmark.py` summed `realtime` and never read
+`%cpu`, so a 24-thread arm was charged a 24th of its cost in the table built to weigh cost
+against accuracy. The conclusion is unchanged and the ratio is slightly larger than first
+reported. Combined with the
 identity-matched result in `docs/benchmarking.md`, Metabuli has now changed **zero decisions
 on every scenario it has been run against**, including the `divergent_*` pair the variant
 table nominated as where its value "should show up". Its remaining untested case is an agent

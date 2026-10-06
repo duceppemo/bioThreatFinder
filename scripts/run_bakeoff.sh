@@ -224,13 +224,22 @@ for v in "${selected[@]}"; do
     else
       # A single variant failing must not abandon the whole bake-off; record it and
       # carry on, so five good comparisons are not lost to one bad configuration.
+      # The stamp is written only AFTER the run succeeds. Writing it first looks
+      # harmless and is not: nextflow fails (OOM, ctrl-C, a starved arm), `continue`
+      # runs, and the PREVIOUS findings.tsv survives because nextflow does not delete
+      # what it already published. The next invocation then sees findings + a matching
+      # stamp and skips - feeding a table built under the old flags to a comparison
+      # labelled with the new ones, which is the bug this stamp exists to prevent.
       mkdir -p "$vdir"
-      printf '%s' "$extra" > "$argstamp"
+      rm -f "$argstamp"
       if ! "${cmd[@]}" >"${OUTDIR}/${name}.log" 2>&1; then
         log "WARNING: variant ${name} FAILED - see ${OUTDIR}/${name}.log"
-        log "         it will be omitted from the comparison"
+        log "         it will be omitted from the comparison, and its flag stamp is NOT"
+        log "         written, so a later run re-executes it rather than reusing whatever"
+        log "         findings.tsv survived this failure"
         continue
       fi
+      printf '%s' "$extra" > "$argstamp"
     fi
   fi
 

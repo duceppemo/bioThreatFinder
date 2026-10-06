@@ -266,7 +266,11 @@ call. See **D15**.
 
 For the arm under test, this was its nominated best case and it changed nothing: `findings.tsv`
 identical across variants (48 rows, `tier` differing in 0), identical evaluator totals (0 TP,
-0 FN, 6 FP, 0 false confirmations), 153.2 -> 173.7 CPU-minutes. Metabuli has now changed zero
+0 FN, 6 FP, 0 false confirmations). ⚠️ The cost was first published here as "153.2 -> 173.7
+CPU-minutes"; those were WALL-CLOCK minutes, because `evaluate_benchmark.py` summed `realtime`
+and ignored `%cpu` (fixed 2026-10-06). Corrected: **2,756.3 -> 3,041.0 cpu-minutes**, of which
+Metabuli is 137.6 over 6 samples - 22.9 cpu-min per sample, matching the 22.2 measured
+independently on lod_v3. Metabuli has now changed zero
 decisions on every scenario it has been run against. `bakeoff_per_taxon.tsv` is EMPTY for this
 batch - these are `specificity` scenarios whose spiked organisms are not watchlist taxa, so
 there is no per-taxon sensitivity to compare, and the table the section above tells you to read

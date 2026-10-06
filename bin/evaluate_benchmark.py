@@ -574,16 +574,41 @@ def parse_trace(path: Path) -> dict:
     per_proc = defaultdict(lambda: {"tasks": 0, "cpu_min": 0.0, "peak_gib": 0.0})
     total_cpu_min = 0.0
     peak_gib = 0.0
+    n_no_cpu = 0
     for r in rows:
         name = (r.get("process") or r.get("name") or "").split(":")[-1].split(" ")[0]
         mins = dur_to_min(r.get("realtime") or r.get("duration") or "")
+        # CPU-MINUTES, NOT WALL-CLOCK MINUTES. This summed `realtime` alone and labelled
+        # the result cpu_minutes in bakeoff.tsv and summary.md, which charges a 24-thread
+        # arm a 24th of its cost relative to a serial one - in the table whose entire
+        # stated purpose is to weigh accuracy against cost, and which is ordered so that
+        # a configuration buying sensitivity with compute has to justify it. Measured on
+        # runs/lod_v4: the old sum gave MARKER_SEARCH_AA 229.5 against a true 5,250.3, and
+        # a run total of 595.4 against 10,490.7 - 17.6x under.
+        pct = (r.get("%cpu") or r.get("pcpu") or "").strip().rstrip("%")
+        try:
+            frac = float(pct) / 100.0 if pct else None
+        except ValueError:
+            frac = None
+        if frac is None or frac <= 0:
+            # No %cpu in this trace: wall-clock is all there is. Counted as one core so
+            # the figure is a documented LOWER BOUND rather than a silent mislabel.
+            n_no_cpu += 1
+            cpu_min = mins
+        else:
+            cpu_min = mins * frac
         gib = mem_to_gib(r.get("peak_rss") or r.get("rss") or "")
         p = per_proc[name]
         p["tasks"] += 1
-        p["cpu_min"] += mins
+        p["cpu_min"] += cpu_min
         p["peak_gib"] = max(p["peak_gib"], gib)
-        total_cpu_min += mins
+        total_cpu_min += cpu_min
         peak_gib = max(peak_gib, gib)
+    if n_no_cpu:
+        sys.stderr.write(
+            f"[bench] WARNING: {n_no_cpu} of {len(rows)} trace rows have no %cpu column; "
+            f"their cost is counted as one core, so cpu_minutes is a LOWER BOUND. Add "
+            f"%cpu to trace.fields to get the real figure.\n")
     return {"per_process": dict(per_proc), "total_cpu_min": total_cpu_min,
             "peak_gib": peak_gib, "n_tasks": len(rows)}
 

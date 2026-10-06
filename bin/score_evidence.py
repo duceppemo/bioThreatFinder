@@ -387,10 +387,19 @@ def main() -> int:
 
     # Stage-1 support, for concordance reporting.
     screen: dict[tuple[str, str], dict] = {}
+    # Control samples seen ANYWHERE, stage 1 included. n_controls used to be counted from
+    # coverage rows alone, which exist only for taxa that reached stage 2 - so the cleanest
+    # possible NTC, the one that nominates nothing, counted as zero controls and every
+    # finding in the run carried "NO NEGATIVE CONTROL IN RUN - contamination cannot be
+    # excluded". The run HAD a control; it was clean. That is the one QC line an analyst
+    # reads first, and it asserted the opposite of the truth in the best case.
+    control_samples: set[str] = set()
     for path in args.candidates:
         for row in read_tsv(path):
             key = (row.get("sample", ""), row.get("taxid", ""))
             screen[key] = row
+            if row.get("role") == "control" and row.get("sample"):
+                control_samples.add(row["sample"])
 
     coverage: list[dict] = []
     for path in args.coverage:
@@ -405,7 +414,8 @@ def main() -> int:
             if rpm > control_rpm[row["taxid"]]:
                 control_rpm[row["taxid"]] = rpm
                 control_src[row["taxid"]] = row.get("sample", "")
-    n_controls = len({r["sample"] for r in coverage if r.get("role") == "control"})
+    control_samples |= {r["sample"] for r in coverage if r.get("role") == "control"}
+    n_controls = len(control_samples)
 
     findings: list[dict] = []
 
@@ -666,6 +676,14 @@ def main() -> int:
         if n_controls == 0 and row.get("role") != "control":
             reasons.append(
                 "NO NEGATIVE CONTROL IN RUN - contamination cannot be excluded"
+            )
+        elif not control_rpm and row.get("role") != "control":
+            # Controls exist but none of them raised anything for any taxon. That is the
+            # good case and must not read like the bad one: subtraction had nothing to
+            # subtract because the controls were clean, not because they were absent.
+            reasons.append(
+                f"{n_controls} negative control(s) in run, all clean - no taxon raised in "
+                f"any control, so no control subtraction applied"
             )
 
         # A control's own content is QC information, not a finding about a
