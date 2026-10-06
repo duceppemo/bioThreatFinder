@@ -424,8 +424,13 @@ def test_coverage_metrics(tmp: Path) -> None:
         skip("coverage:masking", "samtools not on PATH")
         return
 
-    tgt = "taxid|632|NZ_TEST1.1 Yersinia pestis chr"
-    nb = "taxid|633|NC_TEST2.1 Yersinia pseudotuberculosis"
+    # No spaces: the SAM spec forbids them in @SQ SN, and samtools' BED reader splits on
+    # whitespace, so a spaced name cannot be addressed as a region. The fixture carried
+    # FASTA-style descriptions here, which made it an invalid header that happened not to
+    # matter until coverage_stats.py began restricting `samtools depth` to the target's
+    # contigs. Real bundle references are `taxid|<taxid>|<accession>`.
+    tgt = "taxid|632|NZ_TEST1.1"
+    nb = "taxid|633|NC_TEST2.1"
     L = 1000
 
     def rd(name, ref, pos, mapq, flag=0, nm=1, ln=100):

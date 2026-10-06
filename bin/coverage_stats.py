@@ -46,7 +46,10 @@ from __future__ import annotations
 
 import argparse
 import re
+import os
+import math
 import statistics
+import tempfile
 import subprocess
 import sys
 from collections import defaultdict
@@ -310,54 +313,101 @@ def collect_alignments(bam: Path, mapq_min: int, mask=None):
 
 
 def depth_profile(bam: Path, mapq_min: int, target_refs: set[str], window: int,
-                  mask=None):
+                  mask=None, lengths=None):
     """Per-base depth for the target's references only.
 
-    ``samtools depth -a`` over the whole competitive bundle would emit a row per
-    base of every neighbour genome too - tens of millions of lines for no
-    benefit. Only the target needs a depth profile.
+    `-aa`, NOT `-a`, AND THE DIFFERENCE IS ~1000x ON A FRAGMENTED GENOME.
+    `samtools depth -a` emits positions only for references that received at least one
+    counted read; a contig with zero coverage is omitted entirely. `total` is the
+    denominator for breadth here and `window_possible` for occupancy, so on a multi-contig
+    reference both were computed over only the contigs that recruited something. Measured
+    on the T. gondii bundle of runs/lod_v4 (2,264 target contigs, 65,668,120 bp): `-a`
+    emitted 57,470 positions - 0.087% of the reference - and the published row read
+    breadth 0.469 / occupancy 0.976 / mean_depth 21.2x where the true values are
+    0.000428 / 0.00125 / 0.0168x. So the two gates this module calls the most useful were
+    never applied to a fragmented reference, and 177 of 363 pack references have more than
+    one contig (Hammondia hammondi: 36,360). mean_depth crossing 20x also drove
+    score_evidence.py's "genome_typing_supported" claim off a 0.017x genome.
+
+    `-aa` alone would emit every neighbour base too, which is what the `-a` here was
+    avoiding, so the target's contigs go to samtools as a BED and it does the restriction.
+    Measured: 15.7 s for the 65.7 Mb target.
+
+    Depth is accumulated with Welford rather than collected in a list, because one row per
+    base is 65.7 M ints for that reference - about 2.6 GB.
+
+    -G 0x800 excludes SUPPLEMENTARY alignments, matching collect_alignments()'s
+    `view -F 0x904`. samtools depth's default filter drops UNMAP/SECONDARY/QCFAIL/DUP but
+    KEEPS supplementary, so a chimeric ONT read's extra segments were counted toward
+    breadth, coverage_10x and occupancy while contributing nothing to unique_reads.
     """
     mask = mask or {}
+    lengths = lengths or {}
     covered = 0
     covered10 = 0
     total = 0
     masked_positions = 0
-    depths: list[int] = []
+    _n = 0
+    _mean = 0.0
+    _m2 = 0.0
     window_hits: dict[tuple[str, int], bool] = {}
-    # Windows that COULD be occupied: per contig, mask-aware. See below.
     window_possible: dict[tuple[str, int], bool] = {}
 
-    # -G 0x800 excludes SUPPLEMENTARY alignments, matching collect_alignments()'s
-    # `view -F 0x904`. samtools depth's default filter drops UNMAP/SECONDARY/QCFAIL/DUP
-    # but KEEPS supplementary, so a chimeric ONT read's extra segments were counted
-    # toward breadth, coverage_10x and occupancy while contributing nothing to
-    # unique_reads - inflating exactly the metrics the confirmation gates rest on, on
-    # the platform where split alignments are common.
-    cmd = ["samtools", "depth", "-a", "-Q", str(mapq_min), "-G", "0x800", str(bam)]
-    for line in stream(cmd):
-        f = line.rstrip("\n").split("\t")
-        if len(f) < 3 or f[0] not in target_refs:
-            continue
-        ivs = mask.get(contig_key(f[0]))
-        if ivs:
+    # samtools' BED reader splits on WHITESPACE, not tabs alone, so a reference whose
+    # name contains a space cannot be addressed as a region at all - it parses as
+    # name/start/end and fails. The SAM spec forbids spaces in @SQ SN for exactly this
+    # reason and every reference this pack builds is space-free, but a hand-made or
+    # third-party BAM can carry one, and the failure would otherwise be an opaque
+    # "[bed_read] Parse error ... at line 1" from a subprocess.
+    spacey = sorted(r for r in target_refs if any(c.isspace() for c in r))
+    if spacey:
+        sys.exit(f"ERROR: target reference name(s) contain whitespace: {spacey[:2]}. "
+                 f"The SAM spec forbids spaces in @SQ SN, and samtools cannot address such "
+                 f"a reference as a region, so per-base depth cannot be restricted to the "
+                 f"target. Rebuild the bundle from FASTA headers whose first token is the "
+                 f"whole name.")
+    missing = sorted(r for r in target_refs if r not in lengths)
+    if missing:
+        sys.exit(f"ERROR: no header length for target reference(s) {missing[:3]}; without "
+                 f"them the region BED cannot be written and `samtools depth -aa` would "
+                 f"emit every neighbour base in the bundle.")
+
+    bed_fh = tempfile.NamedTemporaryFile("w", suffix=".bed", delete=False)
+    try:
+        for r in sorted(target_refs):
+            bed_fh.write(f"{r}\t0\t{lengths[r]}\n")
+        bed_fh.close()
+        cmd = ["samtools", "depth", "-aa", "-b", bed_fh.name,
+               "-Q", str(mapq_min), "-G", "0x800", str(bam)]
+        for line in stream(cmd):
+            f = line.rstrip("\n").split("\t")
+            if len(f) < 3 or f[0] not in target_refs:
+                continue
             pos0 = int(f[1]) - 1
-            if in_masked(ivs, pos0, pos0 + 1):
+            ivs = mask.get(contig_key(f[0]))
+            if ivs and in_masked(ivs, pos0, pos0 + 1):
                 masked_positions += 1
                 continue
-        d = int(f[2])
-        total += 1
-        depths.append(d)
-        pos0 = int(f[1]) - 1
-        win = (f[0], pos0 // window)
-        window_possible[win] = True
-        if d > 0:
-            covered += 1
-            window_hits[win] = True
-        if d >= 10:
-            covered10 += 1
+            d = int(f[2])
+            total += 1
+            _n += 1
+            _delta = d - _mean
+            _mean += _delta / _n
+            _m2 += _delta * (d - _mean)
+            win = (f[0], pos0 // window)
+            window_possible[win] = True
+            if d > 0:
+                covered += 1
+                window_hits[win] = True
+            if d >= 10:
+                covered10 += 1
+    finally:
+        os.unlink(bed_fh.name)
 
-    return (covered, total, depths, len(window_hits), covered10, masked_positions,
-            len(window_possible))
+    mean_depth = _mean if _n else 0.0
+    sd = math.sqrt(_m2 / _n) if _n else 0.0
+    return (covered, total, (mean_depth, sd), len(window_hits), covered10,
+            masked_positions, len(window_possible))
 
 
 def main() -> int:
@@ -418,9 +468,9 @@ def main() -> int:
     window = min(args.window, max(100, target_len // 50)) if target_len else args.window
 
     per_taxid = collect_alignments(args.bam, args.mapq_min, mask)
-    (covered, total_bases, depths, occupied_windows, covered10, masked_positions,
+    (covered, total_bases, depth_stats, occupied_windows, covered10, masked_positions,
      possible_windows) = depth_profile(args.bam, args.mapq_min, target_refs,
-                                       window, mask)
+                                       window, mask, lengths)
 
     tgt = per_taxid.get(args.taxid, {"reads": 0, "nm": 0, "aln": 0, "bases": 0})
     unique_reads = tgt["reads"]
@@ -433,10 +483,10 @@ def main() -> int:
 
     breadth = (covered / total_bases) if total_bases else 0.0
     breadth10 = (covered10 / total_bases) if total_bases else 0.0
-    mean_depth = statistics.fmean(depths) if depths else 0.0
+    mean_depth, _depth_sd = depth_stats
     # CV over the whole reference (zeros included) - an organism present at low
     # depth everywhere has a lower CV than one stacked on a single locus.
-    depth_cv = (statistics.pstdev(depths) / mean_depth) if depths and mean_depth > 0 else 0.0
+    depth_cv = (_depth_sd / mean_depth) if mean_depth > 0 else 0.0
     # OCCUPANCY IS A FRACTION, AND IT USED TO BE ABLE TO EXCEED 1.0.
     #
     # window_hits is keyed (contig, position // window) - PER CONTIG, over raw
