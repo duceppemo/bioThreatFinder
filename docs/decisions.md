@@ -552,6 +552,17 @@ corrected to MAPQ>=10 primary. Breadth, occupancy and identity are
 what actually hold the line - the specificity table shows 0.000 false positives - so this
 is a redundancy that is doing nothing, not an active false positive.
 
+⚠️ **CORRECTED 2026-10-06: the *T. gondii* row's coverage geometry above is inflated
+~1000x.** `samtools depth -a` omitted every zero-coverage contig, so breadth and occupancy
+were computed over only the contigs that recruited reads - 57,470 of 65,668,120 positions on
+that 2,264-contig reference. The READ COUNTS in the table (8,310 on target, the 26x ratio
+against *N. meningitidis*) are from `collect_alignments`, not from depth, and are unaffected;
+the breadth and occupancy figures quoted anywhere from this entry are not. Fixed in
+`bin/coverage_stats.py` with `-aa` restricted to the target's contigs; `runs/lod_v4` re-scored
+2026-10-06 gives breadth 0.000336 and occupancy 0.001256 for the same sample. The conclusion
+of this entry - that masking operates at a scale reads do not reach - is unchanged, and the
+*T. gondii* reference is a worse human-read sink than the entry implies, not a better one.
+
 **Why masking does not catch it.** `mask_pack_refs.py` runs at `min_hit_len=200` and
 `min_identity=0.95`. A 150 bp read needs neither - and 150 bp is the length this batch
 actually used (`simulate_benchmark.py:120`); an earlier version of this entry said 101 bp
@@ -770,6 +781,52 @@ see the failure before any threshold is tuned against it, or the tuning is unfal
 
 **Would resolve it:** re-running the batch after (1), which turns an invisible `unlisted`
 into a counted false positive and gives the first honest specificity number for the pack.
+
+### CORRECTED 2026-10-06 — the breadth figures above are inflated ~1000x, and the diagnosis was wrong twice
+
+**The numbers in the table at the top of this entry are wrong.** `bin/coverage_stats.py` ran
+`samtools depth -a`, which emits positions only for references that received a counted read,
+so breadth and occupancy were computed over only the contigs that recruited something. On
+this exact bundle - 2,264 target contigs, 65,668,120 bp - `-a` emitted 57,470 positions,
+0.087% of the reference. Corrected with `-aa` restricted to the target's contigs
+(`runs/lod_v4`, re-scored 2026-10-06):
+
+| metric | as recorded above | corrected |
+|---|---|---|
+| breadth | 0.441 | **0.000336** |
+| window_occupancy | 0.965 | **0.001256** |
+| mean_depth | - | **0.0165x** |
+| depth_cv | 5.44 | **198.79** |
+
+So "44% of a 65 Mb parasite genome is covered at 96.5% window occupancy" was never true. The
+truth is starker and simpler: 8,318 host reads pile onto 0.03% of the genome. The mechanism
+this entry describes is unchanged and the read-attribution evidence stands; only the coverage
+geometry was mismeasured.
+
+**The sentence "Every gate passes except `depth_cv`" was wrong, and so was my replacement for
+it.** With corrected depth, breadth and occupancy fail too - the reasons string reads
+`failed: breadth 0.0003 >= 0.0050; occupancy 0.0013 >= 0.1500; depth_cv 198.79 <= 2.50`. I
+predicted that this would demote the finding to `screened_only` and that the gates would
+therefore have caught the false positive on their own. **It does not.** Re-scoring `lod_v4`
+with the matrix blanks demoted back to samples, with the corrected metrics, still produces
+*T. gondii* at `supported` in all 21 rows.
+
+**That is the finding this correction exposes, and it is worse than the one it replaces.**
+`supported` is not a judgement, it is the FALLBACK: `score_evidence.py` assigns it to
+anything that clears `unique_reads` and `neighbour_ratio`, however badly it then fails the
+confirmation gates. A finding that fails EVERY gate - breadth by 15x, occupancy by 119x,
+depth_cv by 80x - is reported at the same tier as one that fails a single gate narrowly, and
+the evaluator maps `supported` to POSITIVE. The tier cannot distinguish "nearly confirmed"
+from "comprehensively refuted".
+
+So the matrix blank is not belt-and-braces over a gate that would have held; **it is the only
+thing standing between this artefact and a positive call**, before and after the depth fix.
+That raises the value of the control recorded below and lowers the confidence this entry
+should place in the gate structure.
+
+VERIFY: whether a finding that fails N gates should fall to `screened_only` rather than
+`supported`, and what N is. That is a change to the tier ladder, not a threshold, so it wants
+its own decision and its own measurement of what it would reclassify across the 89 taxa.
 
 ### RESOLVED 2026-10-05 — the batch had no control that could contain the artefact
 
