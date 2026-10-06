@@ -236,7 +236,16 @@ def nt_evidence(bam: Path, mapq_min: int) -> dict[str, dict]:
     # Covered bases per reference. -Q 0 for multi-sequence markers, filtered otherwise;
     # one pass each, and the BAM is small.
     covered: dict[str, int] = defaultdict(int)
-    for line in stream(["samtools", "depth", "-a", "-Q", str(mapq_min), str(bam)]):
+    # -G 0x800 EXCLUDES SUPPLEMENTARY, matching the `view -F 0x904` that counts marker
+    # reads a few lines above. samtools depth's default filter drops
+    # UNMAP/SECONDARY/QCFAIL/DUP but KEEPS supplementary, so a chimeric read's extra
+    # segments lifted nt_breadth - the PRESENCE gate - while contributing nothing to
+    # nt_reads. The same mismatch was fixed in coverage_stats.py (e69fd01); this file was
+    # not in that review's scope. Direction of harm here is the worse one: an inflated
+    # breadth makes a neighbour-specific marker read PRESENT, which fires veto_if and
+    # vetoes a correct select-agent detection.
+    for line in stream(["samtools", "depth", "-a", "-G", "0x800",
+                        "-Q", str(mapq_min), str(bam)]):
         f = line.rstrip("\n").split("\t")
         if len(f) < 3:
             continue

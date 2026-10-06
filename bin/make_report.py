@@ -207,6 +207,8 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--findings", required=True, type=Path)
     ap.add_argument("--read-stats", nargs="*", type=Path, default=[])
+    ap.add_argument("--samplesheet", type=Path,
+                    help="authoritative source of sample roles; see has_control")
     ap.add_argument("--pack-yaml", type=Path, default=None)
     ap.add_argument("--pack", default="unknown")
     ap.add_argument("--lab", default="Unspecified laboratory")
@@ -218,12 +220,23 @@ def main() -> int:
     args = ap.parse_args()
 
     findings = read_tsv(args.findings)
+    control_samples: set[str] = set()
+    if args.samplesheet and args.samplesheet.exists():
+        with args.samplesheet.open(newline="") as fh:
+            for r in csv.DictReader(fh):
+                if (r.get("role") or "").strip().lower() == "control" and r.get("sample"):
+                    control_samples.add(r["sample"].strip())
     by_tier: dict[str, list[dict]] = defaultdict(list)
     for f in findings:
         by_tier[f.get("tier", "screened_only")].append(f)
 
     samples = sorted({f["sample"] for f in findings if f.get("sample")})
-    has_control = any(f.get("role") == "control" for f in findings)
+    # findings come only from coverage rows, so a control that raised nothing is
+    # invisible here too and the banner an analyst reads first - "No negative control
+    # in this run" - fired precisely when the control was spotless. The samplesheet is
+    # authoritative; the findings check stays as a fallback when it is not supplied.
+    has_control = (bool(control_samples)
+                   or any(f.get("role") == "control" for f in findings))
     n_crit = len(by_tier["confirmed_in_silico"])
     n_warn = len(by_tier["supported"])
     n_gap = len(by_tier["no_reference"])

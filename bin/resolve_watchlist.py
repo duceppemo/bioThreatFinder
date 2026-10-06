@@ -291,6 +291,17 @@ def main() -> int:
                    f"rank is {actual_rank}, watchlist expected {row['rank'].strip()}"
 
         desc = descendants(taxid, children)
+        # RETIRED TAXIDS BELONG IN THE CLADE TOO. merged.dmp was applied to the watchlist
+        # taxid and to near neighbours, but never to the descendant set, which walks
+        # nodes.dmp and therefore holds CURRENT ids only. When a classifier index predates
+        # the taxdump - the normal direction, since indexes are rebuilt rarely - it assigns
+        # reads to ids that have since been merged away, parse_screen matches those ids
+        # against this set, finds nothing, and the taxon never becomes a candidate. A silent
+        # missed detection with no trace in any output. Measured against the pinned
+        # 2026-09-29 taxdump: 3,491 retired ids point into 50 of the 89 watchlist clades,
+        # 2,728 of them inside Influenza A virus alone, plus 453 Salmonella enterica, 66
+        # Listeria monocytogenes and 9 Enterovirus C.
+        desc |= {old for old, new in merged.items() if new in desc or new == taxid}
 
         # Near neighbours are advisory - a missing one degrades competitive
         # mapping but must not block the run.

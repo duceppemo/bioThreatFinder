@@ -245,6 +245,18 @@ def load_rules(path: Path) -> dict[str, dict]:
             if not line.endswith(":"):
                 raise RuleError(f"expected a taxon key ending in ':', got {line!r}")
             current = line[:-1].strip().strip("'\"")
+            # DUPLICATE TAXON BLOCKS ARE AN ERROR, NOT LAST-ONE-WINS. This file is 452
+            # lines of hand-curated rules; appending a second block for a taxon that
+            # already has one silently DELETED the first - including its veto_if. The
+            # B. thailandensis -> B. pseudomallei veto the README highlights could vanish
+            # from an ordinary editing mistake with no error, and --validate cannot see it
+            # because it validates only what survived the parse. bin/btf_yaml.py refuses
+            # duplicate keys for exactly this reason and says so in its docstring; this
+            # loader is separate and did not.
+            if current in rules:
+                raise RuleError(
+                    f"duplicate taxon block {current!r}: a second block silently replaces "
+                    f"the first, discarding its rules. Merge them into one block.")
             rules[current] = {}
             continue
 
@@ -263,6 +275,12 @@ def load_rules(path: Path) -> dict[str, dict]:
         if key not in RULE_KEYS:
             raise RuleError(
                 f"unknown rule key {key!r} for {current!r}; allowed: {sorted(RULE_KEYS)}")
+        # Same reasoning as the duplicate taxon block: last-one-wins on a repeated key
+        # drops a curated rule without a word.
+        if key in rules[current] or (pending_key == key):
+            raise RuleError(
+                f"duplicate key {key!r} in block {current!r}: the later value would "
+                f"silently replace the earlier rule.")
         if val in (">", "|", ">-", "|-", ""):
             pending_key = key
             fold = []

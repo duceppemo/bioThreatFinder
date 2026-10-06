@@ -300,6 +300,12 @@ def main() -> int:
     ap.add_argument("--candidates", nargs="*", type=Path, default=[],
                     help="per-sample stage-1 candidate TSVs from parse_screen.py")
     ap.add_argument("--missing-refs", type=Path, default=None)
+    ap.add_argument("--samplesheet", type=Path,
+                    help="the run's samplesheet. THE ONLY AUTHORITATIVE SOURCE for "
+                         "which samples are controls: a control that raises nothing "
+                         "produces a header-only candidates.tsv and no coverage rows, "
+                         "so counting controls from either output misses the cleanest "
+                         "case - the one where the reassurance matters most.")
     ap.add_argument("--watchlist", required=True, type=Path,
                     help="watchlist.resolved.tsv")
     ap.add_argument("--pack-yaml", type=Path, default=None)
@@ -411,10 +417,27 @@ def main() -> int:
     for row in coverage:
         if row.get("role") == "control":
             rpm = as_float(row.get("reads_per_million"))
-            if rpm > control_rpm[row["taxid"]]:
+            # .get(), NOT [] - control_rpm is a defaultdict, so a bare read INSERTS the
+            # key even when the comparison is false. Every control with any coverage row,
+            # including one at 0.00 RPM, then made `control_rpm` truthy and the
+            # "controls all clean" branch below unreachable.
+            if rpm > control_rpm.get(row["taxid"], 0.0):
                 control_rpm[row["taxid"]] = rpm
                 control_src[row["taxid"]] = row.get("sample", "")
     control_samples |= {r["sample"] for r in coverage if r.get("role") == "control"}
+    # The samplesheet wins when present. Counting from pipeline OUTPUT asks "did a control
+    # produce a row?", a different question from "did the run have a control?", and answers
+    # it wrongly in exactly the good case: parse_screen writes a header-only candidates.tsv
+    # for a sample that raises nothing, so a spotless NTC contributes no rows anywhere and
+    # counted as zero controls - putting "NO NEGATIVE CONTROL IN RUN - contamination cannot
+    # be excluded" on every finding of the cleanest possible run. An earlier fix moved the
+    # count from coverage rows to candidate rows, which only widened it from "control
+    # reached stage 2" to "control reached stage 1" and left the spotless case broken.
+    if args.samplesheet and args.samplesheet.exists():
+        with args.samplesheet.open(newline="") as fh:
+            for r in csv.DictReader(fh):
+                if (r.get("role") or "").strip().lower() == "control" and r.get("sample"):
+                    control_samples.add(r["sample"].strip())
     n_controls = len(control_samples)
 
     findings: list[dict] = []

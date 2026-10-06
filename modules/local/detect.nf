@@ -437,6 +437,7 @@ process SCORE_EVIDENCE {
     path pack_yaml
     path marker_states
     path marker_rules
+    path samplesheet
 
     output:
     path "findings.tsv", emit: findings
@@ -471,6 +472,7 @@ process SCORE_EVIDENCE {
         ${mr_arg} \\
         --watchlist ${watchlist} \\
         --pack-yaml ${pack_yaml} \\
+        ${samplesheet ? "--samplesheet ${samplesheet}" : ''} \\
         --control-ratio ${params.control_ratio} \\
         ${thr} \\
         --out findings.tsv \\
@@ -488,6 +490,7 @@ process MAKE_REPORT {
     path findings
     path read_stats
     path pack_yaml
+    path samplesheet
 
     output:
     path "biothreatfinder_report.html", emit: html
@@ -500,6 +503,7 @@ process MAKE_REPORT {
         --findings ${findings} \\
         ${stats_arg} \\
         --pack-yaml ${pack_yaml} \\
+        ${samplesheet ? "--samplesheet ${samplesheet}" : ''} \\
         --pack ${params.pack} \\
         --lab '${params.lab_name}' \\
         --run-id '${params.run_id ?: workflow.runName}' \\

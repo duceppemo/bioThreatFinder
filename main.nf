@@ -549,13 +549,17 @@ workflow {
         ch_watchlist.first(),
         file("${pack.dir}/pack.yaml"),
         ch_marker_states.map { meta, tsv -> tsv }.collect().ifEmpty([]),
-        SKIP.skip_markers ? [] : file("${pack.dir}/marker_rules.yaml", checkIfExists: true)
+        SKIP.skip_markers ? [] : file("${pack.dir}/marker_rules.yaml", checkIfExists: true),
+        // The samplesheet is the only authoritative statement of which samples are
+        // CONTROLS. Counting them from pipeline output misses the spotless control.
+        file(params.input, checkIfExists: true)
     )
 
     MAKE_REPORT(
         SCORE_EVIDENCE.out.findings,
         SEQKIT_STATS.out.stats.map { meta, s -> s }.collect().ifEmpty([]),
-        file("${pack.dir}/pack.yaml")
+        file("${pack.dir}/pack.yaml"),
+        file(params.input, checkIfExists: true)
     )
 }
 
