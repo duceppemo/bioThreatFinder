@@ -368,6 +368,246 @@ scenarios:
 
     # -----------------------------------------------------------------------
     # THE TEN ISOLATES - per-organism ground truth, one organism per library
+    # Added as real scenarios 2026-10-07. They were previously documented in the
+    # comment below WITH their accessions, but no scenario carried an `accessions:`
+    # block, so fetch_mock_communities.py skipped them and the set this file calls
+    # "worth running before the community arms" could not be downloaded at all.
+    # One scenario each, because truth differs per library: a Salmonella call in the
+    # Listeria library is a false positive, and a single shared scenario could not
+    # express that.
+    # -----------------------------------------------------------------------
+    - id: zymo_isolate_salmonella_enterica
+      description: >
+        Single-organism Illumina library: Salmonella enterica only, 14,269,735 reads.
+        This organism IS on the human watchlist, so the library yields real-data TRUE
+        POSITIVES at 100% abundance as well as specificity.
+        .
+        One organism per library is the cleanest ground truth this project can obtain:
+        every read has exactly one correct answer, so recruitment onto any other reference
+        is measurable without the read-name trick simulated data relies on and real data
+        cannot supply. This is the instrument D12 names for its calibration limit - the
+        uniformity threshold and the recruitment coefficients both rest on ONE simulated
+        background, and ten real single-organism libraries replace that with a measurement.
+      kind: mock_community
+      source: external_sra
+      accessions:
+          # VERIFIED 2026-10-03 via the ENA portal API; HiSeq 1500, paired, ~2x101.
+          illumina: ["ERR2935848"]        # 0.91 GB
+      bracken_readlen: 100          # ~2x101, NOT the 150 default
+      truth:
+          present: [Salmonella enterica]
+          # truth_absent is expanded to the full watchlist by the fetcher.
+          absent: [Bacillus anthracis, Yersinia pestis, Francisella tularensis]
+
+    - id: zymo_isolate_listeria_monocytogenes
+      description: >
+        Single-organism Illumina library: Listeria monocytogenes only, 10,564,043 reads.
+        This organism IS on the human watchlist, so the library yields real-data TRUE
+        POSITIVES at 100% abundance as well as specificity.
+        .
+        One organism per library is the cleanest ground truth this project can obtain:
+        every read has exactly one correct answer, so recruitment onto any other reference
+        is measurable without the read-name trick simulated data relies on and real data
+        cannot supply. This is the instrument D12 names for its calibration limit - the
+        uniformity threshold and the recruitment coefficients both rest on ONE simulated
+        background, and ten real single-organism libraries replace that with a measurement.
+      kind: mock_community
+      source: external_sra
+      accessions:
+          # VERIFIED 2026-10-03 via the ENA portal API; HiSeq 1500, paired, ~2x101.
+          illumina: ["ERR2935854"]        # 0.65 GB
+      bracken_readlen: 100          # ~2x101, NOT the 150 default
+      truth:
+          present: [Listeria monocytogenes]
+          # truth_absent is expanded to the full watchlist by the fetcher.
+          absent: [Bacillus anthracis, Yersinia pestis, Francisella tularensis]
+
+    - id: zymo_isolate_escherichia_coli
+      description: >
+        Single-organism Illumina library: Escherichia coli only, 7,099,045 reads.
+        This organism IS on the human watchlist, so the library yields real-data TRUE
+        POSITIVES at 100% abundance as well as specificity.
+        .
+        One organism per library is the cleanest ground truth this project can obtain:
+        every read has exactly one correct answer, so recruitment onto any other reference
+        is measurable without the read-name trick simulated data relies on and real data
+        cannot supply. This is the instrument D12 names for its calibration limit - the
+        uniformity threshold and the recruitment coefficients both rest on ONE simulated
+        background, and ten real single-organism libraries replace that with a measurement.
+      kind: mock_community
+      source: external_sra
+      accessions:
+          # VERIFIED 2026-10-03 via the ENA portal API; HiSeq 1500, paired, ~2x101.
+          illumina: ["ERR2935852"]        # 0.44 GB
+      bracken_readlen: 100          # ~2x101, NOT the 150 default
+      truth:
+          present: [Escherichia coli]
+          # truth_absent is expanded to the full watchlist by the fetcher.
+          absent: [Bacillus anthracis, Yersinia pestis, Francisella tularensis]
+
+    - id: zymo_isolate_cryptococcus_neoformans
+      description: >
+        Single-organism Illumina library: Cryptococcus neoformans only, 8,422,093 reads.
+        This organism IS on the human watchlist, so the library yields real-data TRUE
+        POSITIVES at 100% abundance as well as specificity.
+        .
+        One organism per library is the cleanest ground truth this project can obtain:
+        every read has exactly one correct answer, so recruitment onto any other reference
+        is measurable without the read-name trick simulated data relies on and real data
+        cannot supply. This is the instrument D12 names for its calibration limit - the
+        uniformity threshold and the recruitment coefficients both rest on ONE simulated
+        background, and ten real single-organism libraries replace that with a measurement.
+      kind: mock_community
+      source: external_sra
+      accessions:
+          # VERIFIED 2026-10-03 via the ENA portal API; HiSeq 1500, paired, ~2x101.
+          illumina: ["ERR2935856"]        # 0.52 GB
+      bracken_readlen: 100          # ~2x101, NOT the 150 default
+      truth:
+          present: [Cryptococcus neoformans]
+          # truth_absent is expanded to the full watchlist by the fetcher.
+          absent: [Bacillus anthracis, Yersinia pestis, Francisella tularensis]
+
+    - id: zymo_isolate_staphylococcus_aureus
+      description: >
+        Single-organism Illumina library: Staphylococcus aureus only, 17,188,862 reads.
+        This organism is NOT on the watchlist, so EVERY watchlist call here is a false
+        positive. Pure specificity, with no ambiguity about truth.
+        .
+        One organism per library is the cleanest ground truth this project can obtain:
+        every read has exactly one correct answer, so recruitment onto any other reference
+        is measurable without the read-name trick simulated data relies on and real data
+        cannot supply. This is the instrument D12 names for its calibration limit - the
+        uniformity threshold and the recruitment coefficients both rest on ONE simulated
+        background, and ten real single-organism libraries replace that with a measurement.
+      kind: mock_community
+      source: external_sra
+      accessions:
+          # VERIFIED 2026-10-03 via the ENA portal API; HiSeq 1500, paired, ~2x101.
+          illumina: ["ERR2935849"]        # 1.02 GB
+      bracken_readlen: 100          # ~2x101, NOT the 150 default
+      truth:
+          present: []
+          # truth_absent is expanded to the full watchlist by the fetcher.
+          absent: [Bacillus anthracis, Yersinia pestis, Francisella tularensis]
+
+    - id: zymo_isolate_enterococcus_faecalis
+      description: >
+        Single-organism Illumina library: Enterococcus faecalis only, 18,870,511 reads.
+        This organism is NOT on the watchlist, so EVERY watchlist call here is a false
+        positive. Pure specificity, with no ambiguity about truth.
+        .
+        One organism per library is the cleanest ground truth this project can obtain:
+        every read has exactly one correct answer, so recruitment onto any other reference
+        is measurable without the read-name trick simulated data relies on and real data
+        cannot supply. This is the instrument D12 names for its calibration limit - the
+        uniformity threshold and the recruitment coefficients both rest on ONE simulated
+        background, and ten real single-organism libraries replace that with a measurement.
+      kind: mock_community
+      source: external_sra
+      accessions:
+          # VERIFIED 2026-10-03 via the ENA portal API; HiSeq 1500, paired, ~2x101.
+          illumina: ["ERR2935850"]        # 1.14 GB
+      bracken_readlen: 100          # ~2x101, NOT the 150 default
+      truth:
+          present: []
+          # truth_absent is expanded to the full watchlist by the fetcher.
+          absent: [Bacillus anthracis, Yersinia pestis, Francisella tularensis]
+
+    - id: zymo_isolate_bacillus_subtilis
+      description: >
+        Single-organism Illumina library: Bacillus subtilis only, 23,164,220 reads.
+        This organism is NOT on the watchlist, so EVERY watchlist call here is a false
+        positive. Pure specificity, with no ambiguity about truth.
+        .
+        One organism per library is the cleanest ground truth this project can obtain:
+        every read has exactly one correct answer, so recruitment onto any other reference
+        is measurable without the read-name trick simulated data relies on and real data
+        cannot supply. This is the instrument D12 names for its calibration limit - the
+        uniformity threshold and the recruitment coefficients both rest on ONE simulated
+        background, and ten real single-organism libraries replace that with a measurement.
+      kind: mock_community
+      source: external_sra
+      accessions:
+          # VERIFIED 2026-10-03 via the ENA portal API; HiSeq 1500, paired, ~2x101.
+          illumina: ["ERR2935851"]        # 1.60 GB
+      bracken_readlen: 100          # ~2x101, NOT the 150 default
+      truth:
+          present: []
+          # truth_absent is expanded to the full watchlist by the fetcher.
+          absent: [Bacillus anthracis, Yersinia pestis, Francisella tularensis]
+
+    - id: zymo_isolate_pseudomonas_aeruginosa
+      description: >
+        Single-organism Illumina library: Pseudomonas aeruginosa only, 7,386,928 reads.
+        This organism is NOT on the watchlist, so EVERY watchlist call here is a false
+        positive. Pure specificity, with no ambiguity about truth.
+        .
+        One organism per library is the cleanest ground truth this project can obtain:
+        every read has exactly one correct answer, so recruitment onto any other reference
+        is measurable without the read-name trick simulated data relies on and real data
+        cannot supply. This is the instrument D12 names for its calibration limit - the
+        uniformity threshold and the recruitment coefficients both rest on ONE simulated
+        background, and ten real single-organism libraries replace that with a measurement.
+      kind: mock_community
+      source: external_sra
+      accessions:
+          # VERIFIED 2026-10-03 via the ENA portal API; HiSeq 1500, paired, ~2x101.
+          illumina: ["ERR2935853"]        # 0.46 GB
+      bracken_readlen: 100          # ~2x101, NOT the 150 default
+      truth:
+          present: []
+          # truth_absent is expanded to the full watchlist by the fetcher.
+          absent: [Bacillus anthracis, Yersinia pestis, Francisella tularensis]
+
+    - id: zymo_isolate_saccharomyces_cerevisiae
+      description: >
+        Single-organism Illumina library: Saccharomyces cerevisiae only, 11,944,989 reads.
+        This organism is NOT on the watchlist, so EVERY watchlist call here is a false
+        positive. Pure specificity, with no ambiguity about truth.
+        .
+        One organism per library is the cleanest ground truth this project can obtain:
+        every read has exactly one correct answer, so recruitment onto any other reference
+        is measurable without the read-name trick simulated data relies on and real data
+        cannot supply. This is the instrument D12 names for its calibration limit - the
+        uniformity threshold and the recruitment coefficients both rest on ONE simulated
+        background, and ten real single-organism libraries replace that with a measurement.
+      kind: mock_community
+      source: external_sra
+      accessions:
+          # VERIFIED 2026-10-03 via the ENA portal API; HiSeq 1500, paired, ~2x101.
+          illumina: ["ERR2935855"]        # 0.75 GB
+      bracken_readlen: 100          # ~2x101, NOT the 150 default
+      truth:
+          present: []
+          # truth_absent is expanded to the full watchlist by the fetcher.
+          absent: [Bacillus anthracis, Yersinia pestis, Francisella tularensis]
+
+    - id: zymo_isolate_lactobacillus_fermentum
+      description: >
+        Single-organism Illumina library: Lactobacillus fermentum only, 16,379,390 reads.
+        This organism is NOT on the watchlist, so EVERY watchlist call here is a false
+        positive. Pure specificity, with no ambiguity about truth.
+        .
+        One organism per library is the cleanest ground truth this project can obtain:
+        every read has exactly one correct answer, so recruitment onto any other reference
+        is measurable without the read-name trick simulated data relies on and real data
+        cannot supply. This is the instrument D12 names for its calibration limit - the
+        uniformity threshold and the recruitment coefficients both rest on ONE simulated
+        background, and ten real single-organism libraries replace that with a measurement.
+      kind: mock_community
+      source: external_sra
+      accessions:
+          # VERIFIED 2026-10-03 via the ENA portal API; HiSeq 1500, paired, ~2x101.
+          illumina: ["ERR2935857"]        # 1.07 GB
+      bracken_readlen: 100          # ~2x101, NOT the 150 default
+      truth:
+          present: []
+          # truth_absent is expanded to the full watchlist by the fetcher.
+          absent: [Bacillus anthracis, Yersinia pestis, Francisella tularensis]
+
+    # -----------------------------------------------------------------------
+    # THE TEN ISOLATES - per-organism ground truth, one organism per library
     # -----------------------------------------------------------------------
     # All Illumina HiSeq 1500, paired, VERIFIED 2026-10-03 via the ENA portal API.
     # Four are on the human watchlist; the rest are the background and filler used above.
