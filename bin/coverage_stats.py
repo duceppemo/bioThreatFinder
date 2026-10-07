@@ -404,6 +404,9 @@ def depth_profile(bam: Path, mapq_min: int, target_refs: set[str], window: int,
     _m2 = 0.0
     window_hits: dict[tuple[str, int], bool] = {}
     window_possible: dict[tuple[str, int], bool] = {}
+    cur_win = None
+    cur_ref = None
+    cur_ivs = None
 
     # samtools' BED reader splits on WHITESPACE, not tabs alone, so a reference whose
     # name contains a space cannot be addressed as a region at all - it parses as
@@ -436,7 +439,14 @@ def depth_profile(bam: Path, mapq_min: int, target_refs: set[str], window: int,
             if len(f) < 3 or f[0] not in target_refs:
                 continue
             pos0 = int(f[1]) - 1
-            ivs = mask.get(contig_key(f[0]))
+            # PER CONTIG, NOT PER BASE. `samtools depth` groups its output by reference, so
+            # contig_key() and the mask lookup were being recomputed 65.7 M times for the
+            # T. gondii reference to return the same answer. With masking on, that lookup -
+            # not the samtools call, and not the window bookkeeping - was the dominant cost.
+            if f[0] != cur_ref:
+                cur_ref = f[0]
+                cur_ivs = mask.get(contig_key(f[0]))
+            ivs = cur_ivs
             if ivs and in_masked(ivs, pos0, pos0 + 1):
                 masked_positions += 1
                 continue
@@ -446,11 +456,20 @@ def depth_profile(bam: Path, mapq_min: int, target_refs: set[str], window: int,
             _delta = d - _mean
             _mean += _delta / _n
             _m2 += _delta * (d - _mean)
+            # ONE DICT WRITE PER WINDOW, NOT PER BASE. `samtools depth` emits positions in
+            # order, so the window key changes every `window` rows; writing it on every row
+            # cost ~65.7 M dict operations on the T. gondii reference and dominated the
+            # task (3m29s, against 7.3s for the samtools call feeding it). Measured before
+            # changing anything: samtools coverage is ~1s and depth ~1-7s, so the loop was
+            # the whole cost and the samtools calls were never the problem.
             win = (f[0], pos0 // window)
-            window_possible[win] = True
+            if win != cur_win:
+                cur_win = win
+                window_possible[win] = True
             if d > 0:
                 covered += 1
-                window_hits[win] = True
+                if win not in window_hits:
+                    window_hits[win] = True
             if d >= 10:
                 covered10 += 1
     finally:
