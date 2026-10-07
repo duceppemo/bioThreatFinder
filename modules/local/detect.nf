@@ -474,6 +474,7 @@ process SCORE_EVIDENCE {
         --pack-yaml ${pack_yaml} \\
         ${samplesheet ? "--samplesheet ${samplesheet}" : ''} \\
         --control-ratio ${params.control_ratio} \\
+        --min-neighbour-uniformity ${params.min_neighbour_uniformity} \\
         ${thr} \\
         --out findings.tsv \\
         2> score.log

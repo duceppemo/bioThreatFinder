@@ -292,6 +292,39 @@ def as_float(value, default=0.0) -> float:
         return default
 
 
+def neighbour_is_credible(row: dict, args) -> bool:
+    """Does the best neighbour look like an organism that is actually present?
+
+    D12: for the case the attribution gate exists to handle, the denominator is background
+    cross-mapping with ZERO reads from the declared neighbour - 2,700 reads on the
+    Y. enterocolitica reference of which not one is Yersinia. Raw count cannot separate that
+    from a real competitor (at 100 rpm: target 2,336, absent neighbour 2,731), so the gate
+    turned min_neighbour_ratio into an undeclared read floor whose height is set by
+    background composition. Measured: it put the Y. pestis cliff at 176.6 rpm, confirmed
+    against a prediction of 171-184.
+
+    Coverage SHAPE separates them, and is near-independent of abundance, which is what lets
+    one threshold serve every spike level. Measured over runs/lod_v4 with the same
+    ref-span denominator this reads:
+
+        absent neighbour  (630)                     0.1532
+        present neighbours (1642, 1428, 486, 562)   0.9720 - 0.9913
+
+    ABSENT EVIDENCE IS NOT EVIDENCE OF INCREDIBILITY. A blank uniformity - no neighbour, or
+    samtools coverage unavailable - returns True, leaving the gate exactly as it was. The
+    change may only ever WITHHOLD an attribution on positive evidence that the neighbour is
+    a pedestal; it must never manufacture one, and it must never silently disable the gate
+    when the measurement is missing.
+    """
+    raw = (row.get("best_neighbour_uniformity") or "").strip()
+    if not raw:
+        return True
+    try:
+        return float(raw) >= args.min_neighbour_uniformity
+    except ValueError:
+        return True
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -313,6 +346,11 @@ def main() -> int:
                     help="minimum window occupancy for confirmation [0.15]")
     ap.add_argument("--min-neighbour-ratio", type=float, default=1.5,
                     help="target reads must exceed best neighbour by this factor [1.5]")
+    ap.add_argument("--min-neighbour-uniformity", type=float, default=0.50,
+                    help="a neighbour below this coverage uniformity is a cross-mapping "
+                         "pedestal, not a competing organism, and cannot out-vote the "
+                         "target (D12). Measured gap: 0.1532 absent vs 0.9720-0.9913 "
+                         "present, so 0.50 sits mid-gap. 0 disables the check.")
     ap.add_argument("--control-ratio", type=float, default=5.0,
                     help="sample RPM must exceed control RPM by this factor [5.0]")
     ap.add_argument("--marker-evidence", nargs="*", type=Path, default=[],
@@ -479,13 +517,31 @@ def main() -> int:
 
         if unique_reads < min_reads:
             reasons.append(f"unique_reads {unique_reads:.0f} < {min_reads:.0f}")
-        elif nb_ratio < args.min_neighbour_ratio:
+        elif nb_ratio < args.min_neighbour_ratio and neighbour_is_credible(row, args):
             tier = "attributed_to_neighbour"
             reasons.append(
                 f"reads favour neighbour taxid {row.get('best_neighbour_taxid') or '?'} "
-                f"(ratio {row.get('neighbour_ratio')} < {args.min_neighbour_ratio})"
+                f"(ratio {row.get('neighbour_ratio')} < {args.min_neighbour_ratio}; "
+                f"neighbour uniformity {row.get('best_neighbour_uniformity') or 'n/a'})"
             )
         else:
+            # WITHHELD ATTRIBUTION MUST FALL THROUGH, NOT SHORT-CIRCUIT. The first version
+            # of this put the not-credible case in its own `elif`, which appended the
+            # reason and then skipped the gate block below - leaving `tier` at its initial
+            # "screened_only". The comment said it fell through to the confirmation gates
+            # and it did not, so a 170 rpm sample was scored BELOW a 190 rpm one not
+            # because its evidence was weaker but because it was never evaluated. Caught by
+            # the d12fine revalidation: the cliff did not move, which is the symptom.
+            if nb_ratio < args.min_neighbour_ratio:
+                reasons.append(
+                    f"neighbour taxid {row.get('best_neighbour_taxid') or '?'} out-counts "
+                    f"the target (ratio {row.get('neighbour_ratio')}) but is NOT CREDIBLE: "
+                    f"coverage uniformity {row.get('best_neighbour_uniformity')} < "
+                    f"{args.min_neighbour_uniformity} means its reads pile on shared "
+                    f"sequence rather than covering its genome, so this is background "
+                    f"cross-mapping and not a competing organism (D12). Attribution "
+                    f"withheld; judged on its own evidence below."
+                )
             ctrl = control_rpm.get(taxid, 0.0)
             if row.get("role") != "control" and ctrl > 0 and rpm < args.control_ratio * ctrl:
                 tier = "suppressed_control"
@@ -785,6 +841,11 @@ def main() -> int:
             "reads_in_masked_regions": row.get("reads_in_masked_regions", ""),
             "masked_fraction_of_reference": row.get("masked_fraction_of_reference", ""),
             "best_neighbour_taxid": row.get("best_neighbour_taxid", ""),
+            # The number that decides whether that neighbour may out-vote the
+            # target travels with the finding. "Every finding explains itself" is
+            # this module's stated principle, and a gate whose input is only in the
+            # prose of `reasons` cannot be audited or re-thresholded from the TSV.
+            "best_neighbour_uniformity": row.get("best_neighbour_uniformity", ""),
             "screen_reads": scr.get("assigned_reads", ""),
             "n_classifiers": n_clf or "",
             "classifiers": clf_list,

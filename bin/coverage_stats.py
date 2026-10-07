@@ -312,6 +312,58 @@ def collect_alignments(bam: Path, mapq_min: int, mask=None):
     return per_taxid
 
 
+def covered_by_taxid(bam: Path, mapq_min: int) -> dict[str, tuple[int, int]]:
+    """Per-taxid (reference_bp, covered_bp) in ONE pass, for the neighbour-credibility gate.
+
+    D12 measured that `neighbour_ratio`'s denominator, for the case the gate exists to
+    handle, is background cross-mapping and not a competing organism at all: in
+    lod_gram_negative the declared neighbour holds ~2,700 reads of which ZERO are Yersinia.
+    Raw read count cannot tell those apart from a real competitor - at 100 rpm the target
+    had 2,336 reads and the absent neighbour 2,731 - but their SHAPE can. Cross-mapped
+    reads pile onto the conserved fraction two genomes share; a present organism's reads
+    spread over its genome.
+
+    `samtools coverage` gives covered bases per reference in one cheap pass, and
+    collect_alignments() already sums each taxon's reference SPAN, so the expectation needs
+    no read-length assumption:
+
+        uniformity = covered_bp / min(reference_bp, summed_reference_span)
+
+    Measured over runs/lod_v4 (scripts/measure_neighbour_uniformity.py): an absent
+    neighbour scores 0.113-0.123 at every spike level, a genuinely present one 0.639-0.992.
+    The gap is wide and the figure is near-independent of abundance, which is what lets one
+    threshold serve every level.
+
+    SUPPLEMENTARY is in the filter list because samtools coverage does NOT exclude it by
+    default, while the read counts this is compared against come from `view -F 0x904`.
+    """
+    out: dict[str, list[int]] = {}
+    proc = subprocess.run(
+        ["samtools", "coverage", "-q", str(mapq_min),
+         "--ff", "UNMAP,SECONDARY,QCFAIL,DUP,SUPPLEMENTARY", str(bam)],
+        capture_output=True, text=True)
+    if proc.returncode != 0:
+        # Not fatal: the gate degrades to "no credibility information", which
+        # score_evidence.py treats as the status quo rather than as a pass.
+        sys.stderr.write(f"[coverage] WARNING: samtools coverage failed, neighbour "
+                         f"credibility unavailable: {proc.stderr.strip()[:200]}\n")
+        return {}
+    for line in proc.stdout.splitlines()[1:]:
+        f = line.split("\t")
+        if len(f) < 7:
+            continue
+        parts = f[0].split("|")
+        if len(parts) < 2:
+            continue
+        rec = out.setdefault(parts[1], [0, 0])
+        try:
+            rec[0] += int(f[2])
+            rec[1] += int(f[4])
+        except ValueError:
+            continue
+    return {k: (v[0], v[1]) for k, v in out.items()}
+
+
 def depth_profile(bam: Path, mapq_min: int, target_refs: set[str], window: int,
                   mask=None, lengths=None):
     """Per-base depth for the target's references only.
@@ -481,6 +533,17 @@ def main() -> int:
     if neighbours:
         best_nb, best_nb_reads = max(neighbours.items(), key=lambda kv: kv[1])
 
+    # Is that neighbour CREDIBLE, or is it a cross-mapping pedestal? See covered_by_taxid.
+    # Reported, never enforced here: coverage_stats.py measures, score_evidence.py decides.
+    nb_uniformity = ""
+    if best_nb:
+        cov_by_tax = covered_by_taxid(args.bam, args.mapq_min)
+        nb_bp, nb_cov = cov_by_tax.get(best_nb, (0, 0))
+        nb_span = per_taxid.get(best_nb, {}).get("bases", 0)
+        denom = min(nb_bp, nb_span) if nb_bp and nb_span else 0
+        if denom > 0:
+            nb_uniformity = f"{nb_cov / denom:.4f}"
+
     breadth = (covered / total_bases) if total_bases else 0.0
     breadth10 = (covered10 / total_bases) if total_bases else 0.0
     mean_depth, _depth_sd = depth_stats
@@ -558,6 +621,9 @@ def main() -> int:
         "distinct_start_positions": n_start_positions,
         "best_neighbour_taxid": best_nb,
         "best_neighbour_reads": best_nb_reads,
+        # Blank when it cannot be computed, NOT 0: an absent measurement must not read as
+        # "maximally incredible" and silently disable the attribution gate.
+        "best_neighbour_uniformity": nb_uniformity,
         "neighbour_ratio": ("inf" if nb_ratio == float("inf") else f"{nb_ratio:.4f}"),
         "screen_assigned_reads": args.assigned_reads,
         "mapped_fraction_of_assigned": (f"{mapped_frac:.4f}" if mapped_frac >= 0 else ""),

@@ -388,6 +388,72 @@ emitted under `-a`, verified by re-running the patched `coverage_stats.py` over 
 (breadth and neighbour_ratio identical to the last decimal, depth_cv differing only in the
 fourth). The numbers above stand.
 
+### REMEDY IMPLEMENTED 2026-10-07 — option 2, and the cliff is gone
+
+Option 2 ("require the neighbour to be credible before it can out-vote") is implemented. A
+neighbour may only win the attribution if its reads COVER its genome rather than piling on
+sequence it shares with the target:
+
+    uniformity = covered_bp / min(reference_bp, summed_reference_span)
+
+`coverage_stats.py` emits it per finding as `best_neighbour_uniformity`; `score_evidence.py`
+gates on `--min-neighbour-uniformity` (default 0.50, `params.min_neighbour_uniformity`).
+Absent evidence counts as CREDIBLE — no neighbour, or samtools coverage unavailable, leaves
+the gate exactly as it was — so the change can only ever withhold an attribution on positive
+evidence of a pedestal, never manufacture one.
+
+**The cliff this entry predicted and then measured at 176.6 rpm is gone.** Re-scoring
+`runs/d12fine`, where the declared neighbour is absent from every sample and scores
+uniformity 0.146–0.159 at every level:
+
+| level | before | after |
+|---|---|---|
+| 120 / 150 / 170 | 3/3 `attributed_to_neighbour` | **3/3 `supported`** |
+| 190 / 210 / 250 | 3/3 `supported` | 3/3 `supported` |
+
+*Y. pestis* is now judged on its own evidence at 120 rpm, the lowest level tested, instead of
+being attributed to an organism that is not in the specimen.
+
+**The cost, measured on `runs/lod_v4` rather than assumed.** This is a PERMISSIVE change, so
+both columns belong in the record:
+
+| | before | after |
+|---|---|---|
+| `attributed_to_neighbour` | 84 | 77 |
+| `supported` | 0 | 7 |
+| `confirmed_in_silico` | 6 | 6 |
+| actionable TP / FP | 6 / 0 | **12 / 1** |
+
+Six new true positives — *Y. pestis* at 10 and 100 rpm, genuinely spiked and previously
+attributed away — against one new false positive, *P. vivax*. That is the trade, and it is
+the trade this entry argued for: the attribution was wrong in exactly the case where the
+neighbour is not present, and removing it recovers detections at the cost of one call that
+the confirmation gates then have to carry.
+
+⚠️ **TWO THINGS I GOT WRONG, BOTH CAUGHT BY THE VALIDATION RATHER THAN BY REVIEW.**
+
+1. **The threshold's justification was weaker than I first stated.** It was calibrated on 5
+   bundles, which gave 0.1532 (absent) against 0.9720–0.9913 (present) and made 0.50 look
+   like the middle of a wide empty gap. Across all 182 measured rows in `lod_v4` the nearest
+   values straddling the threshold are **0.4321 and 0.5010** — a 0.07 gap. The distribution
+   is still strongly bimodal (19 rows below 0.3, 162 above 0.5), and both straddling rows are
+   controls, so no actionable call in this batch turns on where exactly 0.50 falls. But it is
+   not the clean separation the first calibration implied, and a batch with a different
+   background could place a real decision in that gap.
+
+2. **The first implementation did not do what its own comment said.** The not-credible case
+   sat in its own `elif`, which appended the reason and then skipped the gate block, leaving
+   `tier` at its initial `screened_only`. The comment claimed it "falls through to the
+   confirmation gates"; it did not. The symptom was that the d12fine cliff did NOT move —
+   120/150/170 simply became `screened_only` instead of `attributed_to_neighbour`, so a 170
+   rpm sample scored below a 190 rpm one not because its evidence was weaker but because it
+   was never evaluated. Only re-running the cliff measurement exposed it; the unit tests
+   passed throughout.
+
+**Still open.** The calibration rests on one simulated batch with one background composition,
+the same limit this entry records for everything else in it. The Zymo isolate runs remain the
+instrument that would replace it with a per-reference measurement on real reads.
+
 **Three conditions the test batch must meet, or the result cannot be interpreted:**
 
 1. **It must be ART-simulated.** `simulate_benchmark.py:2416` defaults `--illumina-simulator`
