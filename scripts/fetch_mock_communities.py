@@ -236,9 +236,27 @@ def main() -> int:
         present = ";".join(truth.get("present") or [])
         absent_list = list(truth.get("absent") or [])
         absent = ";".join(absent_list)
+        if not present and not absent_list:
+            die(f"{sid} declares neither truth.present nor truth.absent. A manifest row "
+                f"with no truth at all scores every call as 'unlisted' and silently "
+                f"measures nothing.")
         if not present:
-            die(f"{sid} declares no truth.present. A manifest row with empty truth scores "
-                f"every call as 'unlisted' and silently measures nothing.")
+            # EMPTY `present` IS LEGITIMATE FOR A SINGLE-ORGANISM LIBRARY OF A
+            # NON-WATCHLIST ORGANISM, and refusing it outright was too strict. Six of the
+            # ten Zymo isolates - S. aureus, E. faecalis, B. subtilis, P. aeruginosa,
+            # S. cerevisiae, L. fermentum - are not on the human watchlist, so nothing on
+            # the watchlist IS present and every watchlist call is a false positive. That
+            # is the cleanest specificity measurement available here, not an absence of
+            # measurement: evaluate_benchmark.specificity_table() groups on
+            # truth == "absent", so with the absent list expanded to the full watchlist the
+            # row is scored, not skipped. The original wording ("scores every call as
+            # 'unlisted'") describes the both-empty case, which is still refused above.
+            # No count here: this runs BEFORE the absent list is expanded to the full
+            # watchlist below, so quoting len(absent_list) would advertise 3 when the row
+            # is about to carry 89. The expansion logs its own before/after.
+            sys.stderr.write(
+                f"[fetch]   {sid}: no truth.present - pure specificity row; every "
+                f"watchlist call here is a false positive.\n")
         # The same reasoning applies to `absent`, and used not to be applied. D14: an
         # unlisted taxon is scored `unlisted`, NOT `false_positive`, so a short absent list
         # excludes from specificity any organism the author forgot. The simulated path got
