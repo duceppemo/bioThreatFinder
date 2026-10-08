@@ -270,10 +270,11 @@ A single-organism library is the strictest specificity test available - every wa
 but that organism is false by construction, with no simulation assumption behind the truth.
 Measured over the ten isolates plus the LOG community:
 
-| | TP | FP |
-|---|---|---|
-| as the pipeline stood on 2026-10-07 | 3 | 12 |
-| after D18's tier-ladder fix | **3** | **2** |
+| | TP | FP | note |
+|---|---|---|---|
+| as the pipeline stood on 2026-10-07 | 3 | 12 | |
+| after D18's tier-ladder fix | **3** | **2** | |
+| ...after investigating those 2 | **3** | **0** | both are real trace contamination, confirmed by Kraken2 at 0.28% and 0.06%, with breadth matching coverage theory. See D18. |
 
 For comparison, the simulated batches report 0 false positives throughout. They are not
 wrong about themselves; they are easier than real data, and the gap between 0 and 12 is the

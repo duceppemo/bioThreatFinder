@@ -1066,10 +1066,31 @@ Net, with the credibility gate off:
 
 ### What they exposed and nobody has fixed
 
-  1. **Two false positives survive, both *L. monocytogenes*** - breadth **0.74** in a
-     *B. subtilis* library and **0.21** in *S. cerevisiae*. 74% of a genome covered by reads
-     from an unrelated organism is a REFERENCE-QUALITY problem, not a threshold one, and
-     belongs with D13.
+  1. ~~**Two false positives survive, both *L. monocytogenes***~~ **— NOT false positives.
+     Investigated 2026-10-08 and the truth model was wrong, not the pipeline.** Those two
+     calls are *L. monocytogenes* at breadth 0.74 in the *B. subtilis* library and 0.21 in
+     *S. cerevisiae*, and Kraken2 says both libraries genuinely contain it: **0.28%**
+     (59,233 reads) and **0.06%** (5,994 reads). The alignments sit at 96.5% identity over
+     101 bp, far too high for cross-genus mis-mapping - *B. subtilis* to *Listeria* would be
+     ~75-80% in conserved regions at best - and reads land on four *Listeria* species at
+     once. It is real DNA: index hopping or lab carry-over, which single-organism libraries
+     sequenced alongside community standards are expected to carry.
+
+     The breadths match coverage theory for those read counts, which is the check that
+     settles it: 59,233 x 101 bp over a 2.9 Mb genome is ~2.2x, predicting breadth ~0.89
+     against 0.74 observed; 5,994 reads is ~0.21x, predicting ~0.19 against 0.21 observed.
+
+     **So breadth is discriminating real trace contamination from cross-mapping noise, which
+     is exactly what D18's tier-ladder rule asks it to do.** The calls the rule REJECTED have
+     no Kraken2 support at all - *B. anthracis* in the *S. aureus* library is 134 reads
+     (0.00%) at breadth 0.0012, *T. gondii* in *S. cerevisiae* is 408 reads at 0.0001. Real
+     contamination spreads over a genome; noise piles on conserved loci.
+
+     The corrected accounting for `zymo_rl100` after the fix is therefore **3 true positives,
+     2 correct detections of trace contamination, and 0 false positives** - where before the
+     fix the same data gave 10 additional calls with no Kraken2 support behind any of them.
+     The earlier figures in this entry and in docs/validation.md counted those two
+     contamination detections as errors; they are not.
   2. **Near-identical pairs are silently attributed, not flagged.** *E. coli* (3,349,860
      reads, breadth 0.667) went to *Shigella* at ratio 0.9032, and *C. neoformans*
      (5,870,155 reads, breadth 0.642) to taxid 40410 at 0.7072 - organisms present at 100%
