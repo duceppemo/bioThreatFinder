@@ -19,7 +19,7 @@ tail -f /media/8tb/bioThreatFinder/logs/build_kraken2_<latest>.log
 | **Three-arm bake-off** | **DONE** 2026-10-04 → `runs/lod_v3_threearm`. Metabuli changed no finding: `findings.tsv` identical to the Kraken2-only run in every scored column, `tier` differing in 0 of 178 rows | — |
 | **Divergent-agent bake-off** | **DONE** 2026-10-04 → `simulated/divergent_v1/bakeoff`. The scenarios built to favour the amino-acid arm; it changed nothing there either, and the pipeline went silent on the divergent filovirus for a reason neither arm can fix (D15) | — |
 | **lod_v4 (matrix blank)** | **DONE** 2026-10-05 → `runs/lod_v4`. 24 samples, the first batch to carry a host-matrix control. `supported` 18 → 0, LoD unchanged at 1000 RPM (D14) | — |
-| **D12 fine grid** | **RUNNING** as `systemd --user` units `btf-d12sim` → `btf-d12pipe` → `runs/d12fine`. 120/150/170/190/210/250 RPM ×3, testing D12's predicted 171–184 RPM cliff | `systemctl --user is-active btf-d12sim btf-d12pipe` |
+| **D12 fine grid** | **DONE** 2026-10-06 → `runs/d12fine`. Cliff at 176.6 rpm, inside the predicted 171–184 band | — |
 
 **Do not start a second build against a live one.** I did, and the two
 `kraken2-build --download-library bacteria` processes collided on the same staging
@@ -225,6 +225,17 @@ stays offline and fast by design.
    tier, and the read/breadth gate incoherence (D11) where **75 of 89** taxa have a
    decorative `min_unique_reads` — up to 243x for *Schistosoma mansoni*. Run
    `scripts/check_threshold_coherence.py` for the table.
+
+## Real data — first measurement, 2026-10-08
+
+`real/mock_v1`: ZymoBIOMICS D6300 (EVEN + LOG, Illumina and ONT) plus all ten member
+organisms as single-organism Illumina libraries. 54 GB, md5-verified. Run as `zymo_rl100`,
+`zymo_rl150` and `zymo_ont` because Bracken takes one read length per run.
+
+It refuted D12's neighbour-credibility threshold (now defaulted off) and answered D14's
+VERIFY on the tier ladder, cutting real-data false positives 12 → 2 with both simulated
+benchmarks unchanged. See **D18**. `zymo_ont` has NOT completed - it died on a 4 h task
+limit now raised to 24 h, and was not restarted.
 
 ## Still unresolved
 

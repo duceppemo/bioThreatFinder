@@ -209,6 +209,16 @@ variant*. An aggregate sensitivity figure hides the case where one configuration
 finds the divergent filovirus and another finds the extra *Plasmodium*. That is a
 trade to decide deliberately, not a ranking to read off.
 
+## Real data, 2026-10-08 — the simulated numbers flatter the pipeline
+
+The ten Zymo single-organism Illumina libraries are the strictest specificity instrument
+this project has: one organism per library, so every other watchlist call is false by
+construction. Measured there, false positives went 12 → 2 after D18's tier-ladder fix,
+against 0 in every simulated batch. The simulated batches are not wrong about themselves -
+they are easier, and that gap is the point of running real data. Both are UNCHANGED by the
+fix. Two true positives at 100% abundance are still missed (*E. coli*, *C. neoformans*),
+attributed to near-identical neighbours. See D18 and docs/validation.md.
+
 ## Results so far (2026-10-04)
 
 The first batch has been run and scored, so this section is no longer hypothetical.

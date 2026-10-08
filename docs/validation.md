@@ -260,6 +260,32 @@ for *Y. pestis*, observed `attributed_to_neighbour` in all three replicates. lod
 the same tier at that level (`neighbour_ratio` 0.8553), before any matrix blank existed. That
 is D12 - the neighbour denominator - and it is unresolved.
 
+## Specificity on REAL reads — 2026-10-08, and it is not 0.000
+
+Everything above this line is simulated. `real/mock_v1` is the first real sequencing data in
+the project: the ZymoBIOMICS D6300 standard plus all ten member organisms as individual
+Illumina libraries, 26 files, 54 GB, md5-verified against ENA.
+
+A single-organism library is the strictest specificity test available - every watchlist call
+but that organism is false by construction, with no simulation assumption behind the truth.
+Measured over the ten isolates plus the LOG community:
+
+| | TP | FP |
+|---|---|---|
+| as the pipeline stood on 2026-10-07 | 3 | 12 |
+| after D18's tier-ladder fix | **3** | **2** |
+
+For comparison, the simulated batches report 0 false positives throughout. They are not
+wrong about themselves; they are easier than real data, and the gap between 0 and 12 is the
+measure of that. Both simulated batches are UNCHANGED by the fix, so this is not a tuning
+that trades one dataset for another.
+
+Two true positives are still MISSED, and both are present at 100% abundance: *E. coli*
+(3,349,860 reads, breadth 0.667) attributed to *Shigella*, and *C. neoformans* (5,870,155
+reads, breadth 0.642) attributed to taxid 40410. See D18.
+
+The ONT arm has NOT been measured - it failed on a 4 h task limit and was not restarted.
+
 ## Kraken2 memory mapping — verified 2026-10-03
 
 Two samples, `params.kraken2_memory_mapping = true`, `maxForks = 2`:

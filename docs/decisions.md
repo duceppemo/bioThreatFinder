@@ -388,6 +388,16 @@ emitted under `-a`, verified by re-running the patched `coverage_stats.py` over 
 (breadth and neighbour_ratio identical to the last decimal, depth_cv differing only in the
 fourth). The numbers above stand.
 
+### ⚠️ REMEDY DEFAULTED OFF 2026-10-08 — real data refuted its threshold, see D18
+
+Everything below is the simulated result and it still stands AS A SIMULATED RESULT: the
+cliff really does disappear on `d12fine`. What does not transfer is the threshold. On the
+Zymo libraries the gate took false positives from 4 to 25 on the isolates and 0 to 4 on the
+community, and did not rescue the true positives it exists for, because their neighbours
+scored ABOVE 0.50. `min_neighbour_uniformity` now defaults to 0. The undeclared read floor
+this entry documents is REAL and still unfixed; what is retracted is that this particular
+threshold fixes it.
+
 ### REMEDY IMPLEMENTED 2026-10-07 — option 2, and the cliff is gone
 
 Option 2 ("require the neighbour to be credible before it can out-vote") is implemented. A
@@ -890,6 +900,13 @@ thing standing between this artefact and a positive call**, before and after the
 That raises the value of the control recorded below and lowers the confidence this entry
 should place in the gate structure.
 
+✅ ANSWERED 2026-10-08 ON REAL DATA — see D18. In the Zymo single-organism libraries, where
+every watchlist call but the library's own organism is false by construction, true positives
+fail a median of 1 confirmation gate and false positives 5 (median breadth 0.8661 against
+0.0015). Requiring breadth AND occupancy to PASS keeps 4 of 4 true positives and cuts false
+positives from 45 to 4; `--actionable-requires` implements it, default `breadth,occupancy`.
+Neither simulated benchmark moved. The original question, kept because it is what was asked:
+
 VERIFY: whether a finding that fails N gates should fall to `screened_only` rather than
 `supported`, and what N is. That is a change to the tier ladder, not a threshold, so it wants
 its own decision and its own measurement of what it would reclassify across the 89 taxa.
@@ -971,6 +988,111 @@ true positive was traded away. See docs/validation.md.
 masking - which would attack the recruitment itself rather than suppress its product - is
 still deferred pending the Zymo measurement. Suppression is the right control for a *known*
 matrix; it does nothing for a specimen type whose matrix was never blanked.
+
+---
+
+## D18 — The first real sequencing data, and it refuted one change and justified another
+
+`real/mock_v1`, fetched 2026-10-07: the ZymoBIOMICS D6300 standard as EVEN and LOG
+communities on both Illumina and ONT, plus **all ten member organisms as individual
+Illumina libraries**. 26 files, 54 GB, every one md5-verified against ENA, no run refused
+for zero reads, measured read lengths matching the declared `bracken_readlen`.
+
+Run as three batches because Bracken takes ONE read length per run and
+`modules/local/detect.nf` passes a single `-r ${params.bracken_readlen}`: `zymo_rl100`
+(ten isolates + LOG community, ~2x101), `zymo_rl150` (EVEN community, ~2x151), `zymo_ont`
+(both communities, GridION). A mixed run would not error - it would produce plausible
+abundances that are simply wrong for the mismatched group.
+
+**WHY THE ISOLATES ARE THE INSTRUMENT.** Each library contains exactly ONE organism, so
+every watchlist call but that organism is false BY CONSTRUCTION. There is no simulation
+assumption behind the truth, and no read-name trick is needed - which is what D12 means
+when it names these runs as the answer to its calibration limit.
+
+### What they refuted
+
+**D12's neighbour-credibility remedy, measured the day before on simulated data.** On
+`lod_v4` it read +6 true positives for +1 false positive. On real reads, in both
+directions:
+
+| | FP with gate | FP without |
+|---|---|---|
+| zymo_rl100 | **25** | 4 |
+| zymo_rl150 | **4** (incl. *B. anthracis*) | 0 |
+
+and it did not rescue the true positives it exists for: *Salmonella* at 2,067,999 reads
+and *E. coli* at 541,547 were still attributed away, their neighbours scoring 0.7473 and
+0.6172 - above the 0.50 threshold, hence "credible".
+
+The mechanism is the interaction with the tier ladder, not the metric. Withholding a bad
+attribution is correct; those neighbours really are absent. But withholding is NOT evidence
+the target is present, and `supported` was the tier a finding reached by FAILING. Every
+false positive gained in `zymo_rl150` had neighbour uniformity below 0.50. `min_neighbour_uniformity`
+now defaults to 0; the measurement and the `best_neighbour_uniformity` column are kept,
+because the separation is real on the bundles it was measured on - what is not established
+is that the threshold transfers to a real background.
+
+### What they justified — D14's VERIFY, answered
+
+D14 asked whether a finding failing N confirmation gates should fall to `screened_only`
+rather than `supported`. In the isolates, true positives fail a median of **1** gate and
+false positives **5**; median breadth **0.8661** against **0.0015**, median depth_cv **0.7**
+against **78.9**. The gates were never wrong - the ladder discarded their answer.
+
+| rule | TP kept | FP kept |
+|---|---|---|
+| fail <= 2 gates | 4/4 | 4 |
+| occupancy must pass | 4/4 | 4 |
+| **breadth AND occupancy must pass** | **4/4** | **4** |
+| breadth must pass | 4/4 | 6 |
+| depth_cv must pass | 3/4 | 3 |
+| identity must pass | 2/4 | 6 |
+
+Breadth and occupancy chosen over a bare count because they mean something: a finding that
+does not cover its reference is not a detection. `--actionable-requires`, default
+`breadth,occupancy`, empty restores the old behaviour. NOT applied to control rows - a
+control is never actionable and its content is QC, reclassified to `control_background`;
+applying the rule there lost that QC signal while preventing no false positive, which
+`tests/test_pipeline.py tier:NTC` caught.
+
+Net, with the credibility gate off:
+
+| batch | before | after |
+|---|---|---|
+| zymo_rl100 | 3 TP / 12 FP | **3 TP / 2 FP** |
+| zymo_rl150 | 1 TP / 0 FP | 1 TP / 0 FP |
+| lod_v4 (simulated) | 6 TP / 0 FP | **unchanged** |
+| d12fine (simulated) | 9 TP / 0 FP | **unchanged** |
+
+### What they exposed and nobody has fixed
+
+  1. **Two false positives survive, both *L. monocytogenes*** - breadth **0.74** in a
+     *B. subtilis* library and **0.21** in *S. cerevisiae*. 74% of a genome covered by reads
+     from an unrelated organism is a REFERENCE-QUALITY problem, not a threshold one, and
+     belongs with D13.
+  2. **Near-identical pairs are silently attributed, not flagged.** *E. coli* (3,349,860
+     reads, breadth 0.667) went to *Shigella* at ratio 0.9032, and *C. neoformans*
+     (5,870,155 reads, breadth 0.642) to taxid 40410 at 0.7072 - organisms present at 100%
+     abundance, reported as absent. The pack's own notes say *Shigella* is genomically
+     *E. coli* and species-level separation from metagenomes is unreliable. The honest
+     outcome is "cannot separate", not a silent attribution to one side.
+  3. **MARKER_SEARCH_AA had no time limit of its own** and inherited the 4 h base default
+     while being the most expensive process in the pipeline: 1 m 41 s - 8 m 13 s on
+     simulated Illumina, 33 m - 2 h 42 m on real Illumina, and killed at 4 h on ONT, whose
+     4 kb reads make a six-frame protein search far larger. Now `24.h * task.attempt`.
+  4. **The retry that should have covered that could not fire.** `errorStrategy` lists 143
+     so an over-time task retries with more time, but Nextflow reports "process hasn't
+     exited" and the trace records `status=RUNNING, exit='-'` - so `task.exitStatus` is
+     NULL, `null in [...]` is false, and the run finished instead of retrying. A null status
+     now retries, bounded by `maxRetries`.
+
+**`zymo_ont` has not been run to completion.** It failed on (3) and (4) above and was
+deliberately not restarted; the fixes are in but the ONT measurement does not exist yet.
+
+**The limit that remains.** This is one standard, one lot, one study, ten organisms, four of
+them on the watchlist. It is enormously better than one simulated background, and it is not
+a clinical specimen: no host, no degraded DNA, no environmental diversity. Every threshold
+in this pipeline is still calibrated against material that flatters it.
 
 ---
 
