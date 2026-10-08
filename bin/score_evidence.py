@@ -346,6 +346,12 @@ def main() -> int:
                     help="minimum window occupancy for confirmation [0.15]")
     ap.add_argument("--min-neighbour-ratio", type=float, default=1.5,
                     help="target reads must exceed best neighbour by this factor [1.5]")
+    ap.add_argument("--actionable-requires", default="breadth,occupancy",
+                    help="comma-separated confirmation gates that MUST pass for a finding "
+                         "to be actionable; failing one drops it to screened_only instead "
+                         "of `supported`. Empty string restores the old behaviour, where "
+                         "`supported` was the bin for any finding that cleared unique_reads "
+                         "and neighbour_ratio however badly it then failed.")
     ap.add_argument("--min-neighbour-uniformity", type=float, default=0.50,
                     help="a neighbour below this coverage uniformity is a cross-mapping "
                          "pedestal, not a competing organism, and cannot out-vote the "
@@ -368,6 +374,8 @@ def main() -> int:
                          "confirmations that looked like a clean negative.")
     ap.add_argument("--out", required=True, type=Path)
     args = ap.parse_args()
+    args.actionable_requires = [x.strip() for x in
+                                (args.actionable_requires or "").split(",") if x.strip()]
 
     thresholds = apply_threshold_overrides(load_pack_thresholds(args.pack_yaml),
                                            args.threshold)
@@ -588,8 +596,51 @@ def main() -> int:
                     tier = "confirmed_in_silico"
                     reasons.append("all confirmation gates passed: " + "; ".join(gates))
                 else:
-                    tier = "supported"
-                    reasons.append(f"read threshold met; failed: {'; '.join(failed)}")
+                    # `supported` IS AN ASSERTION OF PRESENCE, SO IT CANNOT BE THE BIN FOR
+                    # "FAILED EVERYTHING". It used to be: any finding clearing unique_reads
+                    # and neighbour_ratio landed here however badly it then failed, and the
+                    # evaluator maps `supported` to POSITIVE. Measured on the Zymo
+                    # single-organism libraries - where every watchlist call but the
+                    # library's own organism is false by construction - that produced 45
+                    # actionable false positives against 4 true ones, including B. anthracis,
+                    # Y. pestis and B. pseudomallei, at a median breadth of 0.0015 and
+                    # depth_cv of 78.9.
+                    #
+                    # The gates were not wrong; the ladder discarded their answer. True
+                    # positives in that data fail a median of 1 gate, false positives 5.
+                    # Requiring the coverage-geometry gates to PASS keeps 4 of 4 true
+                    # positives and drops 45 false positives to 4:
+                    #
+                    #     fail <= 2 gates                 TP 4/4   FP 4
+                    #     occupancy must pass             TP 4/4   FP 4
+                    #     breadth AND occupancy must pass TP 4/4   FP 4   <- this
+                    #     breadth must pass               TP 4/4   FP 6
+                    #     depth_cv must pass              TP 3/4   FP 3
+                    #
+                    # Breadth and occupancy are chosen over a bare failure count because
+                    # they say something: a finding that does not cover its reference is not
+                    # a detection, whatever else it passes. coverage_stats.py's own
+                    # docstring calls them the most useful metrics it computes.
+                    # NOT FOR CONTROLS. This rule governs whether a finding is
+                    # ACTIONABLE, and a control row never is: its content is QC about the
+                    # control itself, reclassified to control_background below. Applying
+                    # the rule to controls sent weak control rows to screened_only, which
+                    # is not in that reclassification's list, so the row silently stopped
+                    # being reported as control background - losing the QC signal without
+                    # preventing any false positive. Caught by tests/test_pipeline.py
+                    # `tier:NTC`, which asserts exactly this.
+                    blocking = [] if row.get("role") == "control" else [
+                        k for k in failed
+                        if any(k.startswith(g) for g in args.actionable_requires)]
+                    if blocking and args.actionable_requires:
+                        tier = "screened_only"
+                        reasons.append(
+                            f"NOT ACTIONABLE: failed {'; '.join(blocking)} - a finding that "
+                            f"does not cover its reference is not a detection. Also failed: "
+                            f"{'; '.join(k for k in failed if k not in blocking) or 'nothing else'}")
+                    else:
+                        tier = "supported"
+                        reasons.append(f"read threshold met; failed: {'; '.join(failed)}")
                 if ctrl > 0:
                     reasons.append(
                         f"control present at {ctrl:.2f} RPM, sample {rpm:.2f} RPM "
