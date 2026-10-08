@@ -477,6 +477,8 @@ process SCORE_EVIDENCE {
         ${refs_manifest ? "--refs-manifest ${refs_manifest}" : ''} \\
         --control-ratio ${params.control_ratio} \\
         --min-neighbour-uniformity ${params.min_neighbour_uniformity} \\
+        ${BtfBool.of('contest_attribution', params.contest_attribution) ? '--contest-attribution' : ''} \\
+        --pedestal-max-uniformity ${params.pedestal_max_uniformity} \\
         ${thr} \\
         --out findings.tsv \\
         2> score.log

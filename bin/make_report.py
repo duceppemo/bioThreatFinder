@@ -45,7 +45,13 @@ TIERS = [
      "A marker arguing against the target was found - a neighbour-specific gene, "
      "or a region the target is known to lack."),
     ("attributed_to_neighbour", "Attributed to a near neighbour",
-     "Reads aligned better to a related organism than to the watchlist target."),
+     "Reads aligned better to a related organism than to the watchlist target. "
+     "The organism they were attributed to is named in 'Why this tier'."),
+    ("indistinguishable_complex", "Cannot be separated from a near neighbour",
+     "The target covers its own reference AND so does a near neighbour, which "
+     "out-counts it only slightly. One of the two IS present; this evidence does not "
+     "say which. Resolve with lineage markers or a targeted assay - do not read this "
+     "as either a detection or a negative."),
     ("control_background", "Negative-control background",
      "Organisms detected in the negative control itself. QC information about "
      "the run, not findings about any specimen."),
@@ -60,6 +66,9 @@ TIER_TONE = {
     "no_reference": "gap",
     "suppressed_control": "muted",
     "attributed_to_neighbour": "muted",
+    # Not "muted": an unresolved complex needs an analyst to act on it, which is the
+    # whole reason it exists as a tier rather than a silent attribution.
+    "indistinguishable_complex": "warn",
     "screened_only": "muted",
     "control_background": "muted",
     "marker_veto": "muted",

@@ -991,6 +991,107 @@ matrix; it does nothing for a specimen type whose matrix was never blanked.
 
 ---
 
+## D19 — The attribution gate never looked at the target, and a 100%-abundance notifiable pathogen produced no finding at all
+
+D18 item 2 recorded that near-identical pairs are silently attributed. Measuring what the
+run actually *reported* turned that from an accuracy complaint into a structural one. In
+the Zymo *C. neoformans* isolate library - one organism, 5,870,155 reads on its own
+reference, breadth 0.642 - the complete output is:
+
+| tier | taxon | reads | breadth |
+|---|---|---|---|
+| `attributed_to_neighbour` | *Cryptococcus neoformans* | 5,870,155 | 0.642 |
+| `attributed_to_neighbour` | *Cryptococcus gattii* | 8,530 | 0.005 |
+| `screened_only` | *Salmonella enterica* | 37 | 0.001 |
+
+Nothing is reported. *C. deneoformans*, which took the vote at ratio 0.7072, is a
+near-neighbour reference and **not a watchlist taxon**, so it generates no finding of its
+own. The reads leave the pipeline unaccounted for. The *E. coli* library behaves the same
+way via *Shigella* at 0.9032. Both organisms are notifiable.
+
+**The cause is that the attribution branch never read the target's own evidence.** It
+compared two read counts and a ratio. A target covering two thirds of its reference lost
+to a sibling on a 10% count difference, and the loss was recorded in prose an analyst
+could not even decode, because the neighbour was named by taxid.
+
+### Two changes, and the order matters
+
+**1. Name the neighbour.** The finding now reads `reads favour Shigella [taxid 620]
+(near-neighbour reference)`, from the pack's existing refs manifest (`--refs-manifest`;
+absent degrades to the bare number and changes no tier). `best_neighbour_name` travels as
+a column. 45/45 attributed rows in `zymo_rl100` carry a name. This makes the call
+auditable; it does not make it right.
+
+**2. `--contest-attribution` (`params.contest_attribution`, default on).** Where the
+TARGET's own breadth and occupancy pass - D14's gates, chosen because D14 measured them as
+the discriminator - a one-sided attribution is no longer allowed to stand silently. The
+neighbour's own coverage uniformity then decides which of two different situations it is:
+
+| neighbour uniformity | meaning | outcome |
+|---|---|---|
+| ≤ 0.30 | reads pile on shared sequence; not in the specimen | attribution rejected, target judged on its own evidence |
+| > 0.30, or unmeasured | both references genuinely covered | **`indistinguishable_complex`** |
+
+`indistinguishable_complex` is a new tier below `supported` and above
+`attributed_to_neighbour`: *one of this pair is present and this evidence does not say
+which*. It is the honest statement, and D18 argued for exactly it.
+
+### Why this threshold is not the one D18 retracted
+
+It is the same metric and the same 0.30-ish region, so the difference has to be stated
+precisely. `min_neighbour_uniformity` asked "may this neighbour out-vote?" of **every**
+row, and on real reads let 25 cross-mapping artefacts through. This asks a narrower
+question of a far smaller population - where the target's own coverage geometry passes,
+which is 6 of 45 rows in `zymo_rl100` and **0 of 84** in `lod_v4`. In that population the
+separation is not the 0.07 gap D18 refused to trust:
+
+    simulated, neighbour absent   0.1495 - 0.1532   (12 rows)
+    real, neighbour a sibling     0.4107 - 0.8607   (10 rows)
+
+All 22 measured rows sit outside a 0.26-wide empty gap, and 0.30 is independently the
+`--pedestal-max` already chosen in `scripts/measure_neighbour_uniformity.py`. The guard
+that does the real work is the precondition, not the threshold.
+
+### Measured, off against on, over four batches
+
+The off column reproduces D18's recorded scoring **identically** in all four, which is
+what makes the comparison worth reading.
+
+| batch | `attributed_to_neighbour` | `indistinguishable_complex` | `supported` | false positives |
+|---|---|---|---|---|
+| zymo_rl100 | 45 → 39 | 0 → 6 | 5 → 5 | **2 → 2** |
+| zymo_rl150 | 7 → 3 | 0 → 4 | 1 → 1 | **0 → 0** |
+| lod_v4 | 84 → 81 | 0 → 0 | 0 → 3 | **0 → 0** |
+| d12fine | 84 → 75 | 0 → 0 | 9 → 18 | **0 → 0** |
+
+`screened_only`, `suppressed_control`, `control_background` and `confirmed_in_silico` are
+unchanged in every batch; no row moved anywhere except out of `attributed_to_neighbour`.
+
+**D12's defect is closed, and the evaluator says so rather than me.** `lod_v4` off FAILS
+its own declared expectation - `lod_gram_negative/Yersinia pestis min_tier_at_rpm[100]:
+expected >= supported, observed attributed_to_neighbour` - and passes with the flag on.
+Twelve genuine *Y. pestis* spikes across the two simulated batches were being attributed to
+*Yersinia* at uniformity 0.15, an organism absent from the specimen. That is the defect
+D12 described; the remedy it proposed was too broad, and the missing piece was D14's gates
+as a precondition.
+
+### What is NOT decided
+
+**Whether `indistinguishable_complex` should count as a detection.** It is in neither
+`POSITIVE_TIERS` nor any other set in `evaluate_benchmark.py`, so it falls to NEGATIVE, and
+the scorecard therefore does not move on the Zymo batches at all: *E. coli* and
+*C. neoformans* still read as misses. Counting it POSITIVE would recover 6 real detections
+and also score *Shigella dysenteriae* as present in a library that contains only *E. coli*
+- 4 rows. The honest scorecard needs a third outcome rather than a reassignment, and this
+project has twice had to retract a mapping decided ahead of its measurement.
+
+**The pairs themselves are still unseparated.** This reports the limit instead of hiding
+it. `ipaH` plus lineage markers for *Shigella*, and a *C. gattii*/*deneoformans*
+discriminator, are what would actually resolve them - which is D17's territory, not this
+entry's.
+
+---
+
 ## D18 — The first real sequencing data, and it refuted one change and justified another
 
 `real/mock_v1`, fetched 2026-10-07: the ZymoBIOMICS D6300 standard as EVEN and LOG

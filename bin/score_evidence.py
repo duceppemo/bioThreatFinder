@@ -14,7 +14,15 @@ no_reference            Watchlist taxon had no reference genome in the pack.
 screened_only           Stage-1 lead that failed stage-2. The normal outcome for
                         k-mer noise. Reported for audit, not for action.
 attributed_to_neighbour Reads align better to a near neighbour. Usually the
-                        correct answer for environmental relatives.
+                        correct answer for environmental relatives - but only
+                        where the target has no claim of its own, which is what
+                        --contest-attribution checks before letting it stand.
+indistinguishable_complex
+                        The target covers its own reference AND so does a near
+                        neighbour that out-counts it only slightly. One of the
+                        two IS present and this evidence does not say which.
+                        Neither a detection nor a negative; needs a lineage
+                        marker or a targeted assay to resolve.
 suppressed_control      Present in a negative control at a comparable level.
                         Reagent/index contamination until proven otherwise.
 control_background      What the negative control itself contains. Reported for
@@ -63,11 +71,26 @@ try:
 except ImportError:  # pragma: no cover - marker gating simply disabled
     mr = None
 
+# Tiers that assert SOMETHING IS THERE, as opposed to explaining why nothing was
+# called. A control row reaching any of them is control background, not a finding.
+# Kept as a named set because the comment at the reclassification said the test was
+# "did anything assert presence, not an enumeration" while the code was an inline
+# enumeration - so adding a presence-asserting tier silently bypassed it, which is
+# the exact failure that comment was written about.
+ASSERTS_PRESENCE = {
+    "supported", "confirmed_in_silico", "vaccine_strain", "marker_veto",
+    "indistinguishable_complex",
+}
+
 TIER_ORDER = [
     "no_reference",
     "control_background",
     "screened_only",
     "attributed_to_neighbour",
+    # Below `supported` because it asserts no single organism, above
+    # `attributed_to_neighbour` because it asserts that one of a named pair IS
+    # present - which a silent attribution does not.
+    "indistinguishable_complex",
     "marker_veto",
     "suppressed_control",
     "vaccine_strain",
@@ -325,6 +348,24 @@ def neighbour_is_credible(row: dict, args) -> bool:
         return True
 
 
+def target_covers_its_reference(breadth: float, min_breadth: float,
+                                occupancy: float, min_occupancy: float) -> bool:
+    """Does the TARGET's own coverage geometry stand up, ignoring the neighbour?
+
+    Deliberately the same two gates `--actionable-requires` defaults to, and for the
+    same reason D14 chose them: a finding that does not cover its reference is not a
+    detection, whatever else it passes. Those gates separated true from false
+    positives on the Zymo isolates at median breadth 0.8661 against 0.0015.
+
+    This is NOT a re-run of the attribution decision. It asks a prior question: is
+    there anything here worth contesting? Where the answer is no - 84 of 84
+    attributed rows in `lod_v4`, 39 of 45 in `zymo_rl100` - the attribution stands
+    untouched, which is what keeps this from re-opening the false positives D18
+    measured when the neighbour gate was applied to every row.
+    """
+    return breadth >= min_breadth and occupancy >= min_occupancy
+
+
 def load_ref_names(manifest) -> dict:
     """taxid -> (name, role) from the pack's reference manifest.
 
@@ -409,6 +450,17 @@ def main() -> int:
                          "pedestal, not a competing organism, and cannot out-vote the "
                          "target (D12). Measured gap: 0.1532 absent vs 0.9720-0.9913 "
                          "present, so 0.50 sits mid-gap. 0 disables the check.")
+    ap.add_argument("--contest-attribution", action="store_true",
+                    help="when a neighbour out-counts the target BUT the target's own "
+                         "breadth and occupancy pass, do not let the attribution stand "
+                         "silently: either the neighbour is a cross-mapping pedestal "
+                         "(judge the target on its own evidence) or both references are "
+                         "genuinely covered (report indistinguishable_complex). "
+                         "--pedestal-max-uniformity decides which.")
+    ap.add_argument("--pedestal-max-uniformity", type=float, default=0.30,
+                    help="with --contest-attribution: a neighbour at or below this "
+                         "coverage uniformity is pile-up on shared sequence, not a "
+                         "present organism [0.30]")
     ap.add_argument("--control-ratio", type=float, default=5.0,
                     help="sample RPM must exceed control RPM by this factor [5.0]")
     ap.add_argument("--marker-evidence", nargs="*", type=Path, default=[],
@@ -576,18 +628,70 @@ def main() -> int:
         grp = (row.get("group") or meta.get("group") or "").strip().lower()
         plat = (row.get("platform") or "").strip().lower()
 
+        # Computed BEFORE the branch because the attribution branch now has to ask
+        # whether there is anything worth contesting, and that question is about the
+        # target's own evidence - which the attribution branch previously never looked at.
+        contested = target_covers_its_reference(breadth, min_breadth,
+                                                occupancy, args.min_occupancy)
+        _nb_raw = (row.get("best_neighbour_uniformity") or "").strip()
+        try:
+            nb_unif = float(_nb_raw) if _nb_raw else None
+        except ValueError:
+            nb_unif = None
+
         reasons: list[str] = []
         tier = "screened_only"
 
         if unique_reads < min_reads:
             reasons.append(f"unique_reads {unique_reads:.0f} < {min_reads:.0f}")
-        elif nb_ratio < args.min_neighbour_ratio and neighbour_is_credible(row, args):
+        elif (nb_ratio < args.min_neighbour_ratio and neighbour_is_credible(row, args)
+              and not (args.contest_attribution and contested)):
             tier = "attributed_to_neighbour"
             reasons.append(
                 f"reads favour "
                 f"{neighbour_label(row.get('best_neighbour_taxid'), ref_names)} "
                 f"(ratio {row.get('neighbour_ratio')} < {args.min_neighbour_ratio}; "
                 f"neighbour uniformity {row.get('best_neighbour_uniformity') or 'n/a'})"
+            )
+        elif (args.contest_attribution and contested
+              and nb_ratio < args.min_neighbour_ratio
+              and not (nb_unif is not None
+                       and nb_unif <= args.pedestal_max_uniformity)):
+            # BOTH REFERENCES ARE GENUINELY COVERED, SO NEITHER CALL IS SAFE.
+            #
+            # The attribution machinery assumes one of the two organisms is real and
+            # the other is cross-mapping. For a sibling pair that assumption fails:
+            # Shigella IS a pathotype within E. coli, and C. deneoformans was
+            # C. neoformans var. neoformans until 2015. Both references then cover
+            # well, the read counts land within ~10% of each other, and whichever way
+            # the ratio falls the pipeline printed a confident one-sided answer.
+            #
+            # Measured on the Zymo single-organism libraries, where the truth is
+            # known by construction: E. coli at 3,349,860 reads and breadth 0.667 was
+            # reported ABSENT because Shigella took the vote at ratio 0.9032, and
+            # C. neoformans at 5,870,155 reads and breadth 0.642 the same way at
+            # 0.7072. Neither neighbour is on the watchlist, so NO finding anywhere
+            # carried those reads: the entire output for a library that is 100% a
+            # notifiable pathogen was `attributed_to_neighbour` and `screened_only`.
+            #
+            # "One of these two is present and this method cannot say which" is a
+            # true statement and a useful one. A one-sided attribution is neither.
+            tier = "indistinguishable_complex"
+            reasons.append(
+                f"CANNOT SEPARATE: the target covers its own reference (breadth "
+                f"{breadth:.4f} >= {min_breadth:.4f}, occupancy {occupancy:.4f} >= "
+                f"{args.min_occupancy:.4f}) AND "
+                f"{neighbour_label(row.get('best_neighbour_taxid'), ref_names)} "
+                + (f"covers its own (uniformity {nb_unif:.4f} > "
+                   f"{args.pedestal_max_uniformity:.2f})"
+                   if nb_unif is not None else
+                   "has NO uniformity measurement, so it cannot be shown to be a "
+                   "pedestal either")
+                + f" while out-counting it only "
+                f"{nb_ratio:.4f}:1. Both references are genuinely covered, so the "
+                f"reads cannot be assigned to one organism at this resolution. One of "
+                f"the two IS present; which one is not determined by this evidence - "
+                f"resolve with lineage markers or a targeted assay."
             )
         else:
             # WITHHELD ATTRIBUTION MUST FALL THROUGH, NOT SHORT-CIRCUIT. The first version
@@ -597,7 +701,22 @@ def main() -> int:
             # and it did not, so a 170 rpm sample was scored BELOW a 190 rpm one not
             # because its evidence was weaker but because it was never evaluated. Caught by
             # the d12fine revalidation: the cliff did not move, which is the symptom.
-            if nb_ratio < args.min_neighbour_ratio:
+            if (args.contest_attribution and contested
+                    and nb_ratio < args.min_neighbour_ratio
+                    and nb_unif is not None
+                    and nb_unif <= args.pedestal_max_uniformity):
+                reasons.append(
+                    f"ATTRIBUTION CONTESTED AND REJECTED: "
+                    f"{neighbour_label(row.get('best_neighbour_taxid'), ref_names)} "
+                    f"out-counts the target {nb_ratio:.4f}:1, but the target covers its "
+                    f"own reference (breadth {breadth:.4f} >= {min_breadth:.4f}, "
+                    f"occupancy {occupancy:.4f} >= {args.min_occupancy:.4f}) while the "
+                    f"neighbour's uniformity is {nb_unif:.4f} <= "
+                    f"{args.pedestal_max_uniformity:.2f} - its reads pile on shared "
+                    f"sequence rather than covering its genome, so it is not in the "
+                    f"specimen and cannot out-vote (D12). Judged on its own evidence below."
+                )
+            elif nb_ratio < args.min_neighbour_ratio:
                 reasons.append(
                     f"neighbour "
                     f"{neighbour_label(row.get('best_neighbour_taxid'), ref_names)} "
@@ -887,8 +1006,7 @@ def main() -> int:
         # actionable stand-down about a specimen, when it is the no-template control's
         # own background. The tier list is meant to be exhaustive for controls, so the
         # test is now "did anything assert presence", not an enumeration.
-        if row.get("role") == "control" and tier in (
-                "supported", "confirmed_in_silico", "vaccine_strain", "marker_veto"):
+        if row.get("role") == "control" and tier in ASSERTS_PRESENCE:
             reasons.append(f"negative control background at {rpm:.2f} RPM "
                            f"(was {tier} before control reclassification)")
             tier = "control_background"

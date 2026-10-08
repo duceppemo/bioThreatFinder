@@ -71,6 +71,16 @@ try:
 except ImportError:
     sys.exit("ERROR: bin/score_evidence.py not importable; tier ordering unavailable")
 
+# `indistinguishable_complex` IS DELIBERATELY IN NEITHER SET, and so falls to
+# NEGATIVE by the default at the end of outcome_of(). It reports that one of a named
+# pair is present without saying which, which is neither a detection of the watchlist
+# taxon nor a clean negative for it. Counting it POSITIVE would credit the pipeline
+# with detections it did not make (and would score Shigella dysenteriae as present in
+# a library containing only E. coli); counting it NEGATIVE understates sensitivity for
+# E. coli and C. neoformans, which really are present in those libraries. The honest
+# scorecard needs a third outcome, and inventing one here while the tier is new would
+# bake in an answer this project has twice had to retract. Until then the conservative
+# reading stands and `tier_counts` in the summary carries the number.
 POSITIVE_TIERS = {"supported", "confirmed_in_silico"}
 CONFIRMED_TIERS = {"confirmed_in_silico"}
 VACCINE_TIERS = {"vaccine_strain"}

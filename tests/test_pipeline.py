@@ -1241,6 +1241,109 @@ def test_neighbour_named(tmp: Path) -> None:
            w["reasons"][:160])
 
 
+# ---------------------------------------------------------------------------
+# 16. Contesting an attribution: the four cases, and the guard that matters most
+# ---------------------------------------------------------------------------
+
+def test_contest_attribution(tmp: Path) -> None:
+    """A neighbour may only take a finding the target has no claim on.
+
+    The attribution branch never looked at the target's own evidence, so a target
+    covering 0.667 of its reference lost to a sibling at ratio 0.9032 and was
+    reported absent - and because that sibling is not a watchlist taxon, NO finding
+    anywhere carried its 3.3M reads. `--contest-attribution` asks the prior question
+    first, and then the neighbour's own coverage uniformity decides which of two very
+    different situations this is.
+
+    THE NOT-CONTESTED CASE IS THE ONE THAT KEEPS THIS HONEST. D18 measured what
+    happens when a neighbour gate is applied to every attributed row: 25 false
+    positives on real reads. The precondition here is D14's coverage-geometry gates,
+    which that measurement showed to be the discriminator (TP median breadth 0.8661
+    against FP 0.0015), so a weak target's attribution is left exactly as it was -
+    39 of 45 rows in zymo_rl100, 84 of 84 in lod_v4.
+    """
+    manifest = tmp / "cm.tsv"
+    manifest.write_text("taxid\tname\tgroup\trole\n"
+                        "632\tYersinia pestis\tbacteria\ttarget\n"
+                        "633\tYersinia pseudotuberculosis\tbacteria\tnear_neighbour\n")
+
+    def row(sample, role, breadth, occ, nb_unif):
+        return cov_row(sample=sample, role=role, taxid="632",
+                       taxon="Yersinia pestis", group="bacteria",
+                       reference_bp=4650000, unique_reads=900,
+                       reads_per_million=180.0, breadth=breadth, mean_depth=0.9,
+                       depth_cv=1.2, window_bp=1000, windows_expected=4650,
+                       windows_occupied=int(4650 * occ), window_occupancy=occ,
+                       mean_identity=0.9950, best_neighbour_taxid="633",
+                       best_neighbour_reads=1000, neighbour_ratio="0.9000",
+                       best_neighbour_uniformity=nb_unif,
+                       screen_assigned_reads=1100,
+                       mapped_fraction_of_assigned="0.8200",
+                       total_reads_screened=5000000, mapq_min=10)
+
+    cov = tmp / "contest.tsv"
+    write_cov(cov, [
+        # Target covers its reference; neighbour's reads pile on shared sequence.
+        row("PEDESTAL", "sample", 0.3400, 0.6000, "0.1500"),
+        # Target covers its reference; so does the neighbour. Sibling pair.
+        row("SIBLING", "sample", 0.3400, 0.6000, "0.8600"),
+        # Target does NOT cover its reference. Nothing to contest.
+        row("WEAK", "sample", 0.0010, 0.0200, "0.8600"),
+        # Target covers its reference; the neighbour was never measured.
+        row("UNMEASURED", "sample", 0.3400, 0.6000, ""),
+    ])
+    # --min-neighbour-uniformity 0 IS THE PIPELINE'S SETTING (D18 retracted the 0.50
+    # default in nextflow.config), and it has to be passed explicitly here or the
+    # comparison measures the wrong thing: at the script's own 0.50 default the
+    # PEDESTAL row is already withheld by the blunt gate, so "off" would not be the
+    # behaviour the pipeline actually has and the flag's effect would be understated.
+    base = ["--refs-manifest", manifest, "--min-neighbour-uniformity", "0"]
+    on = score(tmp / "con_on", cov,
+               extra=base + ["--contest-attribution",
+                             "--pedestal-max-uniformity", "0.30"])
+    off = score(tmp / "con_off", cov, extra=base)
+
+    # The control goes in its OWN batch. Sharing a batch put a 180 RPM control row on
+    # taxid 632 into run-global control_rpm, so every sample row above was tested
+    # against 5x its own abundance and came back suppressed_control - the fixture
+    # would have asserted control subtraction while claiming to test attribution.
+    ctrl = tmp / "contest_ctrl.tsv"
+    write_cov(ctrl, [row("NTC", "control", 0.3400, 0.6000, "0.8600")])
+    on_ctrl = score(tmp / "con_ctrl", ctrl,
+                    extra=base + ["--contest-attribution",
+                                  "--pedestal-max-uniformity", "0.30"])
+
+    record("contest:pedestal neighbour cannot take the finding",
+           on["PEDESTAL"]["tier"] != "attributed_to_neighbour",
+           on["PEDESTAL"]["tier"])
+    record("contest:pedestal rejection says why",
+           "ATTRIBUTION CONTESTED AND REJECTED" in on["PEDESTAL"]["reasons"],
+           on["PEDESTAL"]["reasons"][:120])
+    record("contest:two covered references are indistinguishable",
+           on["SIBLING"]["tier"] == "indistinguishable_complex",
+           on["SIBLING"]["tier"])
+    record("contest:indistinguishable names both the pair and the limit",
+           "CANNOT SEPARATE" in on["SIBLING"]["reasons"]
+           and "Yersinia pseudotuberculosis" in on["SIBLING"]["reasons"],
+           on["SIBLING"]["reasons"][:140])
+    # THE GUARD. A target that does not cover its reference has no claim to contest.
+    record("contest:a weak target does NOT contest its attribution",
+           on["WEAK"]["tier"] == "attributed_to_neighbour", on["WEAK"]["tier"])
+    # Absent evidence must not be read as evidence the neighbour is a pedestal.
+    record("contest:an unmeasured neighbour is not assumed to be a pedestal",
+           on["UNMEASURED"]["tier"] == "indistinguishable_complex",
+           on["UNMEASURED"]["tier"])
+    record("contest:a control is never a finding, new tier included",
+           on_ctrl["NTC"]["tier"] == "control_background", on_ctrl["NTC"]["tier"])
+
+    # Off, every one of them is the single behaviour that existed before.
+    record("contest:flag off leaves all four attributed",
+           all(off[k]["tier"] == "attributed_to_neighbour"
+               for k in ("PEDESTAL", "SIBLING", "WEAK", "UNMEASURED")),
+           "; ".join(f'{k}={off[k]["tier"]}' for k in
+                     ("PEDESTAL", "SIBLING", "WEAK", "UNMEASURED")))
+
+
 CASES = {
     "selftests": test_selftests,
     "tiering": test_tiering,
@@ -1257,6 +1360,7 @@ CASES = {
     "shared_assembly": test_shared_assembly_masking,
     "matrix_blank": test_matrix_blank_suppresses_host_artifact,
     "neighbour_named": test_neighbour_named,
+    "contest": test_contest_attribution,
 }
 
 
