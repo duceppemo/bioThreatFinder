@@ -541,6 +541,8 @@ workflow {
     }
 
     // -- Evidence scoring, control subtraction, tiering -------------------
+    def manifest_tsv = file(pack.confirm.refs_manifest
+                            ?: "${pack.confirm.refs_dir}/manifest.tsv")
     SCORE_EVIDENCE(
         COVERAGE_STATS.out.stats.map { meta, tsv -> tsv }.collect().ifEmpty([]),
         PARSE_SCREEN.out.candidates.map { meta, tsv -> tsv }.collect().ifEmpty([]),
@@ -552,7 +554,12 @@ workflow {
         SKIP.skip_markers ? [] : file("${pack.dir}/marker_rules.yaml", checkIfExists: true),
         // The samplesheet is the only authoritative statement of which samples are
         // CONTROLS. Counting them from pipeline output misses the spotless control.
-        file(params.input, checkIfExists: true)
+        file(params.input, checkIfExists: true),
+        // NAMES for the competitive bundles' near neighbours. Cosmetic to the gates
+        // and load-bearing for the reader: without it `attributed_to_neighbour` says
+        // "reads favour neighbour taxid 620" and never that 620 is Shigella. Not
+        // checkIfExists - a pack built before the manifest existed must still score.
+        manifest_tsv.exists() ? manifest_tsv : []
     )
 
     MAKE_REPORT(

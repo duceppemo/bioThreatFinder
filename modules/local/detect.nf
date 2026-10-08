@@ -438,6 +438,7 @@ process SCORE_EVIDENCE {
     path marker_states
     path marker_rules
     path samplesheet
+    path refs_manifest
 
     output:
     path "findings.tsv", emit: findings
@@ -473,6 +474,7 @@ process SCORE_EVIDENCE {
         --watchlist ${watchlist} \\
         --pack-yaml ${pack_yaml} \\
         ${samplesheet ? "--samplesheet ${samplesheet}" : ''} \\
+        ${refs_manifest ? "--refs-manifest ${refs_manifest}" : ''} \\
         --control-ratio ${params.control_ratio} \\
         --min-neighbour-uniformity ${params.min_neighbour_uniformity} \\
         ${thr} \\

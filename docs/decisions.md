@@ -1097,6 +1097,24 @@ Net, with the credibility gate off:
      abundance, reported as absent. The pack's own notes say *Shigella* is genomically
      *E. coli* and species-level separation from metagenomes is unreliable. The honest
      outcome is "cannot separate", not a silent attribution to one side.
+
+     **Half-fixed: the neighbour is now NAMED, and that is all.** The finding read
+     "reads favour neighbour taxid 620" - a number, nowhere resolved to a name in any
+     artifact an analyst reads. `score_evidence.py` now loads the pack's refs manifest
+     (`--refs-manifest`, passed by the pipeline; absent degrades to the bare taxid and
+     changes no tier) and the same finding reads "reads favour Shigella [taxid 620]
+     (near-neighbour reference) (ratio 0.9032 ...)", with `best_neighbour_name` as its
+     own column. Re-scored over `runs/zymo_rl100`, 45/45 attributed rows carry a name.
+
+     THE DECISION ITSELF IS UNCHANGED AND STILL WRONG FOR THESE TWO PAIRS. Naming
+     makes the call auditable; it does not make it right. The measurement says these
+     are not D12 pedestals - 620 covers 0.7328 of its reference and 40410 covers
+     0.8607, so competitive alignment is working exactly as designed, and the reads
+     genuinely do fit the neighbour better. They are taxonomic siblings: *Shigella* is
+     a pathotype within *E. coli*, and *C. deneoformans* was *C. neoformans* var.
+     *neoformans* until 2015. Whether a sibling-complex attribution should count as a
+     detection of the watchlist taxon is a POLICY question over all 89 taxa, not a
+     threshold to tune, and it is not answered here.
   3. **MARKER_SEARCH_AA had no time limit of its own** and inherited the 4 h base default
      while being the most expensive process in the pipeline: 1 m 41 s - 8 m 13 s on
      simulated Illumina, 33 m - 2 h 42 m on real Illumina, and killed at 4 h on ONT, whose

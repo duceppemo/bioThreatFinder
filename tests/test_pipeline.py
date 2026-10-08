@@ -47,7 +47,13 @@ COV_COLS = [
     "reference_bp", "reference_contigs",
     "unique_reads", "reads_per_million", "aligned_bases", "breadth", "mean_depth",
     "depth_cv", "window_bp", "windows_expected", "windows_occupied", "window_occupancy",
-    "mean_identity", "best_neighbour_taxid", "best_neighbour_reads", "neighbour_ratio",
+    "mean_identity", "best_neighbour_taxid", "best_neighbour_reads",
+    # The D12 credibility gate's ONLY input. It was absent from this list while
+    # being present in every real coverage TSV, so cov_row() rejected it and no
+    # fixture could reach either side of the gate - the branch that withholds an
+    # attribution was unreachable from the test suite that is supposed to pin the
+    # tiering logic.
+    "best_neighbour_uniformity", "neighbour_ratio",
     "screen_assigned_reads", "mapped_fraction_of_assigned", "total_reads_screened",
     "mapq_min",
 ]
@@ -1150,6 +1156,91 @@ def test_platform_carried(tmp: Path) -> None:
                row is not None and row["platform"] == want,
                f"got {row and row['platform']!r}")
 
+# ---------------------------------------------------------------------------
+# 15. The attributed-to neighbour is NAMED, not just numbered
+# ---------------------------------------------------------------------------
+
+def test_neighbour_named(tmp: Path) -> None:
+    """`attributed_to_neighbour` must say WHICH organism took the reads.
+
+    This is the only tier that reports a watchlist organism as absent on the
+    strength of a different organism, and it used to identify that organism by
+    number alone: "reads favour neighbour taxid 620". D18 records the two calls
+    that exposed it - *E. coli* attributed to 620 and *C. neoformans* to 40410,
+    both organisms present at 100% abundance - where the analyst could not tell
+    from the finding that 620 is *Shigella*, let alone that the pack's own notes
+    say the pair cannot be separated at species level.
+
+    The fallback is asserted as well, because the name comes from a file the
+    scorer must not depend on: no manifest means the bare taxid comes back, and
+    scoring itself is unchanged.
+    """
+    cov = tmp / "named.tsv"
+    write_cov(cov, [
+        cov_row(sample="NB", role="sample", taxid="632", taxon="Yersinia pestis",
+                group="bacteria", reference_bp=4650000, unique_reads=300,
+                reads_per_million=60.0, breadth=0.0100, mean_depth=0.10, depth_cv=9.0,
+                window_bp=1000, windows_expected=4650, windows_occupied=47,
+                window_occupancy=0.0100, mean_identity=0.9910,
+                best_neighbour_taxid="633", best_neighbour_reads=900,
+                neighbour_ratio="0.3333", best_neighbour_uniformity="0.9100",
+                screen_assigned_reads=1200, mapped_fraction_of_assigned="0.7000",
+                total_reads_screened=5000000, mapq_min=10),
+    ])
+    manifest = tmp / "manifest.tsv"
+    manifest.write_text("taxid\tname\tgroup\trole\n"
+                        "632\tYersinia pestis\tbacteria\ttarget\n"
+                        "633\tYersinia pseudotuberculosis\tbacteria\tnear_neighbour\n")
+
+    with_m = score(tmp / "with_m", cov, extra=["--refs-manifest", manifest])["NB"]
+    record("neighbour_named:tier is attributed_to_neighbour",
+           with_m["tier"] == "attributed_to_neighbour", with_m["tier"])
+    record("neighbour_named:reason carries the neighbour's name",
+           "Yersinia pseudotuberculosis" in with_m["reasons"],
+           with_m["reasons"][:120])
+    record("neighbour_named:reason still carries the taxid",
+           "taxid 633" in with_m["reasons"], with_m["reasons"][:120])
+    record("neighbour_named:near_neighbour role is stated",
+           "near-neighbour reference" in with_m["reasons"], with_m["reasons"][:120])
+    record("neighbour_named:name travels as its own column",
+           with_m.get("best_neighbour_name") == "Yersinia pseudotuberculosis",
+           repr(with_m.get("best_neighbour_name")))
+
+    # No manifest: degrade to the number, and change NOTHING else.
+    without = score(tmp / "without_m", cov)["NB"]
+    record("neighbour_named:without a manifest the taxid is still named",
+           "taxid 633" in without["reasons"], without["reasons"][:120])
+    record("neighbour_named:without a manifest the name column is empty",
+           without.get("best_neighbour_name") == "",
+           repr(without.get("best_neighbour_name")))
+    record("neighbour_named:naming does not change the tier",
+           without["tier"] == with_m["tier"],
+           f'{without["tier"]} vs {with_m["tier"]}')
+
+    # The OTHER branch that names a neighbour: attribution withheld because the
+    # neighbour's reads pile on shared sequence (D12). Its prose was numbered too.
+    ped = tmp / "pedestal.tsv"
+    write_cov(ped, [
+        cov_row(sample="PED", role="sample", taxid="632", taxon="Yersinia pestis",
+                group="bacteria", reference_bp=4650000, unique_reads=300,
+                reads_per_million=60.0, breadth=0.0100, mean_depth=0.10, depth_cv=9.0,
+                window_bp=1000, windows_expected=4650, windows_occupied=47,
+                window_occupancy=0.0100, mean_identity=0.9910,
+                best_neighbour_taxid="633", best_neighbour_reads=900,
+                neighbour_ratio="0.3333", best_neighbour_uniformity="0.1200",
+                screen_assigned_reads=1200, mapped_fraction_of_assigned="0.7000",
+                total_reads_screened=5000000, mapq_min=10),
+    ])
+    w = score(tmp / "ped", ped,
+              extra=["--refs-manifest", manifest,
+                     "--min-neighbour-uniformity", "0.50"])["PED"]
+    record("neighbour_named:withheld attribution is not the neighbour tier",
+           w["tier"] != "attributed_to_neighbour", w["tier"])
+    record("neighbour_named:withheld attribution names the neighbour",
+           "Yersinia pseudotuberculosis" in w["reasons"] and "NOT CREDIBLE" in w["reasons"],
+           w["reasons"][:160])
+
+
 CASES = {
     "selftests": test_selftests,
     "tiering": test_tiering,
@@ -1165,6 +1256,7 @@ CASES = {
     "absent": test_exhaustive_absent,
     "shared_assembly": test_shared_assembly_masking,
     "matrix_blank": test_matrix_blank_suppresses_host_artifact,
+    "neighbour_named": test_neighbour_named,
 }
 
 

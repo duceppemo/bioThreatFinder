@@ -325,6 +325,55 @@ def neighbour_is_credible(row: dict, args) -> bool:
         return True
 
 
+def load_ref_names(manifest) -> dict:
+    """taxid -> (name, role) from the pack's reference manifest.
+
+    WHY A NAME IS NOT COSMETIC. `attributed_to_neighbour` is the only tier that
+    reports a watchlist organism as absent on the strength of a DIFFERENT organism,
+    and until now it named that organism by number: "reads favour neighbour taxid
+    620". An analyst cannot audit that. The two calls this was written for are
+    *E. coli* -> 620 and *C. neoformans* -> 40410; both read as opaque, and both are
+    cases where the pack's own notes say the pair cannot be separated at species
+    level from a metagenome. Spelled out as "Shigella" and "Cryptococcus
+    deneoformans" the call is at least reviewable by the person holding it.
+
+    The manifest's `role` column comes with it, because "the neighbour is itself a
+    watchlist target" and "the neighbour is a near_neighbour reference that exists
+    only to absorb cross-mapping" are different situations for a reader, and the
+    distinction is already recorded.
+
+    MISSING IS NOT FATAL. No manifest, or a taxid absent from it, falls back to the
+    bare number - the behaviour before this function existed. Scoring must not
+    depend on a cosmetic file.
+    """
+    out: dict = {}
+    if not manifest or manifest.name == "NO_FILE" or not manifest.exists():
+        return out
+    try:
+        with manifest.open(newline="") as fh:
+            for row in csv.DictReader(fh, delimiter="\t"):
+                tid = (row.get("taxid") or "").strip()
+                if tid and tid not in out:
+                    out[tid] = ((row.get("name") or "").strip(),
+                                (row.get("role") or "").strip())
+    except Exception as exc:
+        sys.stderr.write(f"[score] WARN: could not read {manifest}: {exc}; "
+                         "neighbours will be named by taxid only\n")
+    return out
+
+
+def neighbour_label(taxid: str, names: dict) -> str:
+    """Human-readable identification of a neighbour, for a reason string."""
+    tid = (taxid or "").strip()
+    if not tid:
+        return "an unidentified neighbour"
+    name, role = names.get(tid, ("", ""))
+    if not name:
+        return f"taxid {tid}"
+    qual = " (near-neighbour reference)" if role == "near_neighbour" else ""
+    return f"{name} [taxid {tid}]{qual}"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -342,6 +391,9 @@ def main() -> int:
     ap.add_argument("--watchlist", required=True, type=Path,
                     help="watchlist.resolved.tsv")
     ap.add_argument("--pack-yaml", type=Path, default=None)
+    ap.add_argument("--refs-manifest", type=Path, default=None,
+                    help="pack refs manifest.tsv; supplies the NAME of an "
+                         "attributed-to neighbour. Absent = name by taxid only.")
     ap.add_argument("--min-occupancy", type=float, default=0.15,
                     help="minimum window occupancy for confirmation [0.15]")
     ap.add_argument("--min-neighbour-ratio", type=float, default=1.5,
@@ -379,6 +431,10 @@ def main() -> int:
 
     thresholds = apply_threshold_overrides(load_pack_thresholds(args.pack_yaml),
                                            args.threshold)
+
+    # taxid -> (name, role). Used ONLY to name an attributed-to neighbour in prose;
+    # no gate reads it, so a missing manifest degrades the wording and nothing else.
+    ref_names = load_ref_names(args.refs_manifest)
 
     # ---- marker evidence and rules -------------------------------------
     # marker_state[sample][marker_id] = mr.TRUE / mr.FALSE. A marker that is
@@ -528,7 +584,8 @@ def main() -> int:
         elif nb_ratio < args.min_neighbour_ratio and neighbour_is_credible(row, args):
             tier = "attributed_to_neighbour"
             reasons.append(
-                f"reads favour neighbour taxid {row.get('best_neighbour_taxid') or '?'} "
+                f"reads favour "
+                f"{neighbour_label(row.get('best_neighbour_taxid'), ref_names)} "
                 f"(ratio {row.get('neighbour_ratio')} < {args.min_neighbour_ratio}; "
                 f"neighbour uniformity {row.get('best_neighbour_uniformity') or 'n/a'})"
             )
@@ -542,7 +599,9 @@ def main() -> int:
             # the d12fine revalidation: the cliff did not move, which is the symptom.
             if nb_ratio < args.min_neighbour_ratio:
                 reasons.append(
-                    f"neighbour taxid {row.get('best_neighbour_taxid') or '?'} out-counts "
+                    f"neighbour "
+                    f"{neighbour_label(row.get('best_neighbour_taxid'), ref_names)} "
+                    f"out-counts "
                     f"the target (ratio {row.get('neighbour_ratio')}) but is NOT CREDIBLE: "
                     f"coverage uniformity {row.get('best_neighbour_uniformity')} < "
                     f"{args.min_neighbour_uniformity} means its reads pile on shared "
@@ -892,6 +951,15 @@ def main() -> int:
             "reads_in_masked_regions": row.get("reads_in_masked_regions", ""),
             "masked_fraction_of_reference": row.get("masked_fraction_of_reference", ""),
             "best_neighbour_taxid": row.get("best_neighbour_taxid", ""),
+            # THE NEIGHBOUR'S NAME, NOT ONLY ITS NUMBER. `attributed_to_neighbour`
+            # reports a watchlist organism as absent because another organism won the
+            # reads; a column holding "620" makes that unauditable without an external
+            # lookup, and the two calls this was written for - Shigella out-voting
+            # E. coli, C. deneoformans out-voting C. neoformans - are exactly the ones
+            # a reader most needs to recognise on sight. Empty when the manifest is
+            # absent or the taxid is not in it.
+            "best_neighbour_name": ref_names.get(
+                (row.get("best_neighbour_taxid") or "").strip(), ("", ""))[0],
             # The number that decides whether that neighbour may out-vote the
             # target travels with the finding. "Every finding explains itself" is
             # this module's stated principle, and a gate whose input is only in the
@@ -937,6 +1005,7 @@ def main() -> int:
                 "mean_identity": "", "neighbour_ratio": "",
                 "mapped_fraction_of_assigned": "", "reads_in_masked_regions": "",
                 "masked_fraction_of_reference": "", "best_neighbour_taxid": "",
+                "best_neighbour_name": "",
                 "screen_reads": screen.get((sample, taxid), {}).get("assigned_reads", ""),
                 # These were left empty even though the screen row is available two
                 # lines above (screen_reads uses it), so the report lost which arms had
