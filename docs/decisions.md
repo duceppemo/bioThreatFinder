@@ -1097,8 +1097,12 @@ whose *E. coli* is real, and that is not a scoring artefact to tune away. *Shige
 pathotype within *E. coli*; the watchlist's own note says species-level separation from a
 metagenome is unreliable. A method that cannot separate the pair should be charged for
 both sides of it, and the number is the honest size of the problem `ipaH` plus lineage
-markers (D17) would solve. The two *L. monocytogenes* false positives are unchanged and
-remain D13's reference-quality problem.
+markers (D17) would solve. The other two in `zymo_rl100` are the *L. monocytogenes* rows,
+unchanged by this and already established as **real trace contamination** rather than
+errors - confirmed by Kraken2 at 0.28% and 0.06% with breadth matching coverage theory, so
+the truth model, not the pipeline, is what is wrong about them. Counting only calls the
+tool actually got wrong, `zymo_rl100` reads 7 TP / 2 FP and `zymo_rl150` 4 TP / 1 FP, and
+every remaining false positive in both is the *Shigella*/*E. coli* pair.
 
 The remaining expectation failures on the Zymo batches are `zymo_even`'s **ONT** rows,
 which have no findings because that batch was never completed - not a scoring outcome.

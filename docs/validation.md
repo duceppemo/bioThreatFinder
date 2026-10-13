@@ -281,9 +281,33 @@ wrong about themselves; they are easier than real data, and the gap between 0 an
 measure of that. Both simulated batches are UNCHANGED by the fix, so this is not a tuning
 that trades one dataset for another.
 
-Two true positives are still MISSED, and both are present at 100% abundance: *E. coli*
-(3,349,860 reads, breadth 0.667) attributed to *Shigella*, and *C. neoformans* (5,870,155
-reads, breadth 0.642) attributed to taxid 40410. See D18.
+### Both missed true positives are recovered — 2026-10-13, D19
+
+The two misses this section recorded - *E. coli* attributed to *Shigella*, *C. neoformans*
+to *C. deneoformans*, each at 100% abundance - were not a threshold problem. The
+attribution branch never read the target's own evidence, so a target covering two thirds
+of its reference lost on a 10% count difference, and because the winning neighbour is not
+a watchlist taxon, NO finding anywhere carried its reads: the entire output for the
+*C. neoformans* library was two `attributed_to_neighbour` rows and one `screened_only`.
+
+`--contest-attribution` (default on) requires the target's own breadth and occupancy to
+pass before an attribution is contested at all, then uses the neighbour's coverage
+uniformity to separate a cross-mapping pedestal from a genuine sibling. The latter is the
+new `indistinguishable_complex` tier, which counts as a detection.
+
+| batch | before TP/FP | after TP/FP | of which are real errors |
+|---|---|---|---|
+| zymo_rl100 | 3 / 2 | 7 / 4 | **7 / 2** — 2 FP are the *Listeria* contamination above |
+| zymo_rl150 | 1 / 0 | 4 / 1 | 4 / 1 |
+| lod_v4 (simulated) | 6 / 0 | **9 / 0** | 9 / 0 |
+| d12fine (simulated) | 9 / 0 | **18 / 0** | 18 / 0 |
+
+Every remaining false positive on real data is *Shigella dysenteriae* in a specimen whose
+*E. coli* is real - the pair the watchlist itself says cannot be separated from a
+metagenome. On the simulated batches the gain is 12 genuine *Y. pestis* spikes and no false
+positive, and `lod_v4`'s declared expectation
+`lod_gram_negative/Yersinia pestis min_tier_at_rpm[100]` goes from FAIL to PASS: **D12 is
+closed**. See D19.
 
 The ONT arm has NOT been measured - it failed on a 4 h task limit and was not restarted.
 
