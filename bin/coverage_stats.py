@@ -330,16 +330,24 @@ def covered_by_taxid(bam: Path, mapq_min: int) -> dict[str, tuple[int, int, floa
     reference_bp from endpos, covered_bp from covbases, aligned_bp from meandepth x endpos.
     No read length is assumed, which is what lets the same formula serve Illumina and ONT.
 
-    ⚠️ THIS FUNCTION PREVIOUSLY COMPUTED `covered_bp / min(reference_bp, span)` AND CALLED
-    IT THE SAME THING. That has no read count in it anywhere, so it is not normalised and
-    not abundance-independent - and the docstring's claim that "the expectation needs no
-    read-length assumption" was true only because there was no expectation. The calibration
-    it cited (0.113-0.123 absent, 0.639-0.992 present) was produced by
-    scripts/measure_neighbour_uniformity.py, which DOES divide by the expectation. Two
-    different metrics under one name, and three successive threshold decisions (D12's 0.50,
-    D18's retraction of it, D19's 0.30) were taken across the gap between them.
+    THIS IS ALGEBRAICALLY THE PREVIOUS FORM, `covered_bp / min(reference_bp, span)`, AND
+    THE CORRECTION THAT CLAIMED OTHERWISE WAS WRONG. `span` there is collect_alignments()'s
+    summed ALIGNED reference span, i.e. the same normalising term, so the two differ only
+    by indel and supplementary-filter handling: over all 467 neighbour rows on disk,
+    max |old - new| = 0.0073, mean 0.00015. The old docstring's "the expectation needs no
+    read-length assumption" was correct; it was misread as meaning there was no expectation.
+    The present form is kept only because both terms now come from one samtools pass
+    instead of two sources. It fixes nothing, because nothing was broken here.
 
-    What the unnormalised version actually did, measured on ONE ABSENT neighbour
+    WHAT IS REAL IS THAT NORMALISING DOES NOT MAKE THIS ABUNDANCE-INDEPENDENT, and the
+    docstring used to claim it did. Below ~1x depth the statistic is covered-per-aligned-
+    base, which is ~1 for ANY taxon whose reads are too sparse to overlap - so a rare
+    pedestal is indistinguishable from a present organism. Above ~1x it saturates to plain
+    breadth, which for a sibling reference plateaus at the shared fraction. It is a
+    DEPTH-GATED pile-up detector, informative only where there is enough depth for overlap,
+    and it was described as a shape statistic that one threshold could serve at every level.
+
+    Measured on ONE ABSENT neighbour
     (L. innocua, taxid 1642) across the Zymo libraries:
 
         14 reads 0.9676 | 21 reads 0.9234 | 1,083 reads 0.8513 | 11,593 reads 0.4176
@@ -349,12 +357,26 @@ def covered_by_taxid(bam: Path, mapq_min: int) -> dict[str, tuple[int, int, floa
     proposed for it. The same absent organism was "genuinely covered" when rare and a
     "pedestal" when abundant. See D20.
 
-    HOW TO READ THE CORRECTED NUMBER. Above ~1x depth the expectation saturates at 1 and
-    uniformity IS breadth, so a present organism approaches 1 and a pedestal plateaus at
-    the fraction of genome the two share. Below 1x it is covered-per-aligned-base, which
-    falls as reads pile on the same conserved sequence. Both regimes measure shape rather
-    than quantity; neither is a presence test on its own, and the discriminating power
-    still depends on depth over the shared fraction.
+    WHAT THE RECALIBRATION FOUND (467 neighbour rows, all competitive BAMs on disk,
+    truth labelled per specimen as PRESENT / ABSENT_SIBLING / ABSENT_DISTANT). Counting
+    DISTINCT CONDITIONS rather than rows, because 288 of the 292 present rows are one
+    simulated background replicated:
+
+        PRESENT         9 conditions   0.524 - 0.991
+        ABSENT_SIBLING 17 conditions   0.022 - 0.861
+        ABSENT_DISTANT 26 conditions   0.000 - 0.604
+
+    Three things follow. (1) Rows below ~0.05x neighbour depth carry no information and
+    must not be judged - unfiltered, ABSENT_DISTANT reaches p90 0.932 purely from sparse
+    non-overlapping reads. (2) Above that floor PRESENT and ABSENT_DISTANT nearly separate,
+    but NOT cleanly: present E. coli in zymo_log scores 0.524 while absent Citrobacter in
+    zymo_even ONT scores 0.604. (3) ABSENT_SIBLING spans the whole range and always will -
+    a sibling reference IS covered by its relative's reads, which is the honest answer and
+    the reason indistinguishable_complex exists.
+
+    So this number can support "the neighbour is a pedestal" only with a depth
+    precondition, and even then the present arm rests on ~5 independent conditions. It is
+    reported for audit; params.contest_attribution is OFF and no gate reads it.
 
     SUPPLEMENTARY is in the filter list because samtools coverage does NOT exclude it by
     default, while the read counts this is compared against come from `view -F 0x904`.

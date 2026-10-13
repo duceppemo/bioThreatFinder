@@ -1,0 +1,468 @@
+run	sample	bundle	nb_taxid	nb_name	nb_reads	depth	unif_new	unif_old	platform	label
+zymo_rl100	zymo_isolate_bacillus_subtilis_illumina_ERR2935851	1314	1334	Streptococcus dysgalactiae	3306	0.10358699496441888	0.037987497336080124	0.0380	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_bacillus_subtilis_illumina_ERR2935851	5207	40410	Cryptococcus deneoformans	31	0.00016245080155167547	1.0	0.9997	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_bacillus_subtilis_illumina_ERR2935851	28901	562	Escherichia coli	288	0.00496710670369043	0.9179891323905142	0.9180	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_bacillus_subtilis_illumina_ERR2935851	1392	1428	Bacillus thuringiensis	6338	0.08838633372853204	0.010648622564886655	0.0106	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_bacillus_subtilis_illumina_ERR2935851	1491	1561	Clostridium baratii	153	0.003625475096342548	0.5048952250085882	0.5048	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_bacillus_subtilis_illumina_ERR2935851	1639	1642	Listeria innocua	11593	0.3897443357457177	0.41777751709820987	0.4176	illumina	ABSENT_SIBLING
+zymo_rl100	zymo_isolate_bacillus_subtilis_illumina_ERR2935851	562	620	Shigella	93	0.0017434177458473226	0.9054457086048824	0.9054	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_cryptococcus_neoformans_illumina_ERR2935856	28901	562	Escherichia coli	57	0.0010059691434873418	0.8832622601279317	0.8833	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_enterococcus_faecalis_illumina_ERR2935850	1314	1334	Streptococcus dysgalactiae	88354	3.975379508234042	0.004346632314274716	0.0043	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_enterococcus_faecalis_illumina_ERR2935850	1392	1405	Bacillus mycoides	2268	0.028712328190041714	0.07068274074436348	0.0707	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_enterococcus_faecalis_illumina_ERR2935850	1639	1640	Listeria seeligeri	3643	0.09215459051856639	0.043317882978104454	0.0433	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_enterococcus_faecalis_illumina_ERR2935850	28901	562	Escherichia coli	397	0.006969214091075242	0.9318799692228776	0.9314	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_bacillus_subtilis_illumina_ERR2935851	666	670	Vibrio parahaemolyticus	950	0.015124366744938314	0.005247731316156613	0.0052	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_enterococcus_faecalis_illumina_ERR2935850	5207	40410	Cryptococcus deneoformans	30	0.0001574119398557269	0.9599866622207401	0.9600	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_escherichia_coli_illumina_ERR2935852	5207	40410	Cryptococcus deneoformans	34	0.00017562532536087436	0.9958158995815899	0.9955	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_escherichia_coli_illumina_ERR2935852	632	630	Yersinia enterocolitica	26424	0.4639184328171072	0.02334682024630586	0.0233	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_escherichia_coli_illumina_ERR2935852	666	670	Vibrio parahaemolyticus	2274	0.03369081472849159	0.033314372066031175	0.0333	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_enterococcus_faecalis_illumina_ERR2935850	562	620	Shigella	114	0.002125494494743941	0.9310501041949806	0.9309	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_cryptococcus_neoformans_illumina_ERR2935856	37769	40410	Cryptococcus deneoformans	8301386	43.19977186553672	0.860695891994519	0.8607	illumina	ABSENT_SIBLING
+zymo_rl100	zymo_isolate_cryptococcus_neoformans_illumina_ERR2935856	5207	40410	Cryptococcus deneoformans	8301394	43.19977658946956	0.860696836781087	0.8607	illumina	ABSENT_SIBLING
+zymo_rl100	zymo_isolate_escherichia_coli_illumina_ERR2935852	727	729	Haemophilus parainfluenzae	1025	0.033472879538909206	0.02077027158978365	0.0204	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_escherichia_coli_illumina_ERR2935852	622	624	Shigella sonnei	1897114	37.69992577093998	0.5732211507366538	0.5732	illumina	ABSENT_SIBLING
+zymo_rl100	zymo_isolate_escherichia_coli_illumina_ERR2935852	562	620	Shigella	3708943	70.79964195711112	0.7328056796941229	0.7328	illumina	ABSENT_SIBLING
+zymo_rl100	zymo_isolate_lactobacillus_fermentum_illumina_ERR2935857	1314	1334	Streptococcus dysgalactiae	10	0.00043737671472598186	0.46687697160883285	0.4664	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_lactobacillus_fermentum_illumina_ERR2935857	1392	1405	Bacillus mycoides	200	0.0027993361494032453	0.4831953850012541	0.4830	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_escherichia_coli_illumina_ERR2935852	28901	562	Escherichia coli	11102540	196.2266086703172	0.7501741409804624	0.7502	illumina	PRESENT
+zymo_rl100	zymo_isolate_lactobacillus_fermentum_illumina_ERR2935857	1639	1638	Listeria ivanovii	103	0.0029795708102761114	0.5599494194735026	0.5546	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_lactobacillus_fermentum_illumina_ERR2935857	28901	562	Escherichia coli	238	0.004157219321113823	0.9090205520681055	0.9087	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_lactobacillus_fermentum_illumina_ERR2935857	5207	40410	Cryptococcus deneoformans	77	0.00039649542969995364	0.9890124437384167	0.9935	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_lactobacillus_fermentum_illumina_ERR2935857	562	620	Shigella	85	0.0015984057539525879	0.8992771084337349	0.8993	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_lactobacillus_fermentum_illumina_ERR2935857	666	674	Vibrio mimicus	1	8.110488280682372e-06	1.0	1.0000	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_listeria_monocytogenes_illumina_ERR2935854	1314	1334	Streptococcus dysgalactiae	47191	2.1247061734504515	0.003743687127097258	0.0037	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_listeria_monocytogenes_illumina_ERR2935854	1392	1396	Bacillus cereus	2259	0.02819432346530171	0.040076011858894825	0.0400	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_listeria_monocytogenes_illumina_ERR2935854	28901	562	Escherichia coli	618	0.00670860588012916	0.3655813705637856	0.3656	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_listeria_monocytogenes_illumina_ERR2935854	5207	40410	Cryptococcus deneoformans	223	0.0011668114114680923	0.9479532163742691	0.9459	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_pseudomonas_aeruginosa_illumina_ERR2935853	1639	1642	Listeria innocua	21	0.0007006824986968275	0.9233811171527434	0.9234	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_pseudomonas_aeruginosa_illumina_ERR2935853	28450	292	Burkholderia cepacia	8537	0.0691816818431939	0.035609518445702905	0.0356	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_pseudomonas_aeruginosa_illumina_ERR2935853	28901	546	Citrobacter freundii	732	0.009206951025634232	0.059147237975215296	0.0591	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_listeria_monocytogenes_illumina_ERR2935854	562	620	Shigella	62	0.0011468079837093567	0.8680100755667507	0.8680	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_pseudomonas_aeruginosa_illumina_ERR2935853	5207	40410	Cryptococcus deneoformans	55	0.00020801050938587718	0.7978803936411809	0.8044	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_pseudomonas_aeruginosa_illumina_ERR2935853	562	544	Citrobacter	6646	0.10817837807599096	0.01395115016138122	0.0139	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_saccharomyces_cerevisiae_illumina_ERR2935855	1491	1509	Clostridium sporogenes	12	0.00012168081769509492	0.10515873015873015	0.1052	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_saccharomyces_cerevisiae_illumina_ERR2935855	1639	1642	Listeria innocua	1083	0.036866013088873766	0.8515111942051317	0.8513	illumina	ABSENT_SIBLING
+zymo_rl100	zymo_isolate_saccharomyces_cerevisiae_illumina_ERR2935855	199306	5501	Coccidioides immitis	162	0.00026805882640206435	0.49627153509899713	0.4954	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_saccharomyces_cerevisiae_illumina_ERR2935855	28901	562	Escherichia coli	156	0.0027692750426526985	0.9207383979861873	0.9207	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_saccharomyces_cerevisiae_illumina_ERR2935855	37769	5207	Cryptococcus neoformans	5309	0.025143010360691456	0.010247935274427682	0.0102	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_saccharomyces_cerevisiae_illumina_ERR2935855	498019	45357	Candidozyma haemuli	5756	0.03184322627594358	0.026355576206863206	0.0263	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_saccharomyces_cerevisiae_illumina_ERR2935855	5207	37769	Cryptococcus gattii	551	0.0016627700171321965	0.30163977350832977	0.3013	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_saccharomyces_cerevisiae_illumina_ERR2935855	562	620	Shigella	138	0.001856076464650005	0.45445113094002904	0.4544	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_saccharomyces_cerevisiae_illumina_ERR2935855	5807	117008	Cryptosporidium andersoni	10601	0.08865257708126824	0.0025008563726536632	0.0025	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_saccharomyces_cerevisiae_illumina_ERR2935855	5691	5693	Trypanosoma cruzi	104044	0.10116690425399624	0.0004913892037692443	0.0010	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_saccharomyces_cerevisiae_illumina_ERR2935855	5811	99158	Hammondia hammondi	297	0.00026152399828327787	0.013068013068013069	0.0131	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_saccharomyces_cerevisiae_illumina_ERR2935855	5833	5855	Plasmodium vivax	684	0.0014761403763743355	0.017429029992978233	0.0174	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_saccharomyces_cerevisiae_illumina_ERR2935855	5855	5833	Plasmodium falciparum	1238	0.0026499807535622223	0.0742972863507493	0.0676	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_listeria_monocytogenes_illumina_ERR2935854	1639	1642	Listeria innocua	1880316	63.81962188082856	0.3641557433971152	0.3642	illumina	ABSENT_SIBLING
+zymo_rl100	zymo_isolate_salmonella_enterica_illumina_ERR2935848	1639	1642	Listeria innocua	14	0.00047104705794744707	0.9676470588235294	0.9676	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_salmonella_enterica_illumina_ERR2935848	622	623	Shigella flexneri	86575	1.6566204580000912	0.02692541863229526	0.0269	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_salmonella_enterica_illumina_ERR2935848	562	544	Citrobacter	1150945	17.965851505861494	0.14164223620513863	0.1416	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_salmonella_enterica_illumina_ERR2935848	632	630	Yersinia enterocolitica	50416	0.8655189931429264	0.013702277368900992	0.0137	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_salmonella_enterica_illumina_ERR2935848	666	670	Vibrio parahaemolyticus	2489	0.0335162037798818	0.07145208707555288	0.0714	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_staphylococcus_aureus_illumina_ERR2935849	1314	1311	Streptococcus agalactiae	1721	0.060231734556073634	0.010354030411360602	0.0104	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_staphylococcus_aureus_illumina_ERR2935849	1392	1405	Bacillus mycoides	2491	0.03184358963782228	0.11520546812556845	0.1134	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_staphylococcus_aureus_illumina_ERR2935849	1491	1561	Clostridium baratii	2289	0.04502326948482696	0.026583311434143376	0.0266	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_staphylococcus_aureus_illumina_ERR2935849	1639	1640	Listeria seeligeri	4185	0.12106507065250804	0.03214977442898647	0.0321	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_staphylococcus_aureus_illumina_ERR2935849	28901	546	Citrobacter freundii	1046	0.0125836065992238	0.013462218192435956	0.0135	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_staphylococcus_aureus_illumina_ERR2935849	5207	40410	Cryptococcus deneoformans	16	8.455839783513705e-05	1.0	1.0000	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_staphylococcus_aureus_illumina_ERR2935849	562	620	Shigella	86473	1.3443224049882585	0.0010930784408957697	0.0011	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_isolate_salmonella_enterica_illumina_ERR2935848	28901	562	Escherichia coli	12474	0.19923354731924775	0.054353316293344986	0.0543	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_log_illumina_ERR2935805	1314	1334	Streptococcus dysgalactiae	179844	8.025365549891989	0.004365488723637245	0.0044	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_log_illumina_ERR2935805	1392	1396	Bacillus cereus	9668	0.11575278239753933	0.030025592614566318	0.0299	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_log_illumina_ERR2935805	498019	45357	Candidozyma haemuli	136	0.0007421331148418135	0.38842222447120733	0.3883	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_log_illumina_ERR2935805	28901	562	Escherichia coli	60004	1.0233037006187211	0.5237926538155956	0.5238	illumina	PRESENT
+zymo_rl100	zymo_log_illumina_ERR2935805	5207	40410	Cryptococcus deneoformans	233	0.0011340588104444265	0.9072942701101547	0.9132	illumina	ABSENT_SIBLING
+zymo_rl100	zymo_log_illumina_ERR2935805	562	620	Shigella	19996	0.3725750932948997	0.6148519042871077	0.6147	illumina	ABSENT_SIBLING
+zymo_rl100	zymo_log_illumina_ERR2935805	5833	5855	Plasmodium vivax	25	5.404666840973342e-05	0.29383561643835615	0.2918	illumina	ABSENT_DISTANT
+zymo_rl100	zymo_log_illumina_ERR2935805	622	624	Shigella sonnei	11430	0.22000115738863488	0.5665931849500221	0.5671	illumina	ABSENT_SIBLING
+zymo_rl100	zymo_log_illumina_ERR2935805	1639	1642	Listeria innocua	7639529	259.03470300656176	0.3911727166773172	0.3912	illumina	ABSENT_SIBLING
+zymo_rl150	zymo_even_illumina_ERR2984773	1314	1334	Streptococcus dysgalactiae	8722	0.542582141508614	0.008198340158219828	0.0082	illumina	ABSENT_DISTANT
+zymo_rl150	zymo_even_illumina_ERR2984773	1491	1561	Clostridium baratii	423	0.009394663352966653	0.12378616644019487	0.1231	illumina	ABSENT_DISTANT
+zymo_rl150	zymo_even_illumina_ERR2984773	1392	1405	Bacillus mycoides	1263	0.022011158377164382	0.1313008875668865	0.1297	illumina	ABSENT_DISTANT
+zymo_rl150	zymo_even_illumina_ERR2984773	37769	40410	Cryptococcus deneoformans	135442	0.9946298856356854	0.4392794131763444	0.4388	illumina	ABSENT_SIBLING
+zymo_rl150	zymo_even_illumina_ERR2984773	5207	40410	Cryptococcus deneoformans	135456	0.9947582191445041	0.43929439634412226	0.4388	illumina	ABSENT_SIBLING
+zymo_rl150	zymo_even_illumina_ERR2984773	562	620	Shigella	614690	16.679635193736406	0.6171602530796272	0.6172	illumina	ABSENT_SIBLING
+zymo_rl150	zymo_even_illumina_ERR2984773	1639	1642	Listeria innocua	190739	9.279774590128447	0.2652812341432918	0.2653	illumina	ABSENT_SIBLING
+zymo_rl150	zymo_even_illumina_ERR2984773	28901	562	Escherichia coli	1800407	45.23944442905263	0.7472761705249968	0.7473	illumina	PRESENT
+zymo_rl150	zymo_even_illumina_ERR2984773	622	624	Shigella sonnei	319856	9.076671991054868	0.4107404063395262	0.4107	illumina	ABSENT_SIBLING
+zymo_ont	zymo_even_ont_ERR3152364	37769	40410	Cryptococcus deneoformans	32788	6.30372190270357	0.8527607345862533	0.8528	ont	ABSENT_SIBLING
+zymo_ont	zymo_even_ont_ERR3152364	5207	40410	Cryptococcus deneoformans	32788	6.30372190270357	0.8527607345862533	0.8528	ont	ABSENT_SIBLING
+zymo_ont	zymo_even_ont_ERR3152364	498019	45357	Candidozyma haemuli	715	0.05638364038486974	0.17411383889917545	0.1668	ont	ABSENT_DISTANT
+zymo_ont	zymo_even_ont_ERR3152364	1392	1405	Bacillus mycoides	10915	2.901979352526257	0.08250932717109599	0.0825	ont	ABSENT_DISTANT
+zymo_ont	zymo_even_ont_ERR3152364	622	624	Shigella sonnei	58709	70.1362775057514	0.7941283952486193	0.7941	ont	ABSENT_SIBLING
+zymo_ont	zymo_even_ont_ERR3152364	562	544	Citrobacter	86455	72.6879280815245	0.6038285233598049	0.6038	ont	ABSENT_DISTANT
+zymo_ont	zymo_even_ont_ERR3152364	1639	1642	Listeria innocua	36236	35.2477004417798	0.32620424392617725	0.3262	ont	ABSENT_SIBLING
+zymo_ont	zymo_even_ont_ERR3152364	28901	562	Escherichia coli	163585	166.18646481744466	0.7877156653597528	0.7877	ont	PRESENT
+zymo_ont	zymo_log_ont_ERR3152366	562	544	Citrobacter	5929	2.8867844466909633	0.35414819624477234	0.3541	ont	ABSENT_DISTANT
+zymo_ont	zymo_log_ont_ERR3152366	28901	546	Citrobacter freundii	3191	1.5549921457610605	0.035068021402825285	0.0351	ont	ABSENT_DISTANT
+zymo_ont	zymo_log_ont_ERR3152366	1639	1642	Listeria innocua	173205	206.87133557427043	0.3376811669498144	0.3377	ont	ABSENT_SIBLING
+lod_v4	lod_gram_negative_illumina_r1_rpm10000	632	630	Yersinia enterocolitica	2730	0.06735885928731399	0.15193168032760576	0.1518	illumina	ABSENT_DISTANT
+lod_v4	lod_gram_negative_illumina_r1_rpm10000	1392	1428	Bacillus thuringiensis	189233	4.5330000501586065	0.9722057422978584	0.9722	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm10000	1639	1642	Listeria innocua	276153	14.343317106454903	0.9914491104657305	0.9914	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm10000	487	486	Neisseria lactamica	382884	26.096500174527684	0.9791616671757057	0.9792	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm10000	622	562	Escherichia coli	602911	16.163842487539334	0.9300678063956258	0.9301	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm10000	562	620	Shigella	5959	0.1507098269600595	0.022361731027987945	0.0224	illumina	ABSENT_SIBLING
+lod_v4	lod_gram_negative_illumina_r1_rpm10000	28901	562	Escherichia coli	769887	20.63353212603928	0.9733931171190817	0.9734	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm10000	727	726	Haemophilus haemolyticus	273869	21.22809984679352	0.981635897870616	0.9816	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm1000	1392	1428	Bacillus thuringiensis	188991	4.527130055516313	0.9719549492647291	0.9720	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm1000	1639	1642	Listeria innocua	276232	14.346969799302782	0.9913479738915241	0.9913	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm1000	487	486	Neisseria lactamica	382701	26.084200063266287	0.9792966534316506	0.9793	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm1000	28901	562	Escherichia coli	769246	20.621937563062986	0.9734184987143865	0.9734	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm1000	632	630	Yersinia enterocolitica	2695	0.06647772964279229	0.1533828914079826	0.1532	illumina	ABSENT_DISTANT
+lod_v4	lod_gram_negative_illumina_r1_rpm1000	562	620	Shigella	641	0.016425641201431092	0.1799678754411265	0.1799	illumina	ABSENT_SIBLING
+lod_v4	lod_gram_negative_illumina_r1_rpm1000	727	726	Haemophilus haemolyticus	274020	21.240399784146334	0.9814818643636762	0.9815	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm1000	622	562	Escherichia coli	603574	16.181995690491107	0.9296951259293551	0.9297	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm100	1392	1428	Bacillus thuringiensis	189197	4.5319000751101175	0.9716150208733284	0.9716	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm100	1639	1642	Listeria innocua	276139	14.342355962641813	0.9914771654743288	0.9915	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm100	632	630	Yersinia enterocolitica	2722	0.06735453578562349	0.1524292784378671	0.1522	illumina	ABSENT_DISTANT
+lod_v4	lod_gram_negative_illumina_r1_rpm100	487	486	Neisseria lactamica	383053	26.107499963640066	0.9793634648108557	0.9794	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm100	28901	562	Escherichia coli	768905	20.613731264316247	0.9731283978046708	0.9731	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm100	727	726	Haemophilus haemolyticus	274005	21.23909980337468	0.9817444449728219	0.9817	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm100	562	620	Shigella	181	0.004445686365059698	0.6089668615984405	0.6089	illumina	ABSENT_SIBLING
+lod_v4	lod_gram_negative_illumina_r1_rpm10	1392	1428	Bacillus thuringiensis	188995	4.5270500253828105	0.9720065455384239	0.9720	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm100	622	562	Escherichia coli	602392	16.150469246711786	0.929413604713827	0.9294	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm10	1639	1642	Listeria innocua	276219	14.346557633127077	0.9914342170661041	0.9914	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm10	487	486	Neisseria lactamica	383097	26.110500112715798	0.9790480423811394	0.9790	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm10	632	630	Yersinia enterocolitica	2753	0.06786449281001669	0.14907002449567264	0.1489	illumina	ABSENT_DISTANT
+lod_v4	lod_gram_negative_illumina_r1_rpm10	562	620	Shigella	93	0.002273780329749181	0.8912509528245957	0.8913	illumina	ABSENT_SIBLING
+lod_v4	lod_gram_negative_illumina_r1_rpm10	28901	562	Escherichia coli	768595	20.605344255760684	0.9732386826237063	0.9732	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm10	727	726	Haemophilus haemolyticus	273925	21.23310024996847	0.9816798336024612	0.9817	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm10	622	562	Escherichia coli	602685	16.158181855555487	0.9296536574074488	0.9297	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm1	1392	1428	Bacillus thuringiensis	189210	4.532179940966195	0.9733584318055405	0.9734	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm1	1639	1642	Listeria innocua	276226	14.347245154016802	0.9910494131827369	0.9910	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm1	487	486	Neisseria lactamica	382729	26.086899788385182	0.9793334678650901	0.9793	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm1	28901	562	Escherichia coli	768809	20.61086993630471	0.973313933691476	0.9733	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm1	727	726	Haemophilus haemolyticus	273900	21.22970014121461	0.981505124457006	0.9815	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm10000	1392	1428	Bacillus thuringiensis	189447	4.5378499401451275	0.9720987159716186	0.9721	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r1_rpm1	562	620	Shigella	105	0.002747332106733448	0.9397869059301835	0.9398	illumina	ABSENT_SIBLING
+lod_v4	lod_gram_negative_illumina_r1_rpm1	622	562	Escherichia coli	601764	16.133301993617064	0.9297785992040546	0.9298	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm10000	1639	1642	Listeria innocua	276130	14.3422974281177	0.991716152584611	0.9917	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm10000	487	486	Neisseria lactamica	383083	26.109500214523614	0.979287108948907	0.9793	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm10000	28901	562	Escherichia coli	769448	20.62108692213302	0.973691618979356	0.9737	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm10000	632	630	Yersinia enterocolitica	2600	0.06466380450854756	0.15613435096129738	0.1559	illumina	ABSENT_DISTANT
+lod_v4	lod_gram_negative_illumina_r2_rpm10000	727	726	Haemophilus haemolyticus	273967	21.235700211511784	0.9816844856211272	0.9817	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm1000	1392	1428	Bacillus thuringiensis	189103	4.529819930602213	0.9729761721060002	0.9730	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm10000	562	620	Shigella	6019	0.15245324470590682	0.022415491890253145	0.0224	illumina	ABSENT_SIBLING
+lod_v4	lod_gram_negative_illumina_r2_rpm10000	622	562	Escherichia coli	602917	16.16387895123963	0.9300383136968562	0.9300	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm1000	1639	1642	Listeria innocua	276134	14.342566202027234	0.9914733555348895	0.9915	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm1000	632	630	Yersinia enterocolitica	2702	0.06626025750776068	0.1513937464112335	0.1512	illumina	ABSENT_DISTANT
+lod_v4	lod_gram_negative_illumina_r2_rpm1000	487	486	Neisseria lactamica	382768	26.088600069811072	0.9790880383088267	0.9791	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm1000	28901	562	Escherichia coli	768932	20.61426070294507	0.973580440442176	0.9736	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm1000	727	726	Haemophilus haemolyticus	273945	21.233400046726942	0.9819201879002029	0.9819	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm1000	562	620	Shigella	709	0.0182834508771396	0.17448915104276386	0.1745	illumina	ABSENT_SIBLING
+lod_v4	lod_gram_negative_illumina_r2_rpm1000	622	562	Escherichia coli	602662	16.15769889027018	0.9303275208884273	0.9303	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm100	1392	1428	Bacillus thuringiensis	189124	4.53014005113622	0.972616915079562	0.9726	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm100	1639	1642	Listeria innocua	276188	14.344872254462391	0.9915737993928342	0.9916	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm100	487	486	Neisseria lactamica	383121	26.112999858196257	0.9791253072414445	0.9791	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm100	632	630	Yersinia enterocolitica	2762	0.06897887537074027	0.15180451787594645	0.1516	illumina	ABSENT_DISTANT
+lod_v4	lod_gram_negative_illumina_r2_rpm100	28901	562	Escherichia coli	768826	20.611285693985543	0.9735859814946721	0.9736	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm100	727	726	Haemophilus haemolyticus	273726	21.217400203861796	0.981199641897941	0.9812	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm100	562	620	Shigella	173	0.004392341980259111	0.5873816204840407	0.5873	illumina	ABSENT_SIBLING
+lod_v4	lod_gram_negative_illumina_r2_rpm10	1392	1428	Bacillus thuringiensis	188836	4.523510009836838	0.9728771328190319	0.9729	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm100	622	562	Escherichia coli	602944	16.164962673861694	0.9303902599021736	0.9304	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm10	1639	1642	Listeria innocua	276168	14.344640887230987	0.9914137819363844	0.9914	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm10	487	486	Neisseria lactamica	383054	26.10719999418241	0.9791589401806362	0.9792	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm10	632	630	Yersinia enterocolitica	2714	0.06686079189256963	0.1522713311131947	0.1521	illumina	ABSENT_DISTANT
+lod_v4	lod_gram_negative_illumina_r2_rpm10	28901	562	Escherichia coli	768759	20.60917401675364	0.9732038276160694	0.9732	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm10	727	726	Haemophilus haemolyticus	273903	21.230499771534195	0.9820189140741139	0.9820	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm10	562	620	Shigella	95	0.0024264954819039285	0.9227777777777777	0.9228	illumina	ABSENT_SIBLING
+lod_v4	lod_gram_negative_illumina_r2_rpm10	622	562	Escherichia coli	603333	16.175325157003936	0.9293712424737761	0.9294	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm1	1392	1428	Bacillus thuringiensis	189259	4.533509942745708	0.9726469463472235	0.9726	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm1	1639	1642	Listeria innocua	276157	14.343019238462377	0.9915048741247963	0.9915	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm1	487	486	Neisseria lactamica	383008	26.104499814564335	0.9790934922989659	0.9791	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm1	28901	562	Escherichia coli	768767	20.609751001187753	0.9733879335538433	0.9734	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm1	727	726	Haemophilus haemolyticus	273752	21.219499814953036	0.9815852425562532	0.9816	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm1	562	620	Shigella	87	0.002095644748736393	0.9058077559272192	0.9058	illumina	ABSENT_SIBLING
+lod_v4	lod_gram_negative_illumina_r3_rpm10000	1392	1428	Bacillus thuringiensis	189535	4.539929924912246	0.9730488541633721	0.9730	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r2_rpm1	622	562	Escherichia coli	602656	16.157209490214232	0.9293605178560417	0.9294	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm10000	1639	1642	Listeria innocua	276172	14.344350985475472	0.9910826635632978	0.9911	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm10000	487	486	Neisseria lactamica	383127	26.11259989891938	0.9791384877176142	0.9791	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm10000	28901	562	Escherichia coli	769476	20.622734759647912	0.9732658516553001	0.9733	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm10000	632	630	Yersinia enterocolitica	2725	0.06706269942151548	0.1535438908659549	0.1533	illumina	ABSENT_DISTANT
+lod_v4	lod_gram_negative_illumina_r3_rpm10000	727	726	Haemophilus haemolyticus	273974	21.236899915436638	0.9817966509600733	0.9818	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm1000	1392	1428	Bacillus thuringiensis	189137	4.530149955064917	0.9718619801276074	0.9719	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm10000	562	620	Shigella	5833	0.14791569815474648	0.02439856368754215	0.0244	illumina	ABSENT_SIBLING
+lod_v4	lod_gram_negative_illumina_r3_rpm10000	622	562	Escherichia coli	602295	16.14711548000261	0.929496005526753	0.9295	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm1000	1639	1642	Listeria innocua	276305	14.351054747097951	0.9915024496178804	0.9915	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm1000	5811	99158	Hammondia hammondi	1	9.903269908261933e-07	1.0	1.0000	illumina	ABSENT_DISTANT
+lod_v4	lod_gram_negative_illumina_r3_rpm1000	632	630	Yersinia enterocolitica	2722	0.06677907771061939	0.1559279017972756	0.1557	illumina	ABSENT_DISTANT
+lod_v4	lod_gram_negative_illumina_r3_rpm1000	487	486	Neisseria lactamica	382915	26.09919989964658	0.9790612228573091	0.9791	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm1000	28901	562	Escherichia coli	768712	20.607853816310534	0.9735327158932578	0.9735	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm1000	727	726	Haemophilus haemolyticus	273781	21.22040023901038	0.981753232119191	0.9818	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm100	1392	1428	Bacillus thuringiensis	189100	4.529710028941835	0.9729701019561537	0.9730	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm1000	622	562	Escherichia coli	602575	16.15509405936612	0.9304424530418144	0.9304	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm1000	562	620	Shigella	644	0.01637595581775401	0.21250073499147412	0.2124	illumina	ABSENT_SIBLING
+lod_v4	lod_gram_negative_illumina_r3_rpm100	1639	1642	Listeria innocua	276088	14.340034324090766	0.9915540569793762	0.9916	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm100	487	486	Neisseria lactamica	383230	26.119100146166936	0.9792139345812063	0.9792	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm100	632	630	Yersinia enterocolitica	2811	0.06958308473198613	0.1499768549441878	0.1498	illumina	ABSENT_DISTANT
+lod_v4	lod_gram_negative_illumina_r3_rpm100	28901	562	Escherichia coli	768692	20.607835584460386	0.973348431211855	0.9733	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm100	727	726	Haemophilus haemolyticus	273713	21.216199983045975	0.9815159791672267	0.9815	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm100	562	620	Shigella	173	0.0043856017150316	0.7005664602819127	0.7006	illumina	ABSENT_SIBLING
+lod_v4	lod_gram_negative_illumina_r3_rpm100	622	562	Escherichia coli	602850	16.16268422882402	0.9300717387554618	0.9301	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm10	1392	1428	Bacillus thuringiensis	188867	4.5241099962269224	0.9724637236663322	0.9725	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm10	1639	1642	Listeria innocua	276102	14.340732235724417	0.9910625747917089	0.9911	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm10	487	486	Neisseria lactamica	383041	26.10610010617101	0.9792462040228631	0.9792	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm10	632	630	Yersinia enterocolitica	2582	0.06356152775255736	0.16263417089528887	0.1625	illumina	ABSENT_DISTANT
+lod_v4	lod_gram_negative_illumina_r3_rpm10	28901	562	Escherichia coli	769205	20.62147068470428	0.97340974027657	0.9734	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm10	562	620	Shigella	102	0.0025919208484876965	0.9285979641875325	0.9286	illumina	ABSENT_SIBLING
+lod_v4	lod_gram_negative_illumina_r3_rpm10	727	726	Haemophilus haemolyticus	274194	21.25369990551233	0.981460154943235	0.9815	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm10	622	562	Escherichia coli	603319	16.175013428115122	0.9295067301444874	0.9295	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm1	1392	1428	Bacillus thuringiensis	189077	4.5292499754797895	0.972518674496521	0.9725	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm1	1639	1642	Listeria innocua	276172	14.343708491142756	0.9913666772305897	0.9914	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm1	487	486	Neisseria lactamica	383202	26.11709989528339	0.9789657780298733	0.9790	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm1	28901	562	Escherichia coli	769284	20.623629014023333	0.9733847161685231	0.9734	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm1	727	726	Haemophilus haemolyticus	273910	21.231699992350013	0.9815878270110676	0.9816	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r1	1392	1428	Bacillus thuringiensis	189055	4.528549991358023	0.9724550976639188	0.9725	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm1	562	620	Shigella	101	0.0026019349568257126	0.9467100880763822	0.9467	illumina	ABSENT_SIBLING
+lod_v4	negative_host_only_illumina_r1	1639	1642	Listeria innocua	276228	14.347503883540542	0.9916527690466665	0.9917	illumina	PRESENT
+lod_v4	lod_gram_negative_illumina_r3_rpm1	622	562	Escherichia coli	603226	16.172616297307854	0.9300241929501726	0.9300	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r1	487	486	Neisseria lactamica	382935	26.098200001454398	0.9793711912968861	0.9794	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r1	727	726	Haemophilus haemolyticus	273907	21.23140019559154	0.9816756984747581	0.9817	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r1	28901	562	Escherichia coli	768522	20.603247771737237	0.9734390542317107	0.9734	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r1_BLANK	1392	1428	Bacillus thuringiensis	189167	4.531420054049892	0.9722316203050985	0.9722	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r1_BLANK	1639	1642	Listeria innocua	276111	14.340806702722547	0.9915190748081609	0.9915	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r1	562	620	Shigella	110	0.002605979115962219	0.8946940585279338	0.8947	illumina	ABSENT_SIBLING
+lod_v4	negative_host_only_illumina_r1	622	562	Escherichia coli	603363	16.176180624011884	0.9302406514847786	0.9302	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r1_NTC	1392	1428	Bacillus thuringiensis	38557	0.9235600406508351	0.6415345395587428	0.6415	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r1_NTC	1639	1642	Listeria innocua	56322	2.925320337976264	0.93497403179914	0.9350	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r1_BLANK	487	486	Neisseria lactamica	382890	26.09680014398534	0.979168939162558	0.9792	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r1_NTC	487	486	Neisseria lactamica	78116	5.324080184563027	0.9702902977151417	0.9703	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r1_NTC	28901	562	Escherichia coli	157031	4.209857711134209	0.9565624382775907	0.9566	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r1_NTC	727	726	Haemophilus haemolyticus	55938	4.335729984431244	0.9679088245692747	0.9679	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r1_BLANK	28901	562	Escherichia coli	769115	20.619011529857783	0.9733831074758629	0.9734	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r1_NTC	562	620	Shigella	29	0.0007385404899286957	0.9202086049543677	0.9200	illumina	ABSENT_SIBLING
+lod_v4	negative_host_only_illumina_r1_BLANK	727	726	Haemophilus haemolyticus	274126	21.248799779184182	0.981635897870616	0.9816	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r1_NTC	622	562	Escherichia coli	123129	3.3011286766447316	0.8644849815134402	0.8645	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r1_BLANK	622	562	Escherichia coli	602724	16.15889432766031	0.9299607389619107	0.9300	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r1_BLANK	562	620	Shigella	110	0.002744250842629443	0.911438596491228	0.9114	illumina	ABSENT_SIBLING
+lod_v4	negative_host_only_illumina_r2	1392	1428	Bacillus thuringiensis	189330	4.535380028120768	0.9715579934129289	0.9716	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r2	1639	1642	Listeria innocua	276299	14.351437472832535	0.991532236417133	0.9915	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r2	5855	5850	Plasmodium knowlesi	186	0.0009546655209040801	0.10777157578359811	0.1076	illumina	ABSENT_DISTANT
+lod_v4	negative_host_only_illumina_r2	487	486	Neisseria lactamica	382727	26.08579990037378	0.9792593844990328	0.9793	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r2	562	620	Shigella	110	0.0028780932521471595	0.937638006022081	0.9376	illumina	ABSENT_SIBLING
+lod_v4	negative_host_only_illumina_r2	28901	562	Escherichia coli	768892	20.613169473090593	0.973183450842374	0.9732	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r2	727	726	Haemophilus haemolyticus	273802	21.224100144522712	0.9815464757340369	0.9815	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r2	622	562	Escherichia coli	603641	16.183698044812814	0.9289631707689819	0.9290	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r2_BLANK	1392	1428	Bacillus thuringiensis	189016	4.527289956042531	0.9725157991623832	0.9725	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r2_BLANK	1639	1642	Listeria innocua	276166	14.344256776063883	0.9915422808029274	0.9915	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r2_NTC	1392	1428	Bacillus thuringiensis	38631	0.9253539296712439	0.6395036844577459	0.6395	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r2_BLANK	487	486	Neisseria lactamica	383085	26.109800183981267	0.9793525568305772	0.9794	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r2_NTC	1639	1642	Listeria innocua	56302	2.924566662683548	0.9363023152309257	0.9363	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r2_NTC	487	486	Neisseria lactamica	78197	5.330060030251465	0.9704625529037043	0.9705	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r2_NTC	28901	562	Escherichia coli	156997	4.208958809424437	0.9555634401356307	0.9556	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r2_BLANK	28901	562	Escherichia coli	768437	20.600650090578334	0.9736163679115862	0.9736	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r2_NTC	562	544	Citrobacter	18	0.0002686239439710378	0.5009671179883947	0.5010	illumina	ABSENT_DISTANT
+lod_v4	negative_host_only_illumina_r2_NTC	727	726	Haemophilus haemolyticus	55902	4.332959965761143	0.9669918600011165	0.9670	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r2_NTC	622	562	Escherichia coli	123413	3.3086991843034497	0.8641666391103572	0.8642	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r2_BLANK	727	726	Haemophilus haemolyticus	273956	21.235399897862347	0.9818845224237638	0.9819	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r2_BLANK	562	620	Shigella	148	0.0036707484429024427	0.9107601909658465	0.9106	illumina	ABSENT_SIBLING
+lod_v4	negative_host_only_illumina_r2_BLANK	622	562	Escherichia coli	602212	16.145222763716117	0.9295358653559992	0.9295	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r3	1639	1642	Listeria innocua	276278	14.350066240992524	0.9912191286668502	0.9912	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r3	1392	1428	Bacillus thuringiensis	189168	4.53117005972069	0.9725967877405975	0.9726	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r3	487	486	Neisseria lactamica	383036	26.1076999432785	0.9793152878979595	0.9793	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r3	727	726	Haemophilus haemolyticus	273821	21.224899774842296	0.9817139484060117	0.9817	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r3	562	620	Shigella	103	0.0025306807244205973	0.9197930142302716	0.9198	illumina	ABSENT_SIBLING
+lod_v4	negative_host_only_illumina_r3	28901	562	Escherichia coli	769115	20.61919331212838	0.9732338565457257	0.9732	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r3	622	562	Escherichia coli	603600	16.182591085518997	0.9297249761153826	0.9297	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r3_BLANK	1392	1428	Bacillus thuringiensis	189168	4.531359991514569	0.9729736162534333	0.9730	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r3_BLANK	1639	1642	Listeria innocua	276149	14.34366831359958	0.9916832485621808	0.9917	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r3_NTC	1392	1428	Bacillus thuringiensis	38649	0.9258020025743825	0.6405881512554583	0.6406	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r3_NTC	1639	1642	Listeria innocua	56360	2.927550191622636	0.9357027693064351	0.9357	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r3_BLANK	487	486	Neisseria lactamica	383024	26.105800136713352	0.97906622234827	0.9791	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r3_NTC	487	486	Neisseria lactamica	78319	5.338080122751138	0.9703589270910599	0.9704	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r3_BLANK	28901	562	Escherichia coli	768934	20.614259987970552	0.973404199224074	0.9734	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r3_NTC	28901	562	Escherichia coli	156957	4.207818782559269	0.9562440958745076	0.9562	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r3_BLANK	727	726	Haemophilus haemolyticus	273904	21.231499955547378	0.9814999555473772	0.9815	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r3_NTC	622	562	Escherichia coli	123074	3.2996452832684344	0.8642746002622169	0.8643	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r3_NTC	562	544	Citrobacter	19	0.00029269791444942224	0.43313609467455616	0.4321	illumina	ABSENT_DISTANT
+lod_v4	negative_host_only_illumina_r3_NTC	727	726	Haemophilus haemolyticus	55946	4.336560111317638	0.9661167636009519	0.9661	illumina	PRESENT
+lod_v4	negative_host_only_illumina_r3_BLANK	562	620	Shigella	92	0.0023592854086353196	0.936821483960493	0.9368	illumina	ABSENT_SIBLING
+lod_v4	negative_host_only_illumina_r3_BLANK	622	562	Escherichia coli	602872	16.16313019417814	0.930197753013841	0.9302	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_BLANK	727	726	Haemophilus haemolyticus	273811	21.22430018132535	0.9817418605180075	0.9817	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_BLANK	1392	1428	Bacillus thuringiensis	189316	4.534419986000318	0.9731982117977516	0.9732	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_BLANK	1639	1642	Listeria innocua	276095	14.340394536546844	0.9913666772305897	0.9914	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_NTC	1392	1428	Bacillus thuringiensis	38637	0.9256099941502924	0.6429362579709895	0.6430	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_BLANK	487	486	Neisseria lactamica	382775	26.089200008726383	0.9792375685384761	0.9792	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_NTC	1639	1642	Listeria innocua	56371	2.927712287227871	0.9390264219300114	0.9390	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_NTC	487	486	Neisseria lactamica	78231	5.331699863286647	0.9705207287985224	0.9705	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_BLANK	622	562	Escherichia coli	603396	16.177128680219603	0.9301376951545284	0.9301	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_NTC	28901	562	Escherichia coli	156960	4.2078783041876955	0.9552697643533369	0.9553	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_BLANK	562	620	Shigella	126	0.002990751970949842	0.884803605924018	0.8848	illumina	ABSENT_SIBLING
+d12fine	lod_gram_negative_fine_illumina_r1_NTC	562	544	Citrobacter	21	0.00027555170525978153	0.1935889377749843	0.1931	illumina	ABSENT_DISTANT
+d12fine	lod_gram_negative_fine_illumina_r1_NTC	727	726	Haemophilus haemolyticus	55842	4.328570010813359	0.9678142335230667	0.9678	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_NTC	622	562	Escherichia coli	123485	3.310677161300932	0.8643055229100177	0.8643	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_BLANK	28901	562	Escherichia coli	768544	20.60383083345473	0.9735042956562617	0.9735	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm120	632	630	Yersinia enterocolitica	2823	0.06897887537074027	0.1496640425211854	0.1495	illumina	ABSENT_DISTANT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm120	1392	1428	Bacillus thuringiensis	189192	4.531809981307133	0.9729723383271498	0.9730	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm120	1639	1642	Listeria innocua	276140	14.342506282070598	0.9914584621352632	0.9915	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm120	487	486	Neisseria lactamica	382617	26.079400097444623	0.9789975929723519	0.9790	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm120	562	620	Shigella	164	0.004058795141000571	0.6756974758018599	0.6757	illumina	ABSENT_SIBLING
+d12fine	lod_gram_negative_fine_illumina_r1_rpm120	622	562	Escherichia coli	602963	16.16550605449357	0.9297171113957107	0.9297	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm120	28901	562	Escherichia coli	768353	20.59841722516603	0.9734485276440428	0.9734	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm120	727	726	Haemophilus haemolyticus	273972	21.23590024831442	0.9817506476643765	0.9818	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm150	1392	1428	Bacillus thuringiensis	189190	4.531959977904655	0.9714782827609981	0.9715	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm150	1639	1642	Listeria innocua	276210	14.34640246468446	0.9912970592462901	0.9913	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm150	487	486	Neisseria lactamica	382937	26.0992998894658	0.9790794028244397	0.9791	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm150	632	630	Yersinia enterocolitica	2695	0.06698747049210096	0.15330648388387613	0.1531	illumina	ABSENT_DISTANT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm150	28901	562	Escherichia coli	768669	20.60697958122155	0.9733813200395739	0.9734	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm170	1392	1428	Bacillus thuringiensis	189229	4.532950051292766	0.9721886500338172	0.9722	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm150	727	726	Haemophilus haemolyticus	274079	21.244800076913375	0.9815330365690018	0.9815	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm150	622	562	Escherichia coli	603363	16.176256947541425	0.9301214294842978	0.9301	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm150	562	620	Shigella	196	0.00485510933287936	0.4901035262385467	0.4901	illumina	ABSENT_SIBLING
+d12fine	lod_gram_negative_fine_illumina_r1_rpm170	1639	1642	Listeria innocua	276167	14.343469157674344	0.991534314565918	0.9915	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm170	632	630	Yersinia enterocolitica	2684	0.06597274464534315	0.15093288595002327	0.1508	illumina	ABSENT_DISTANT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm170	487	486	Neisseria lactamica	383044	26.107100004363193	0.9793630103116774	0.9794	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm170	28901	562	Escherichia coli	768372	20.59890108416948	0.9734601459799217	0.9735	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm170	562	620	Shigella	195	0.005014372171255118	0.5180889469237269	0.5179	illumina	ABSENT_SIBLING
+d12fine	lod_gram_negative_fine_illumina_r1_rpm170	727	726	Haemophilus haemolyticus	273891	21.2289997539599	0.9815904114658821	0.9816	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm190	1392	1428	Bacillus thuringiensis	188863	4.524020062164724	0.9722161254489116	0.9722	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm170	622	562	Escherichia coli	603599	16.18238445788398	0.9292627450910297	0.9293	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm190	1639	1642	Listeria innocua	276348	14.353635115172738	0.9915519788305911	0.9916	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm190	487	486	Neisseria lactamica	383026	26.10530018761726	0.9792257515598412	0.9792	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm190	632	630	Yersinia enterocolitica	2661	0.0653516736275044	0.1532868687336467	0.1531	illumina	ABSENT_DISTANT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm190	28901	562	Escherichia coli	768809	20.61070888829506	0.973246726087007	0.9732	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm190	562	620	Shigella	212	0.0053317423739676325	0.5206241421657155	0.5206	illumina	ABSENT_SIBLING
+d12fine	lod_gram_negative_fine_illumina_r1_rpm190	727	726	Haemophilus haemolyticus	274033	21.240500060993135	0.9815382054786307	0.9815	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm190	622	562	Escherichia coli	602247	16.146256259378454	0.9299292800832231	0.9299	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm210	1392	1428	Bacillus thuringiensis	189291	4.534480048535641	0.9732665808539167	0.9733	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm210	1639	1642	Listeria innocua	276141	14.343172675114342	0.9913749898257299	0.9914	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm210	632	630	Yersinia enterocolitica	2899	0.07182244243257499	0.1432690629119738	0.1431	illumina	ABSENT_DISTANT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm210	487	486	Neisseria lactamica	382848	26.0932000559943	0.9789675960265863	0.9790	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm210	28901	562	Escherichia coli	768404	20.600048439523434	0.973267817835218	0.9733	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm210	562	620	Shigella	228	0.005719403914052759	0.45270884541567064	0.4527	illumina	ABSENT_SIBLING
+d12fine	lod_gram_negative_fine_illumina_r1_rpm210	727	726	Haemophilus haemolyticus	274017	21.23960015382675	0.9816844856211272	0.9817	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm250	1392	1428	Bacillus thuringiensis	188821	4.523099955240632	0.9729878331833367	0.9730	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm210	622	562	Escherichia coli	603212	16.172052003671393	0.9298172078278985	0.9298	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm250	1639	1642	Listeria innocua	276333	14.352254531663194	0.9913860732859169	0.9914	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm250	487	486	Neisseria lactamica	382530	26.071899952004888	0.9790116824468781	0.9790	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm250	632	630	Yersinia enterocolitica	2729	0.0673776665196676	0.15948678296078364	0.1593	illumina	ABSENT_DISTANT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm250	28901	562	Escherichia coli	769121	20.619168645507592	0.9734746242138632	0.9735	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm250	727	726	Haemophilus haemolyticus	274070	21.243799892900192	0.9816183235778779	0.9816	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm250	562	620	Shigella	228	0.0057099675427342445	0.4346037099494098	0.4346	illumina	ABSENT_SIBLING
+d12fine	lod_gram_negative_fine_illumina_r2_BLANK	1392	1428	Bacillus thuringiensis	189249	4.53335004221949	0.9726999802879871	0.9727	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r1_rpm250	622	562	Escherichia coli	603623	16.18316092020795	0.9297535750960076	0.9298	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_BLANK	1639	1642	Listeria innocua	276203	14.345938691147259	0.9914362952148893	0.9914	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_NTC	1392	1428	Bacillus thuringiensis	38535	0.9230889650745941	0.6399928149532038	0.6400	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_BLANK	487	486	Neisseria lactamica	383080	26.109500214523614	0.9791025822825312	0.9791	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_NTC	1639	1642	Listeria innocua	56328	2.92581944004281	0.935742946849613	0.9357	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_NTC	28901	562	Escherichia coli	157033	4.209813025226982	0.9559430916034286	0.9559	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_NTC	487	486	Neisseria lactamica	78191	5.329320105589249	0.9701680374361883	0.9702	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_BLANK	28901	562	Escherichia coli	768687	20.60780716422339	0.9734792715482148	0.9735	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_NTC	622	562	Escherichia coli	123323	3.306278638080794	0.8638098668270593	0.8638	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_NTC	562	544	Citrobacter	21	0.0003306274075052941	0.3038239916186485	0.3035	illumina	ABSENT_DISTANT
+d12fine	lod_gram_negative_fine_illumina_r2_NTC	727	726	Haemophilus haemolyticus	55939	4.335870061882186	0.9676157473933189	0.9676	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_BLANK	727	726	Haemophilus haemolyticus	273766	21.22049999896622	0.9817646037203744	0.9818	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_BLANK	562	620	Shigella	108	0.002820704708210067	0.9340479279033248	0.9340	illumina	ABSENT_SIBLING
+d12fine	lod_gram_negative_fine_illumina_r2_BLANK	622	562	Escherichia coli	602328	16.14858225022142	0.9297215799864333	0.9297	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm120	1392	1428	Bacillus thuringiensis	189174	4.53140999038041	0.972573305845139	0.9726	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm120	632	630	Yersinia enterocolitica	2690	0.06604408242323623	0.1523017099164681	0.1521	illumina	ABSENT_DISTANT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm120	1639	1642	Listeria innocua	276164	14.34429314366762	0.9915086840642355	0.9915	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm120	487	486	Neisseria lactamica	382878	26.095799791293977	0.9791607581773493	0.9792	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm120	562	620	Shigella	185	0.004675433119814569	0.6240629376390148	0.6241	illumina	ABSENT_SIBLING
+d12fine	lod_gram_negative_fine_illumina_r2_rpm120	28901	562	Escherichia coli	768689	20.60744896199106	0.9734531749783943	0.9735	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm120	622	562	Escherichia coli	602752	16.15979680424266	0.9300433185184656	0.9300	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm120	727	726	Haemophilus haemolyticus	273733	21.217499963817634	0.9817248031162322	0.9817	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm150	1392	1428	Bacillus thuringiensis	189277	4.534219990536956	0.9732724912629778	0.9733	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm150	1639	1642	Listeria innocua	276176	14.344266474091546	0.9916337193494702	0.9916	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm150	487	486	Neisseria lactamica	382926	26.09849997091205	0.9790516783745655	0.9791	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm150	632	630	Yersinia enterocolitica	2728	0.06658560100996999	0.15345256917637665	0.1532	illumina	ABSENT_DISTANT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm150	28901	562	Escherichia coli	768709	20.60793317848177	0.9735105516832734	0.9735	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm150	727	726	Haemophilus haemolyticus	274037	21.24119993135688	0.9817940665052588	0.9818	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm170	1392	1428	Bacillus thuringiensis	189178	4.531700079646756	0.9721028692320398	0.9721	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm150	622	562	Escherichia coli	602906	16.16395098492208	0.9299139081311371	0.9299	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm150	562	620	Shigella	192	0.004773840992136229	0.551050869337206	0.5509	illumina	ABSENT_SIBLING
+d12fine	lod_gram_negative_fine_illumina_r2_rpm170	1639	1642	Listeria innocua	276267	14.349261304696443	0.9914962151715252	0.9915	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm170	487	486	Neisseria lactamica	383517	26.139299907645768	0.9792043900984627	0.9792	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm170	5811	99158	Hammondia hammondi	1	1.9029812764895479e-06	1.0	1.0000	illumina	ABSENT_DISTANT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm170	632	630	Yersinia enterocolitica	2722	0.06714052245194428	0.15169165185585864	0.1515	illumina	ABSENT_DISTANT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm170	28901	562	Escherichia coli	768723	20.608779708308273	0.9733537935207222	0.9734	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm170	562	620	Shigella	191	0.004725696240511151	0.5186437915155467	0.5186	illumina	ABSENT_SIBLING
+d12fine	lod_gram_negative_fine_illumina_r2_rpm170	727	726	Haemophilus haemolyticus	273869	21.22789980999088	0.9817702895209661	0.9818	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm190	1392	1428	Bacillus thuringiensis	189253	4.533309947282346	0.9724779405962357	0.9725	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm170	622	562	Escherichia coli	602102	16.142710879499088	0.9297843190001797	0.9298	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm190	1639	1642	Listeria innocua	276166	14.343945400104253	0.9913781070489075	0.9914	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm190	632	630	Yersinia enterocolitica	2703	0.06576219011301633	0.15739559774890866	0.1572	illumina	ABSENT_DISTANT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm190	487	486	Neisseria lactamica	383342	26.12740021016042	0.9789562335471298	0.9790	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm190	28901	562	Escherichia coli	768772	20.61004914556077	0.9733975857098044	0.9734	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm190	562	620	Shigella	208	0.005193470647300408	0.500927024621774	0.5009	illumina	ABSENT_SIBLING
+d12fine	lod_gram_negative_fine_illumina_r2_rpm190	727	726	Haemophilus haemolyticus	273841	21.22619975561395	0.9815619824629234	0.9816	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm190	622	562	Escherichia coli	603646	16.18396866266698	0.9300325939007311	0.9300	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm210	1392	1428	Bacillus thuringiensis	189150	4.530960000587846	0.9721736343999865	0.9722	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm210	1639	1642	Listeria innocua	276361	14.354102005933115	0.9912610380006823	0.9913	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm210	487	486	Neisseria lactamica	382732	26.085699910554563	0.9792057535959975	0.9792	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm210	632	630	Yersinia enterocolitica	2726	0.06759427395436111	0.15194302216621947	0.1517	illumina	ABSENT_DISTANT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm210	28901	562	Escherichia coli	768825	20.610746603200763	0.9733804263214293	0.9734	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm210	562	620	Shigella	266	0.006754708652998436	0.34928011404134	0.3493	illumina	ABSENT_SIBLING
+d12fine	lod_gram_negative_fine_illumina_r2_rpm210	727	726	Haemophilus haemolyticus	273990	21.237500025844547	0.981874701495469	0.9819	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm210	622	562	Escherichia coli	602877	16.16295877903802	0.9302315355597044	0.9302	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm250	1392	1428	Bacillus thuringiensis	189357	4.535999982109032	0.9718977620635443	0.9719	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm250	1639	1642	Listeria innocua	276127	14.341848894338257	0.9914830535625532	0.9915	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm250	487	486	Neisseria lactamica	382966	26.101900079264656	0.9790216814288	0.9790	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm250	632	630	Yersinia enterocolitica	2797	0.0683454823730836	0.15123450932761467	0.1510	illumina	ABSENT_DISTANT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm250	28901	562	Escherichia coli	769180	20.620402691521566	0.9734079528402809	0.9734	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm250	727	726	Haemophilus haemolyticus	273927	21.23310024996847	0.9818493738382875	0.9818	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm250	562	620	Shigella	272	0.006665929731001792	0.4463222973363379	0.4463	illumina	ABSENT_SIBLING
+d12fine	lod_gram_negative_fine_illumina_r3_BLANK	1392	1428	Bacillus thuringiensis	189168	4.53112006085485	0.972032423545664	0.9720	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r2_rpm250	622	562	Escherichia coli	602734	16.15938623012706	0.929453822030331	0.9295	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_BLANK	1639	1642	Listeria innocua	276116	14.341625146985733	0.9913382758638605	0.9913	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_NTC	1392	1428	Bacillus thuringiensis	38565	0.9237530075196377	0.6406097365906802	0.6406	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_BLANK	487	486	Neisseria lactamica	382988	26.10369989601059	0.9790739488343005	0.9791	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_NTC	1639	1642	Listeria innocua	56344	2.9265024582768335	0.9382031286529959	0.9382	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_NTC	28901	562	Escherichia coli	156868	4.205407173518059	0.9561944051456716	0.9562	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_NTC	487	486	Neisseria lactamica	77965	5.3137998676498395	0.9709402315400614	0.9709	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_BLANK	727	726	Haemophilus haemolyticus	273790	21.221300146176766	0.9816927558765334	0.9817	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_NTC	562	620	Shigella	21	0.0005669525951369178	0.9748641304347827	0.9749	illumina	ABSENT_SIBLING
+d12fine	lod_gram_negative_fine_illumina_r3_BLANK	28901	562	Escherichia coli	768744	20.6092739344422	0.9731698663265771	0.9732	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_NTC	622	562	Escherichia coli	123164	3.3020835251103517	0.8649402415362657	0.8649	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_NTC	727	726	Haemophilus haemolyticus	55907	4.333199803167921	0.9675888690632488	0.9676	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_BLANK	562	620	Shigella	108	0.00260058690378021	0.9109152843601895	0.9109	illumina	ABSENT_SIBLING
+d12fine	lod_gram_negative_fine_illumina_r3_BLANK	622	562	Escherichia coli	602738	16.159501519767705	0.9297923624634804	0.9298	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm120	1392	1428	Bacillus thuringiensis	189351	4.5357800190474915	0.9728764938558901	0.9729	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm120	1639	1642	Listeria innocua	276226	14.347429416542411	0.9915374317890956	0.9915	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm120	632	630	Yersinia enterocolitica	2748	0.06781779899175941	0.15127646891944013	0.1511	illumina	ABSENT_DISTANT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm120	487	486	Neisseria lactamica	382971	26.10100017089169	0.9788866951728551	0.9789	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm120	622	562	Escherichia coli	602997	16.166596211886272	0.9306851868898698	0.9307	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm120	562	620	Shigella	146	0.0036166337420758554	0.577209797657082	0.5772	illumina	ABSENT_SIBLING
+d12fine	lod_gram_negative_fine_illumina_r3_rpm120	28901	562	Escherichia coli	768453	20.601650876156583	0.9733738128071597	0.9734	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm120	727	726	Haemophilus haemolyticus	273949	21.23420019393749	0.9815991986122511	0.9816	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm150	1392	1428	Bacillus thuringiensis	189220	4.532620026830062	0.9724600496282673	0.9725	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm150	1639	1642	Listeria innocua	276078	14.339509937880669	0.9914155137270386	0.9914	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm150	5855	5850	Plasmodium knowlesi	206	0.0010482465163623891	0.08856997614671723	0.0885	illumina	ABSENT_DISTANT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm150	487	486	Neisseria lactamica	382921	26.09859996073127	0.9791103087685618	0.9791	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm150	632	630	Yersinia enterocolitica	2786	0.06787767949017268	0.15112709160047647	0.1510	illumina	ABSENT_DISTANT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm150	28901	562	Escherichia coli	768854	20.611819243717832	0.9735185951465742	0.9735	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm150	562	620	Shigella	197	0.004736095506862168	0.6203797828650429	0.6204	illumina	ABSENT_SIBLING
+d12fine	lod_gram_negative_fine_illumina_r3_rpm150	727	726	Haemophilus haemolyticus	273904	21.23030025162252	0.9814947866377484	0.9815	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm170	1392	1428	Bacillus thuringiensis	189396	4.536719933828977	0.9721961578507324	0.9722	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm150	622	562	Escherichia coli	603650	16.18391110721847	0.9294472085160614	0.9294	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm170	1639	1642	Listeria innocua	276328	14.352000304795155	0.991638568363302	0.9916	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm170	487	486	Neisseria lactamica	383163	26.11510009889902	0.9788871496720334	0.9789	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm170	28901	562	Escherichia coli	769259	20.62302611176303	0.9734419141297732	0.9734	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm170	632	630	Yersinia enterocolitica	2812	0.06852274594239366	0.1498085040602187	0.1496	illumina	ABSENT_DISTANT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm170	562	620	Shigella	194	0.004950435941097015	0.5152104567027153	0.5152	illumina	ABSENT_SIBLING
+d12fine	lod_gram_negative_fine_illumina_r3_rpm170	727	726	Haemophilus haemolyticus	273948	21.234000157134854	0.9815873101201048	0.9816	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm170	622	562	Escherichia coli	603250	16.173317687307684	0.9298962125118753	0.9299	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm190	1392	1428	Bacillus thuringiensis	189210	4.532229939832035	0.9724047793165075	0.9724	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm190	1639	1642	Listeria innocua	276059	14.338606982233559	0.9914778581905905	0.9915	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm190	632	630	Yersinia enterocolitica	2838	0.06963993877921607	0.1463497917093492	0.1461	illumina	ABSENT_DISTANT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm190	487	486	Neisseria lactamica	383112	26.111799980365635	0.9792848364530157	0.9793	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm190	28901	562	Escherichia coli	768954	20.61483321878846	0.9731532431690888	0.9732	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm190	562	620	Shigella	203	0.005001661956826098	0.4808640073925766	0.4809	illumina	ABSENT_SIBLING
+d12fine	lod_gram_negative_fine_illumina_r3_rpm190	727	726	Haemophilus haemolyticus	273991	21.238199896208293	0.9817868300317785	0.9818	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm190	622	562	Escherichia coli	602765	16.160246523212987	0.9289613833326928	0.9290	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm210	1392	1428	Bacillus thuringiensis	189079	4.529560032344314	0.9723471128929664	0.9723	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm210	1639	1642	Listeria innocua	276343	14.353140862120023	0.9912343684246073	0.9912	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm210	487	486	Neisseria lactamica	383020	26.10590012653257	0.9793798267812732	0.9794	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm210	632	630	Yersinia enterocolitica	2743	0.06767317786021254	0.15077559990800135	0.1506	illumina	ABSENT_DISTANT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm210	28901	562	Escherichia coli	768887	20.612877942231847	0.973453711209281	0.9735	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm210	562	620	Shigella	226	0.005793354252548879	0.5348535717847289	0.5348	illumina	ABSENT_SIBLING
+d12fine	lod_gram_negative_fine_illumina_r3_rpm210	622	562	Escherichia coli	603246	16.173037774784817	0.929898536179051	0.9299	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm210	727	726	Haemophilus haemolyticus	273729	21.217900037422904	0.9817475463185992	0.9817	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm250	1392	1428	Bacillus thuringiensis	188982	4.526700033321928	0.9720635729988234	0.9721	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm250	1639	1642	Listeria innocua	276053	14.3387915911173	0.9914092792806835	0.9914	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm250	632	630	Yersinia enterocolitica	2750	0.06777369927451642	0.14920274438380546	0.1490	illumina	ABSENT_DISTANT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm250	487	486	Neisseria lactamica	382978	26.102100058903094	0.9789421440726035	0.9789	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm250	28901	562	Escherichia coli	769058	20.61755065817873	0.9731763010972178	0.9732	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm250	727	726	Haemophilus haemolyticus	273935	21.23239986271376	0.9817232524433436	0.9817	illumina	PRESENT
+d12fine	lod_gram_negative_fine_illumina_r3_rpm250	562	620	Shigella	265	0.006585624285291162	0.3888645202795567	0.3888	illumina	ABSENT_SIBLING
+d12fine	lod_gram_negative_fine_illumina_r3_rpm250	622	562	Escherichia coli	602692	16.158162372499934	0.9292463006771703	0.9292	illumina	PRESENT
