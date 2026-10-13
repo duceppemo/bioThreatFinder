@@ -243,6 +243,35 @@ def resolve_identity_floor(thresholds: dict, group: str,
         else f"{group or 'default'}")
 
 
+def resolve_alignment_floor(thresholds: dict, platform: str) -> tuple[float, str]:
+    """The minimum mean alignment length for this platform, and which rule applied.
+
+    WHY THIS IS PER-PLATFORM AND WAS NOT. pack.yaml states the gate's rationale in its
+    own comment - "a 50 bp match inside a 10 kb read says almost nothing about where
+    that read came from" - which is a statement about ONT. It was then applied flat at
+    100 bp to every platform, where it is not a weak-evidence filter but a read-length
+    filter: a 2x101 library trims and soft-clips to a mean of 98-99, so the gate is
+    UNREACHABLE and no finding on such a run can ever be confirmed.
+
+    Measured on the Zymo isolate libraries (2x101, real reads): 81 of 82 rows failed it,
+    including Salmonella enterica in its own single-organism library at 24,057,383 reads,
+    breadth 0.9137, occupancy 0.9378, depth_cv 0.42 and neighbour_ratio 1928 - held at
+    `supported` with the reason "failed: mean_alignment_length 99 >= 100". Across all
+    nine runs on disk, every confirmed_in_silico call the project has ever produced is on
+    150 bp simulated reads, and this is why.
+
+    This is the fourth recurrence of the standing lesson that a threshold must be
+    REACHABLE, not merely strict (D10, D11, D20). It stayed invisible because the only
+    fixture in the suite sets mean_alignment_length to exactly 100.0 - the single value
+    that passes.
+    """
+    by_plat = (thresholds.get("min_alignment_length_by_platform") or {})
+    if platform and platform in by_plat:
+        return as_float(by_plat[platform], thresholds["min_alignment_length"]), platform
+    return as_float(thresholds.get("min_alignment_length"), 100.0), (
+        f"{platform or 'default'}, no platform rule")
+
+
 def load_pack_thresholds(pack_yaml: Path) -> dict:
     """Read the pack's thresholds block.
 
@@ -258,6 +287,7 @@ def load_pack_thresholds(pack_yaml: Path) -> dict:
         "min_read_identity": 0.98,
         "min_mapped_fraction_of_assigned": 0.50,
         "min_alignment_length": 100.0,
+        "min_alignment_length_by_platform": {},
         "min_read_identity_by_group": {},
         "min_read_identity_by_platform": {},
         "min_expected_reads_for_absence": 3.0,
@@ -295,6 +325,8 @@ def load_pack_thresholds(pack_yaml: Path) -> dict:
         out[k] = v
     if not isinstance(out.get("min_read_identity_by_group"), dict):
         out["min_read_identity_by_group"] = {}
+    if not isinstance(out.get("min_alignment_length_by_platform"), dict):
+        out["min_alignment_length_by_platform"] = {}
     if not isinstance(out.get("min_read_identity_by_platform"), dict):
         out["min_read_identity_by_platform"] = {}
     return out
@@ -765,9 +797,9 @@ def main() -> int:
                 # origin. Only applied when the metric is present.
                 mean_aln = as_float(row.get("mean_alignment_length"), -1.0)
                 if mean_aln >= 0:
-                    aln_floor = as_float(thresholds.get("min_alignment_length"), 100.0)
-                    gates[f"mean_alignment_length {mean_aln:.0f} >= {aln_floor:.0f}"] = \
-                        mean_aln >= aln_floor
+                    aln_floor, aln_src = resolve_alignment_floor(thresholds, plat)
+                    gates[f"mean_alignment_length {mean_aln:.0f} >= {aln_floor:.0f} "
+                          f"({aln_src})"] = mean_aln >= aln_floor
 
                 # Wright et al. criterion (ii). Only applied when the denominator is
                 # known - absent stage-1 counts must not fabricate a failed gate.
@@ -897,7 +929,12 @@ def main() -> int:
         # ---- marker gating -------------------------------------------
         marker_summary = ""
         spec = marker_rules.get(this_taxon)
-        if spec and mr is not None and tier in ("supported", "confirmed_in_silico"):
+        # An explicit, auditable declaration that this taxon HAS no usable markers, as
+        # opposed to nobody having written a block for it. Silence must not grant
+        # permission; a key in the pack must.
+        declared_no_markers = bool(spec) and bool(spec.get("no_markers_available"))
+        if (spec and not declared_no_markers and mr is not None
+                and tier in ("supported", "confirmed_in_silico")):
             verdict = mr.evaluate(row.get("taxon", ""), spec, eff_state)
             marker_summary = "; ".join(verdict["reasons"])
 
@@ -1013,6 +1050,33 @@ def main() -> int:
         # actionable stand-down about a specimen, when it is the no-template control's
         # own background. The tier list is meant to be exhaustive for controls, so the
         # test is now "did anything assert presence", not an enumeration.
+        # D17a: NO MARKER RULE BLOCK MEANS NO CONFIRMATION. 31 of the 89 watchlist
+        # entries have no block in marker_rules.yaml - 29 of them `notifiable`,
+        # including Dengue, Zika, West Nile, all three orthohantaviruses, Salmonella
+        # enterica and C. neoformans. For those taxa the veto/vaccine/confirm block
+        # above simply does not execute, and the finding reached `confirmed_in_silico`
+        # on alignment geometry alone with an EMPTY marker_verdict and no caveat.
+        #
+        # This was dormant only because nothing could reach the top tier: until
+        # min_alignment_length was made reachable, every confirmation in the project's
+        # history was Y. pestis or E. coli, both of which have blocks. The first
+        # real-data confirmation that fix produces is Salmonella enterica - notifiable,
+        # marker_verdict empty, no block - which is why the two land together (D20).
+        #
+        # Capped at `supported`, matching the unevaluable-veto rule a few lines above
+        # and for the same asymmetry: the finding is still reported and still
+        # prominent, it is simply not stamped as confirmed on evidence nobody gathered.
+        if (tier == "confirmed_in_silico" and mr is not None and marker_rules
+                and not spec and not declared_no_markers):
+            tier = "supported"
+            reasons.append(
+                "CAPPED AT SUPPORTED: no marker rule block exists for this taxon, so "
+                "the veto, vaccine and confirmation checks never ran. Alignment "
+                "geometry alone cannot distinguish wild type from a vaccine or "
+                "attenuated strain, nor the target from a near neighbour carrying a "
+                "diagnostic deletion. Add a block to marker_rules.yaml, or declare "
+                "`no_markers_available: true` there to state that none exist.")
+
         if row.get("role") == "control" and tier in ASSERTS_PRESENCE:
             reasons.append(f"negative control background at {rpm:.2f} RPM "
                            f"(was {tier} before control reclassification)")

@@ -47,7 +47,14 @@ COV_COLS = [
     "reference_bp", "reference_contigs",
     "unique_reads", "reads_per_million", "aligned_bases", "breadth", "mean_depth",
     "depth_cv", "window_bp", "windows_expected", "windows_occupied", "window_occupancy",
-    "mean_identity", "best_neighbour_taxid", "best_neighbour_reads",
+    "mean_identity",
+    # Absent from this list entirely, so no scoring fixture could set it, so
+    # `as_float(row.get("mean_alignment_length"), -1.0)` returned -1 and
+    # score_evidence.py SKIPPED the gate in every test ever written. Not "tested at the
+    # boundary" - never executed. It was simultaneously unreachable on real 2x100 data,
+    # which is how the project's entire top tier stayed broken while 110 tests passed.
+    "mean_alignment_length",
+    "best_neighbour_taxid", "best_neighbour_reads",
     # The D12 credibility gate's ONLY input. It was absent from this list while
     # being present in every real coverage TSV, so cov_row() rejected it and no
     # fixture could reach either side of the gate - the branch that withholds an
@@ -1347,6 +1354,100 @@ def test_contest_attribution(tmp: Path) -> None:
                      ("PEDESTAL", "SIBLING", "WEAK", "UNMEASURED")))
 
 
+# ---------------------------------------------------------------------------
+# 17. Gates must be REACHABLE, not merely strict
+# ---------------------------------------------------------------------------
+
+def test_gate_reachability(tmp: Path) -> None:
+    """A perfect finding at each plausible read length must reach the top tier.
+
+    THIS IS THE TEST THE SUITE DID NOT HAVE, AND ITS ABSENCE COST THE PROJECT ITS WHOLE
+    TOP TIER ON REAL DATA. `min_alignment_length` was a flat 100 while a 2x101 library
+    trims and soft-clips to a mean of 98-99, so on real 2x100 reads nothing could ever
+    be confirmed: 81 of 82 rows in the Zymo isolate batch failed it, and every
+    confirmed_in_silico call in nine runs was on 150 bp SIMULATED reads. The suite could
+    not see it because its one mean_alignment_length fixture is set to exactly 100.0 -
+    the single value that passes.
+
+    Every other test here asserts that a gate REJECTS bad evidence. This one asserts
+    that gates ACCEPT good evidence, which is the half that was missing, and it is
+    parameterised over read length precisely because that is the axis the simulated
+    benchmark holds fixed at 150.
+    """
+    for rl, plat in [(75, "illumina"), (101, "illumina"), (151, "illumina"),
+                     (251, "illumina"), (4000, "ont")]:
+        aln = int(rl * 0.98)          # trimming + soft-clipping, as observed on real data
+        ident = 0.9950 if plat == "illumina" else 0.9200
+        cov = tmp / f"reach_{plat}_{rl}.tsv"
+        write_cov(cov, [
+            cov_row(sample=f"R{rl}", role="sample", taxid="632",
+                    taxon="Yersinia pestis", group="bacteria", platform=plat,
+                    reference_bp=4650000, unique_reads=900000,
+                    reads_per_million=90000.0, breadth=0.9500, mean_depth=29.0,
+                    depth_cv=0.40, window_bp=1000, windows_expected=4650,
+                    windows_occupied=4400, window_occupancy=0.9462,
+                    mean_identity=ident, mean_alignment_length=aln,
+                    best_neighbour_taxid="633", best_neighbour_reads=10,
+                    neighbour_ratio="90000.0",
+                    screen_assigned_reads=950000,
+                    mapped_fraction_of_assigned="0.9500",
+                    total_reads_screened=5000000, mapq_min=10),
+        ])
+        got = score(tmp / f"reach{rl}{plat}", cov)[f"R{rl}"]
+        record(f"reachable:{plat} {rl}bp perfect evidence confirms",
+               got["tier"] == "confirmed_in_silico",
+               f'{got["tier"]}: {got["reasons"][:150]}')
+
+
+def test_marker_block_required_to_confirm(tmp: Path) -> None:
+    """A taxon with no marker rule block cannot reach confirmed_in_silico (D17a).
+
+    31 of 89 watchlist entries have no block - 29 of them notifiable. For those the
+    veto/vaccine/confirm logic never executes, so the finding used to be stamped
+    confirmed on alignment geometry alone with an EMPTY marker_verdict and no caveat.
+    Dormant only while nothing could reach the top tier; the very first real-data
+    confirmation unblocked by the reachability fix above is Salmonella enterica,
+    notifiable, with no block.
+    """
+    import json
+    rules = tmp / "rules_none.yaml"
+    rules.write_text("taxa:\n  Yersinia pestis:\n    no_markers_available: true\n")
+    cov = tmp / "d17a.tsv"
+    def perfect(sample, taxid, taxon):
+        return cov_row(sample=sample, role="sample", taxid=taxid, taxon=taxon,
+                       group="bacteria", platform="illumina", reference_bp=4650000,
+                       unique_reads=900000, reads_per_million=90000.0, breadth=0.9500,
+                       mean_depth=29.0, depth_cv=0.40, window_bp=1000,
+                       windows_expected=4650, windows_occupied=4400,
+                       window_occupancy=0.9462, mean_identity=0.9950,
+                       mean_alignment_length=148, best_neighbour_taxid="633",
+                       best_neighbour_reads=10, neighbour_ratio="90000.0",
+                       screen_assigned_reads=950000,
+                       mapped_fraction_of_assigned="0.9500",
+                       total_reads_screened=5000000, mapq_min=10)
+    # 28901 = Salmonella enterica, which really has no block in the shipped pack.
+    write_cov(cov, [perfect("NOBLOCK", "28901", "Salmonella enterica")])
+    got = score(tmp / "d17a", cov, markers=_empty_markers(tmp))["NOBLOCK"]
+    record("d17a:no marker block caps a perfect finding at supported",
+           got["tier"] == "supported", got["tier"])
+    record("d17a:the cap says why, and how to lift it",
+           "no marker rule block" in got["reasons"]
+           and "no_markers_available" in got["reasons"], got["reasons"][-160:])
+
+
+def _empty_markers(tmp: Path) -> Path:
+    """A marker-state file with no observations: gating ACTIVE, evidence absent.
+
+    Needed because the cap must apply when marker gating is running and the taxon has
+    no rule - not when gating is switched off altogether, where capping every
+    confirmation would be a surprise rather than a safeguard.
+    """
+    f = tmp / "no_markers.tsv"
+    f.write_text("sample\tmarker_id\tstate\ttaxon\ttier\n"
+                 "NOBLOCK\tplaceholder\tUNKNOWN\tYersinia pestis\tdna\n")
+    return f
+
+
 CASES = {
     "selftests": test_selftests,
     "tiering": test_tiering,
@@ -1364,6 +1465,8 @@ CASES = {
     "matrix_blank": test_matrix_blank_suppresses_host_artifact,
     "neighbour_named": test_neighbour_named,
     "contest": test_contest_attribution,
+    "reachable": test_gate_reachability,
+    "d17a": test_marker_block_required_to_confirm,
 }
 
 

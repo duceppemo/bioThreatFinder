@@ -161,7 +161,20 @@ thresholds:
   min_mapped_fraction_of_assigned: 0.50
   # Short alignments are a documented false-positive source on ONT, where a 50 bp
   # match inside a 10 kb read says almost nothing about where that read came from.
+  #
+  # THAT RATIONALE IS ONT-SPECIFIC AND THE FLAT 100 MADE THE GATE UNREACHABLE ON
+  # ILLUMINA. A 2x101 library trims and soft-clips to a mean aligned length of 98-99, so
+  # on real 2x100 data NOTHING COULD EVER BE CONFIRMED: 81 of 82 rows in the Zymo isolate
+  # batch failed this gate, including Salmonella enterica in its own single-organism
+  # library at 24M reads, breadth 0.9137, occupancy 0.9378, neighbour_ratio 1928, held at
+  # `supported` by "mean_alignment_length 99 >= 100". Every confirmed_in_silico call in
+  # the project's history is on 150 bp SIMULATED reads, for this reason and no other.
+  # Fourth recurrence of "a threshold must be reachable, not merely strict" (D10, D11,
+  # D20), invisible because the one fixture in the suite sits exactly on the boundary.
   min_alignment_length: 100
+  min_alignment_length_by_platform:
+      illumina: 60
+      ont: 100
 
   # ---- DEPTH-CONDITIONAL STRAIN / SUB-SPECIES TYPING ----
   #
