@@ -312,8 +312,8 @@ def collect_alignments(bam: Path, mapq_min: int, mask=None):
     return per_taxid
 
 
-def covered_by_taxid(bam: Path, mapq_min: int) -> dict[str, tuple[int, int]]:
-    """Per-taxid (reference_bp, covered_bp) in ONE pass, for the neighbour-credibility gate.
+def covered_by_taxid(bam: Path, mapq_min: int) -> dict[str, tuple[int, int, float]]:
+    """Per-taxid (reference_bp, covered_bp, aligned_bp) in ONE pass, for the neighbour gate.
 
     D12 measured that `neighbour_ratio`'s denominator, for the case the gate exists to
     handle, is background cross-mapping and not a competing organism at all: in
@@ -323,16 +323,38 @@ def covered_by_taxid(bam: Path, mapq_min: int) -> dict[str, tuple[int, int]]:
     reads pile onto the conserved fraction two genomes share; a present organism's reads
     spread over its genome.
 
-    `samtools coverage` gives covered bases per reference in one cheap pass, and
-    collect_alignments() already sums each taxon's reference SPAN, so the expectation needs
-    no read-length assumption:
+        uniformity = (covered_bp / reference_bp) / min(1, aligned_bp / reference_bp)
 
-        uniformity = covered_bp / min(reference_bp, summed_reference_span)
+    i.e. OBSERVED BREADTH DIVIDED BY THE BREADTH THOSE SAME BASES WOULD GIVE IF THEY WERE
+    SPREAD UNIFORMLY. All three quantities come from one `samtools coverage` pass:
+    reference_bp from endpos, covered_bp from covbases, aligned_bp from meandepth x endpos.
+    No read length is assumed, which is what lets the same formula serve Illumina and ONT.
 
-    Measured over runs/lod_v4 (scripts/measure_neighbour_uniformity.py): an absent
-    neighbour scores 0.113-0.123 at every spike level, a genuinely present one 0.639-0.992.
-    The gap is wide and the figure is near-independent of abundance, which is what lets one
-    threshold serve every level.
+    ⚠️ THIS FUNCTION PREVIOUSLY COMPUTED `covered_bp / min(reference_bp, span)` AND CALLED
+    IT THE SAME THING. That has no read count in it anywhere, so it is not normalised and
+    not abundance-independent - and the docstring's claim that "the expectation needs no
+    read-length assumption" was true only because there was no expectation. The calibration
+    it cited (0.113-0.123 absent, 0.639-0.992 present) was produced by
+    scripts/measure_neighbour_uniformity.py, which DOES divide by the expectation. Two
+    different metrics under one name, and three successive threshold decisions (D12's 0.50,
+    D18's retraction of it, D19's 0.30) were taken across the gap between them.
+
+    What the unnormalised version actually did, measured on ONE ABSENT neighbour
+    (L. innocua, taxid 1642) across the Zymo libraries:
+
+        14 reads 0.9676 | 21 reads 0.9234 | 1,083 reads 0.8513 | 11,593 reads 0.4176
+        190,739 reads 0.2653 | 1,880,316 reads 0.3642 | 7,639,529 reads 0.3912
+
+    A monotone decline across five orders of magnitude, crossing every threshold ever
+    proposed for it. The same absent organism was "genuinely covered" when rare and a
+    "pedestal" when abundant. See D20.
+
+    HOW TO READ THE CORRECTED NUMBER. Above ~1x depth the expectation saturates at 1 and
+    uniformity IS breadth, so a present organism approaches 1 and a pedestal plateaus at
+    the fraction of genome the two share. Below 1x it is covered-per-aligned-base, which
+    falls as reads pile on the same conserved sequence. Both regimes measure shape rather
+    than quantity; neither is a presence test on its own, and the discriminating power
+    still depends on depth over the shared fraction.
 
     SUPPLEMENTARY is in the filter list because samtools coverage does NOT exclude it by
     default, while the read counts this is compared against come from `view -F 0x904`.
@@ -355,13 +377,17 @@ def covered_by_taxid(bam: Path, mapq_min: int) -> dict[str, tuple[int, int]]:
         parts = f[0].split("|")
         if len(parts) < 2:
             continue
-        rec = out.setdefault(parts[1], [0, 0])
+        rec = out.setdefault(parts[1], [0, 0, 0.0])
         try:
-            rec[0] += int(f[2])
+            ref_bp = int(f[2])
+            rec[0] += ref_bp
             rec[1] += int(f[4])
+            # meandepth is over the WHOLE reference, so meandepth x reference_bp is the
+            # aligned base count - the normalising term, free in this same pass.
+            rec[2] += float(f[6]) * ref_bp
         except ValueError:
             continue
-    return {k: (v[0], v[1]) for k, v in out.items()}
+    return {k: (v[0], v[1], v[2]) for k, v in out.items()}
 
 
 def depth_profile(bam: Path, mapq_min: int, target_refs: set[str], window: int,
@@ -557,11 +583,11 @@ def main() -> int:
     nb_uniformity = ""
     if best_nb:
         cov_by_tax = covered_by_taxid(args.bam, args.mapq_min)
-        nb_bp, nb_cov = cov_by_tax.get(best_nb, (0, 0))
-        nb_span = per_taxid.get(best_nb, {}).get("bases", 0)
-        denom = min(nb_bp, nb_span) if nb_bp and nb_span else 0
-        if denom > 0:
-            nb_uniformity = f"{nb_cov / denom:.4f}"
+        nb_bp, nb_cov, nb_aln = cov_by_tax.get(best_nb, (0, 0, 0.0))
+        if nb_bp > 0 and nb_aln > 0:
+            expected = min(1.0, nb_aln / nb_bp)
+            if expected > 0:
+                nb_uniformity = f"{(nb_cov / nb_bp) / expected:.4f}"
 
     breadth = (covered / total_bases) if total_bases else 0.0
     breadth10 = (covered10 / total_bases) if total_bases else 0.0

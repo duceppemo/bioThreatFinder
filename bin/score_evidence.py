@@ -631,13 +631,25 @@ def main() -> int:
         # Computed BEFORE the branch because the attribution branch now has to ask
         # whether there is anything worth contesting, and that question is about the
         # target's own evidence - which the attribution branch previously never looked at.
-        contested = target_covers_its_reference(breadth, min_breadth,
-                                                occupancy, args.min_occupancy)
         _nb_raw = (row.get("best_neighbour_uniformity") or "").strip()
         try:
             nb_unif = float(_nb_raw) if _nb_raw else None
         except ValueError:
             nb_unif = None
+        # A ROW WITH NO MEASUREMENT IS NOT CONTESTED, AND THE FIRST VERSION OF THIS GOT
+        # THAT BACKWARDS. It routed a blank to `indistinguishable_complex`, reasoning
+        # from "absent evidence is not evidence" - but that principle, which
+        # neighbour_is_credible() states in its own docstring, says a missing
+        # measurement must leave the decision EXACTLY AS IT WAS, not manufacture a
+        # different one. The symptom is concrete: runs/lod_v1 and runs/lod_v3_threearm
+        # pre-date the column entirely, so byte-identical rows scored `supported` in one
+        # run and `indistinguishable_complex` in another, and the latter ranks lower -
+        # so the very expectation D19 cited as proof would have FAILED on them. The live
+        # risk is not old runs, it is covered_by_taxid() returning {} when samtools
+        # coverage fails, which blanks every row in that sample at once.
+        contested = (nb_unif is not None
+                     and target_covers_its_reference(breadth, min_breadth,
+                                                     occupancy, args.min_occupancy))
 
         reasons: list[str] = []
         tier = "screened_only"
@@ -655,8 +667,7 @@ def main() -> int:
             )
         elif (args.contest_attribution and contested
               and nb_ratio < args.min_neighbour_ratio
-              and not (nb_unif is not None
-                       and nb_unif <= args.pedestal_max_uniformity)):
+              and nb_unif > args.pedestal_max_uniformity):
             # BOTH REFERENCES ARE GENUINELY COVERED, SO NEITHER CALL IS SAFE.
             #
             # The attribution machinery assumes one of the two organisms is real and
@@ -683,10 +694,7 @@ def main() -> int:
                 f"{args.min_occupancy:.4f}) AND "
                 f"{neighbour_label(row.get('best_neighbour_taxid'), ref_names)} "
                 + (f"covers its own (uniformity {nb_unif:.4f} > "
-                   f"{args.pedestal_max_uniformity:.2f})"
-                   if nb_unif is not None else
-                   "has NO uniformity measurement, so it cannot be shown to be a "
-                   "pedestal either")
+                   f"{args.pedestal_max_uniformity:.2f})")
                 + f" while out-counting it only "
                 f"{nb_ratio:.4f}:1. Both references are genuinely covered, so the "
                 f"reads cannot be assigned to one organism at this resolution. One of "
@@ -703,7 +711,6 @@ def main() -> int:
             # the d12fine revalidation: the cliff did not move, which is the symptom.
             if (args.contest_attribution and contested
                     and nb_ratio < args.min_neighbour_ratio
-                    and nb_unif is not None
                     and nb_unif <= args.pedestal_max_uniformity):
                 reasons.append(
                     f"ATTRIBUTION CONTESTED AND REJECTED: "

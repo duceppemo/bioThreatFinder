@@ -1329,9 +1329,12 @@ def test_contest_attribution(tmp: Path) -> None:
     # THE GUARD. A target that does not cover its reference has no claim to contest.
     record("contest:a weak target does NOT contest its attribution",
            on["WEAK"]["tier"] == "attributed_to_neighbour", on["WEAK"]["tier"])
-    # Absent evidence must not be read as evidence the neighbour is a pedestal.
-    record("contest:an unmeasured neighbour is not assumed to be a pedestal",
-           on["UNMEASURED"]["tier"] == "indistinguishable_complex",
+    # ABSENT EVIDENCE LEAVES THE DECISION EXACTLY AS IT WAS. Not "assume pedestal"
+    # (which would credit the target) and not "assume sibling" (which the first version
+    # did, and which made byte-identical rows score differently in runs predating the
+    # column). No measurement means nothing to contest with.
+    record("contest:an unmeasured neighbour leaves the attribution untouched",
+           on["UNMEASURED"]["tier"] == "attributed_to_neighbour",
            on["UNMEASURED"]["tier"])
     record("contest:a control is never a finding, new tier included",
            on_ctrl["NTC"]["tier"] == "control_background", on_ctrl["NTC"]["tier"])
