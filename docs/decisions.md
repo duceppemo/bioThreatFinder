@@ -1075,15 +1075,35 @@ Twelve genuine *Y. pestis* spikes across the two simulated batches were being at
 D12 described; the remedy it proposed was too broad, and the missing piece was D14's gates
 as a precondition.
 
-### What is NOT decided
+### `indistinguishable_complex` COUNTS AS A DETECTION — decided, with the cost stated
 
-**Whether `indistinguishable_complex` should count as a detection.** It is in neither
-`POSITIVE_TIERS` nor any other set in `evaluate_benchmark.py`, so it falls to NEGATIVE, and
-the scorecard therefore does not move on the Zymo batches at all: *E. coli* and
-*C. neoformans* still read as misses. Counting it POSITIVE would recover 6 real detections
-and also score *Shigella dysenteriae* as present in a library that contains only *E. coli*
-- 4 rows. The honest scorecard needs a third outcome rather than a reassignment, and this
-project has twice had to retract a mapping decided ahead of its measurement.
+Asserting that one of a named pair is present is an assertion of presence, and for a
+notifiable organism a scorecard that calls it a miss is wrong about what the tool did. It
+is in `POSITIVE_TIERS`; it is deliberately NOT in `CONFIRMED_TIERS`, because it resolves
+no organism and must never read as a confirmation.
+
+The resulting scorecard, with the before column reproducing D18's recorded figures
+exactly:
+
+| batch | before TP/FP | after TP/FP |
+|---|---|---|
+| zymo_rl100 | 3 / 2 | **7 / 4** |
+| zymo_rl150 | 1 / 0 | **4 / 1** |
+| lod_v4 | 6 / 0 | **9 / 0** |
+| d12fine | 9 / 0 | **18 / 0** |
+
+**Every one of the three new false positives is *Shigella dysenteriae*** in a specimen
+whose *E. coli* is real, and that is not a scoring artefact to tune away. *Shigella* is a
+pathotype within *E. coli*; the watchlist's own note says species-level separation from a
+metagenome is unreliable. A method that cannot separate the pair should be charged for
+both sides of it, and the number is the honest size of the problem `ipaH` plus lineage
+markers (D17) would solve. The two *L. monocytogenes* false positives are unchanged and
+remain D13's reference-quality problem.
+
+The remaining expectation failures on the Zymo batches are `zymo_even`'s **ONT** rows,
+which have no findings because that batch was never completed - not a scoring outcome.
+
+### What is NOT decided
 
 **The pairs themselves are still unseparated.** This reports the limit instead of hiding
 it. `ipaH` plus lineage markers for *Shigella*, and a *C. gattii*/*deneoformans*

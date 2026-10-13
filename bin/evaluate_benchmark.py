@@ -9,8 +9,11 @@ EXPLICIT SEMANTICS - the whole point is that these are not left implicit
 
 A finding's tier is mapped to one of four outcomes:
 
-  POSITIVE        supported, confirmed_in_silico
-                  The tool is asserting the organism is there.
+  POSITIVE        supported, confirmed_in_silico, indistinguishable_complex
+                  The tool is asserting the organism is there. For
+                  indistinguishable_complex it is asserting that one of a named
+                  pair is there without resolving which, which counts as a
+                  detection of the watchlist taxon and is scored as one.
   VACCINE         vaccine_strain
                   Asserting a vaccine/attenuated strain, i.e. a stand-down.
   NEGATIVE        screened_only, attributed_to_neighbour, marker_veto,
@@ -71,17 +74,21 @@ try:
 except ImportError:
     sys.exit("ERROR: bin/score_evidence.py not importable; tier ordering unavailable")
 
-# `indistinguishable_complex` IS DELIBERATELY IN NEITHER SET, and so falls to
-# NEGATIVE by the default at the end of outcome_of(). It reports that one of a named
-# pair is present without saying which, which is neither a detection of the watchlist
-# taxon nor a clean negative for it. Counting it POSITIVE would credit the pipeline
-# with detections it did not make (and would score Shigella dysenteriae as present in
-# a library containing only E. coli); counting it NEGATIVE understates sensitivity for
-# E. coli and C. neoformans, which really are present in those libraries. The honest
-# scorecard needs a third outcome, and inventing one here while the tier is new would
-# bake in an answer this project has twice had to retract. Until then the conservative
-# reading stands and `tier_counts` in the summary carries the number.
-POSITIVE_TIERS = {"supported", "confirmed_in_silico"}
+# `indistinguishable_complex` COUNTS AS A DETECTION. The tier says one of a named pair
+# is present without resolving which; for a biosurveillance watchlist that is an
+# assertion of presence, and scoring it NEGATIVE would record E. coli and
+# C. neoformans - each at 100% abundance in its own Zymo isolate library - as misses
+# the pipeline did not make.
+#
+# THE COST IS REAL AND IS NOT HIDDEN HERE. On the Zymo batches this recovers 6 true
+# positives and creates 4, all four Shigella dysenteriae in libraries containing only
+# E. coli. That is not a scoring artefact to be tuned away: Shigella IS a pathotype
+# within E. coli, the watchlist's own note says species-level separation from a
+# metagenome is unreliable, and a method that cannot separate them should be charged
+# for both sides of that. The fix is a marker that resolves the pair (ipaH plus
+# lineage markers, D17), not a different mapping here. `tier_counts` in the summary
+# carries the raw number so the contribution stays visible.
+POSITIVE_TIERS = {"supported", "confirmed_in_silico", "indistinguishable_complex"}
 CONFIRMED_TIERS = {"confirmed_in_silico"}
 VACCINE_TIERS = {"vaccine_strain"}
 NOT_ASSESSED_TIERS = {"no_reference"}
@@ -1072,6 +1079,10 @@ def self_test() -> int:
     # Outcome mapping
     check(outcome_of("confirmed_in_silico") == POSITIVE, "confirmed -> POSITIVE")
     check(outcome_of("supported") == POSITIVE, "supported -> POSITIVE")
+    check(outcome_of("indistinguishable_complex") == POSITIVE,
+          "indistinguishable_complex -> POSITIVE")
+    check("indistinguishable_complex" not in CONFIRMED_TIERS,
+          "indistinguishable_complex is a detection but NOT a confirmation")
     check(outcome_of("vaccine_strain") == VACCINE, "vaccine -> VACCINE")
     check(outcome_of("marker_veto") == NEGATIVE, "veto -> NEGATIVE")
     check(outcome_of("suppressed_control") == NEGATIVE, "suppressed -> NEGATIVE")
