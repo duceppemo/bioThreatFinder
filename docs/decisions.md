@@ -991,6 +991,146 @@ matrix; it does nothing for a specimen type whose matrix was never blanked.
 
 ---
 
+## D20 — Three adversarial passes over everything, and what calibrating on two datasets actually cost
+
+2026-10-13. Three independent reviews — threshold provenance, the open backlog, and an
+attack on D14/D18/D19 — run against the code and the data on disk, not against the
+comments. Every figure below that is marked ✓ I re-derived myself; the rest is the
+reviewer's measurement, attributed as such.
+
+### The class of defect the validation set cannot show
+
+Not "the thresholds are loosely calibrated". Something sharper: **a gate that is
+unreachable on realistic input is invisible on everything this project has ever tested.**
+
+| gate | unreachable when | evidence |
+|---|---|---|
+| `min_alignment_length: 100` | any 2×100 library | ✓ **81 of 82** real Zymo rows fail it |
+| `max_depth_cv: 2.5` | mean depth < 0.26× | no row below 0.258× has passed, in 709 rows |
+| `min_read_identity` illumina 0.98 | strain-divergent real isolate | *L. monocytogenes*, 12.5M reads, markers PRESENT, held at 0.9643 |
+| `min_occupancy: 0.15` | large genomes | implies ~20,000 reads for *T. gondii*, ~109,000 for *S. mansoni* |
+
+✓ **Every `confirmed_in_silico` call in the project's history is *Y. pestis* or *E. coli*
+on simulated 150 bp reads.** Nine runs, zero real-data confirmations, and the reason is
+the first row of that table rather than anything biological.
+
+✓ The unit suite cannot see any of them: the only `mean_alignment_length` fixture is set
+to exactly `100.0`, the one value that passes. The standing lesson "a threshold must be
+reachable, not merely strict" (D10, D11) is recurring for the fourth time because **the
+tests check that gates reject bad data and never that they accept good data.** The
+generalisable fix is a parameterised reachability test — for each gate, assert some
+plausible real input passes, swept over read length 100/150/250 and both platforms.
+
+Related, and the same shape: ✓ all 89 watchlist rows carry explicit `min_unique_reads`
+and `min_breadth`, so the pack-level defaults are unreachable, and ✓ the identity
+resolver always returns from the platform block, so `min_read_identity` and
+`min_read_identity_by_group` are dead — while `nextflow.config` documents all of them as
+live overrides. An override that prints a confirmation line to stderr and changes nothing
+is worse than no override.
+
+### The uniformity metric: a retraction of my own correction, and what is actually wrong
+
+I reported that `coverage_stats.py` computed an unnormalised quantity while
+`scripts/measure_neighbour_uniformity.py` computed a normalised one, and that D12's 0.50,
+D18's retraction and D19's 0.30 were decided across that gap. **That was wrong.** `span`
+is the summed ALIGNED reference span — the normalising term itself — so the two
+expressions are the same formula: ✓ over all 467 neighbour rows, max |old − new| =
+**0.0073**, mean 0.00015. The docstring I called false was correct.
+
+What is real, and was the actual finding: **normalising never made this
+abundance-independent, and the docstring claimed it did.** ✓ One ABSENT neighbour
+(*L. innocua*), its own read count against its uniformity:
+
+    14 reads 0.968 | 1,083 reads 0.852 | 11,593 reads 0.418 | 190,739 reads 0.265
+
+Below ~1× depth the statistic is covered-per-aligned-base, which is ~1 for any taxon too
+sparse for its reads to overlap; above ~1× it saturates to breadth, which for a sibling
+plateaus at the shared fraction. It is a **depth-gated pile-up detector** described as a
+level-independent shape statistic.
+
+### The recalibration, and why it still does not license a threshold
+
+All 512 competitive BAMs re-measured, truth labelled per specimen in three classes —
+because the sibling case is the one that matters and lumping it into "absent" is what
+made every previous calibration look clean. ✓ Counting DISTINCT CONDITIONS, not rows,
+since 288 of the 292 present rows are one simulated background replicated:
+
+| class | conditions | range |
+|---|---|---|
+| PRESENT | 9 | 0.524 – 0.991 |
+| ABSENT_SIBLING | 17 | 0.022 – 0.861 |
+| ABSENT_DISTANT | 26 | 0.000 – 0.604 |
+
+1. ✓ Below ~0.05× neighbour depth the number is noise: unfiltered, ABSENT_DISTANT reaches
+   p90 **0.932** from sparse non-overlapping reads alone.
+2. ✓ Above that floor the arms nearly separate but cross — present *E. coli* in `zymo_log`
+   is **0.524**, absent *Citrobacter* in `zymo_even` ONT is **0.604**. And the trap
+   repeats: a 0.63 threshold scores **99.7% on rows** and calls a genuinely present
+   organism a pedestal. That is the D19 error reproduced with better data.
+3. ✓ ABSENT_SIBLING spans the whole range and always will. A sibling reference IS covered
+   by its relative's reads. That is the honest answer and the reason the tier exists.
+
+**`params.contest_attribution` is OFF.** The tier is kept; the pedestal/sibling split is
+not shipped. Recommended resolution: drop the split rather than re-threshold it — a
+contested row becomes `indistinguishable_complex`, which needs no number — but that is
+coupled to whether the tier should rank above `supported`, which is unresolved.
+
+Also fixed: a missing measurement now leaves the decision unchanged instead of
+manufacturing a tier. ✓ `runs/lod_v1` and `runs/lod_v3_threearm` have no
+`best_neighbour_uniformity` column, so byte-identical rows scored differently across
+runs, and the lower-ranking tier would have failed the very expectation D19 cited.
+
+Published, as the measurements D12 and D13 both name and neither produced:
+`benchmarks/measurements/cross_recruitment_matrix.tsv` (1,773 per-taxid rows on real
+reads) and `neighbour_uniformity_recal.tsv` (467 rows, three-class truth).
+
+### Backlog, verified against current code
+
+**Before any real use.** ✓ `min_alignment_length` (above). ✓ `--threshold
+min_read_identity` silently dead. **D17a**, which is dormant only because nothing can
+currently confirm: ✓ re-scoring at a reachable alignment floor produces the first
+real-data confirmation in project history, and it is *Salmonella enterica*, `notifiable`,
+`marker_verdict` EMPTY, with no block in `marker_rules.yaml` — so the two must land
+together. **D16a** is no longer a prediction: the reviewer injected one 1,000 RPM control
+row and flipped three genuine `supported` detections to `suppressed_control` in an
+unrelated scenario, a true-positive → false-negative flip.
+
+**Before release.** **D15's cause is structural and was misdiagnosed**: the filovirus
+markers DO fire (`ebola_NP`, `ebola_GP`, `ebolaS_NP`, `ebolaS_GP` all PRESENT, both
+`confirm_requires` satisfied) and are then discarded, because `score_evidence.py` builds
+findings only from coverage rows and the `--missing-refs` list — **marker evidence can
+gate a finding but can never raise one**. The entry's "why is unresolved" is answered and
+its VERIFY ("does HMM have filovirus profiles at all") is resolved YES. The fix is a
+capped `marker_lead` tier, and it must land with **D17b**, since the same data shows
+`marburg_L` PRESENT on HMM bits alone across a genus boundary — the HMM branch never
+checks the catalogue's `min_coverage`/`min_identity`. Then **D16b** (units and threshold
+together), and **declaring** D12's residual floor, which D19 moved rather than removed:
+it is now ≈55–58 rpm and set by `min_occupancy`, i.e. by genome size rather than by
+background composition. Predictable is better than unpredictable; undeclared is still
+undeclared, and `min_occupancy` is a hardcoded argparse default with no per-taxon
+override and no representation in the pack.
+
+**Accept and document.** D13 (do not touch masking; the recruitment matrix it wanted is
+now published), the Illumina identity floor as a strain-divergence problem rather than an
+error-rate one, D17c.
+
+**Explicitly rejected.** Replacing `min_occupancy` with an occupancy *ratio*: measured, it
+buys 3 simulated true positives for 3 real-data false positives.
+
+### What this says about the evidence base
+
+✓ Across 709 stage-2 rows in six runs: 623 bacteria, 69 parasite, 17 fungus, **0 virus**.
+29 of 89 watchlist entries are viruses — Variola, the ebolaviruses, Nipah, MERS — and not
+one has ever produced a coverage row, so every virus-specific threshold is unexercised
+rather than weakly calibrated. ONT has 11 rows, all from the batch that never completed.
+
+And the thresholds have never been tested where they will be used: 65% of all rows sit in
+depth regions where no placement matters (47% is cross-mapping noise, 18% passes
+everything) and **2% fall in the band where a gate actually decides**. A clinical specimen
+lives in the 0.01–1× band, which is 8.5% of this corpus.
+
+---
+
 ## D19 — The attribution gate never looked at the target, and a 100%-abundance notifiable pathogen produced no finding at all
 
 D18 item 2 recorded that near-identical pairs are silently attributed. Measuring what the
