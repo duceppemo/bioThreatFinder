@@ -1374,8 +1374,13 @@ def test_gate_reachability(tmp: Path) -> None:
     parameterised over read length precisely because that is the axis the simulated
     benchmark holds fixed at 150.
     """
-    for rl, plat in [(75, "illumina"), (101, "illumina"), (151, "illumina"),
-                     (251, "illumina"), (4000, "ont")]:
+    # 50 IS IN THIS LIST BECAUSE THE FIRST VERSION OF THIS TEST STOPPED AT 75, AND THE
+    # FIX IT WAS WRITTEN TO GUARD REPRODUCED THE DEFECT AT 2x50. A flat illumina floor
+    # of 60 is unreachable for a ~49 bp mean aligned length exactly as a flat 100 was
+    # for 2x101 - the same bug, one read length down, in the test meant to prevent it.
+    # That is why the floor is now a fraction of the measured read length.
+    for rl, plat in [(50, "illumina"), (75, "illumina"), (101, "illumina"),
+                     (151, "illumina"), (251, "illumina"), (4000, "ont")]:
         aln = int(rl * 0.98)          # trimming + soft-clipping, as observed on real data
         ident = 0.9950 if plat == "illumina" else 0.9200
         cov = tmp / f"reach_{plat}_{rl}.tsv"
@@ -1393,7 +1398,14 @@ def test_gate_reachability(tmp: Path) -> None:
                     mapped_fraction_of_assigned="0.9500",
                     total_reads_screened=5000000, mapq_min=10),
         ])
-        got = score(tmp / f"reach{rl}{plat}", cov)[f"R{rl}"]
+        # The pipeline measures read length with seqkit_stats and now passes it to the
+        # scorer; the fixture has to supply it too, or the test silently exercises the
+        # unknown-read-length fallback instead of the path that ships.
+        stats = tmp / f"stats_{plat}_{rl}.tsv"
+        stats.write_text("file\tavg_len\tsample\trole\tplatform\n"
+                         f"x.fastq.gz\t{rl}.0\tR{rl}\tsample\t{plat}\n")
+        got = score(tmp / f"reach{rl}{plat}", cov,
+                    extra=["--read-stats", stats])[f"R{rl}"]
         record(f"reachable:{plat} {rl}bp perfect evidence confirms",
                got["tier"] == "confirmed_in_silico",
                f'{got["tier"]}: {got["reasons"][:150]}')

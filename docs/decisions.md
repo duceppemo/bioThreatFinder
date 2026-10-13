@@ -1008,11 +1008,12 @@ unreachable on realistic input is invisible on everything this project has ever 
 | `min_alignment_length: 100` | any 2×100 library | ✓ **81 of 82** real Zymo rows fail it |
 | `max_depth_cv: 2.5` | mean depth < 0.26× | no row below 0.258× has passed, in 709 rows |
 | `min_read_identity` illumina 0.98 | strain-divergent real isolate | *L. monocytogenes*, 12.5M reads, markers PRESENT, held at 0.9643 |
-| `min_occupancy: 0.15` | large genomes | implies ~20,000 reads for *T. gondii*, ~109,000 for *S. mansoni* |
+| `min_occupancy: 0.15` | large genomes | *derived, not measured*: ~20,000 reads for *T. gondii* (✓ 66,891 windows, so 0.15 needs 10,034 occupied; observed 82 on 8,261 reads), and *S. mansoni*, which has no coverage row on disk |
 
 ✓ **Every `confirmed_in_silico` call in the project's history is *Y. pestis* or *E. coli*
-on simulated 150 bp reads.** Nine runs, zero real-data confirmations, and the reason is
-the first row of that table rather than anything biological.
+on simulated 150 bp reads.** ✓ 13 runs carry a findings.tsv and 10 contain at least
+one confirmation; not one is on real data, and the reason is the first row of that table
+rather than anything biological.
 
 ✓ The unit suite cannot see any of them: the only `mean_alignment_length` fixture is set
 to exactly `100.0`, the one value that passes. The standing lesson "a threshold must be
@@ -1042,6 +1043,15 @@ abundance-independent, and the docstring claimed it did.** ✓ One ABSENT neighb
 (*L. innocua*), its own read count against its uniformity:
 
     14 reads 0.968 | 1,083 reads 0.852 | 11,593 reads 0.418 | 190,739 reads 0.265
+    ...then 1,880,316 reads 0.364 and 7,639,529 reads 0.391 - IT RISES AGAIN AT THE TOP.
+
+The decline is NOT monotone, and this entry first presented it as though it were by
+stopping at the fourth point. Two further caveats on the same series: the first two points
+sit below the 0.05x depth floor this entry itself calls uninformative, and the points come
+from different specimens, so abundance is confounded with composition. The same organism
+at 276,000 reads scores 0.9915 in `lod_v4` - higher than at 1,083 reads - because there it
+is genuinely PRESENT. The mechanism claim survives all of that; the series as first
+presented was selective.
 
 Below ~1× depth the statistic is covered-per-aligned-base, which is ~1 for any taxon too
 sparse for its reads to overlap; above ~1× it saturates to breadth, which for a sibling
@@ -1055,18 +1065,33 @@ because the sibling case is the one that matters and lumping it into "absent" is
 made every previous calibration look clean. ✓ Counting DISTINCT CONDITIONS, not rows,
 since 288 of the 292 present rows are one simulated background replicated:
 
-| class | conditions | range |
+| class | conditions | range (at ≥0.05× depth) |
 |---|---|---|
 | PRESENT | 9 | 0.524 – 0.991 |
 | ABSENT_SIBLING | 17 | 0.022 – 0.861 |
 | ABSENT_DISTANT | 26 | 0.000 – 0.604 |
 
+⚠️ **Two caveats the first version of this entry left implicit.** The table is
+DEPTH-FILTERED at ≥0.05×; unfiltered, ABSENT_DISTANT runs 0.000–1.000, so its 0.604
+ceiling exists only because the floor presented below as *conclusion 1* was already
+applied. And the three counts are not one unit: PRESENT collapses 288 replicate rows of
+one simulated background to 5 conditions and adds 4 individual real rows, while the other
+two count distinct (run, sample-family, neighbour); under the rule giving 17 and 26,
+PRESENT is 19. The PRESENT arm is thinner than "9" suggests — **5 conditions are one
+synthetic background and all 4 real-data conditions are the same organism, *E. coli*.**
+
 1. ✓ Below ~0.05× neighbour depth the number is noise: unfiltered, ABSENT_DISTANT reaches
    p90 **0.932** from sparse non-overlapping reads alone.
-2. ✓ Above that floor the arms nearly separate but cross — present *E. coli* in `zymo_log`
-   is **0.524**, absent *Citrobacter* in `zymo_even` ONT is **0.604**. And the trap
-   repeats: a 0.63 threshold scores **99.7% on rows** and calls a genuinely present
-   organism a pedestal. That is the D19 error reproduced with better data.
+2. ✓ Above that floor the arms appear to cross — present *E. coli* in `zymo_log` is
+   **0.524**, absent *Citrobacter* in `zymo_even` ONT is **0.604** — but THAT PAIR IS
+   WEAKER EVIDENCE THAN IT LOOKS and this entry first overstated it. The two points come
+   from different platforms, and *Citrobacter* is probably mislabelled: `truth.py`'s
+   SIBLING_OF list has no genus-level Enterobacteriaceae entry, so *Citrobacter*,
+   *Klebsiella* and *Enterobacter* fall to ABSENT_DISTANT however close they are. At 72.7×
+   depth inside the *E. coli* bundle of a specimen that contains *E. coli*, it is a
+   sibling by behaviour; relabelled, the cross disappears. What does NOT depend on it: a
+   0.63 threshold still scores **99.7% on rows** while calling present *E. coli* a
+   pedestal, and conclusion 3 is sufficient on its own to keep the split unshipped.
 3. ✓ ABSENT_SIBLING spans the whole range and always will. A sibling reference IS covered
    by its relative's reads. That is the honest answer and the reason the tier exists.
 
@@ -1082,7 +1107,33 @@ runs, and the lower-ranking tier would have failed the very expectation D19 cite
 
 Published, as the measurements D12 and D13 both name and neither produced:
 `benchmarks/measurements/cross_recruitment_matrix.tsv` (1,773 per-taxid rows on real
-reads) and `neighbour_uniformity_recal.tsv` (467 rows, three-class truth).
+reads), `neighbour_uniformity_recal.tsv` (467 rows, three-class truth) and
+`neighbour_truth_labels.py`, which is the RULE that produced the `label` column. The
+first version published the labels without the rule, which makes a derived column
+unauditable - and the rule is hand-built, single-sourced and has at least one known
+limitation (no genus-level Enterobacteriaceae sibling entry, see conclusion 2), so it is
+the part most in need of review.
+
+### What the alignment-length gate was actually worth
+
+Sweeping `min_alignment_length` from 100 down to 0 across five batches and 512 rows
+changes **exactly one call, and it is a true positive**. No row anywhere on disk with
+`mean_alignment_length < 100` passes the other gates. The gate's measured record in this
+project is **zero false positives prevented, one true positive suppressed** - a stronger
+argument for fixing it than unreachability, and the one this entry should have led with.
+It also means no value in [0, 98.9) is distinguishable from any other on current data, so
+the Illumina setting is defended by read-length reasoning, not by measurement.
+
+**AND THE TWO CHANGES TOGETHER NET TO ZERO NEW CONFIRMATIONS ON REAL DATA.** The
+reachability fix confirms *Salmonella enterica*; D17a immediately caps it at `supported`.
+`zymo_rl100` goes from `conf=0, sup=5` to `conf=0, sup=5`. "Produces the first real-data
+confirmation in project history" is true of the first change in isolation and FALSE of
+what ships, and in a project with this record of writing down justifications for
+behaviour the code does not have, that distinction has to be on the page. The only
+evidence the reachability fix works is the new synthetic fixture. What changed is the
+reason attached to the row: from "failed: mean_alignment_length 99 >= 100", which was
+false, to "all confirmation gates passed ... CAPPED AT SUPPORTED: no marker rule block",
+which is true and actionable.
 
 ### Backlog, verified against current code
 
@@ -1091,9 +1142,14 @@ min_read_identity` silently dead. **D17a**, which is dormant only because nothin
 currently confirm: ✓ re-scoring at a reachable alignment floor produces the first
 real-data confirmation in project history, and it is *Salmonella enterica*, `notifiable`,
 `marker_verdict` EMPTY, with no block in `marker_rules.yaml` — so the two must land
-together. **D16a** is no longer a prediction: the reviewer injected one 1,000 RPM control
-row and flipped three genuine `supported` detections to `suppressed_control` in an
-unrelated scenario, a true-positive → false-negative flip.
+together. **D16a** is no longer a prediction: injecting one 1,000 RPM control row into
+`zymo_rl100` flips **2** genuine `supported` detections to `suppressed_control` (both the
+*L. monocytogenes* trace contamination D18 established as real) plus 3 `screened_only`
+rows — a true-positive → false-negative flip. `d12fine` carries 9 *Y. pestis* `supported`
+rows at 2,149–2,925 RPM, every one of which a 1,000 RPM control would suppress at
+`control_ratio 5.0`. The mechanism is sharpest when the operator does the right thing:
+adding a control simultaneously removes the "NO NEGATIVE CONTROL IN RUN" caveat and
+suppresses the finding.
 
 **Before release.** **D15's cause is structural and was misdiagnosed**: the filovirus
 markers DO fire (`ebola_NP`, `ebola_GP`, `ebolaS_NP`, `ebolaS_GP` all PRESENT, both
@@ -1120,14 +1176,16 @@ buys 3 simulated true positives for 3 real-data false positives.
 ### What this says about the evidence base
 
 ✓ Across 709 stage-2 rows in six runs: 623 bacteria, 69 parasite, 17 fungus, **0 virus**.
-29 of 89 watchlist entries are viruses — Variola, the ebolaviruses, Nipah, MERS — and not
+30 of 89 watchlist entries are viruses — Variola, the ebolaviruses, Nipah, MERS — and not
 one has ever produced a coverage row, so every virus-specific threshold is unexercised
 rather than weakly calibrated. ONT has 11 rows, all from the batch that never completed.
 
 And the thresholds have never been tested where they will be used: 65% of all rows sit in
 depth regions where no placement matters (47% is cross-mapping noise, 18% passes
 everything) and **2% fall in the band where a gate actually decides**. A clinical specimen
-lives in the 0.01–1× band, which is 8.5% of this corpus.
+lives in the 0.01–1× band, which is ✓ **34.6%** of this corpus — corrected from
+8.5%, which is the 0.05–1× band. The corpus is better populated there than first stated;
+what remains true is that the deciding band is 2%.
 
 ---
 

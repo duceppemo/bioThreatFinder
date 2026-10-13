@@ -559,7 +559,12 @@ workflow {
         // and load-bearing for the reader: without it `attributed_to_neighbour` says
         // "reads favour neighbour taxid 620" and never that 620 is Shigella. Not
         // checkIfExists - a pack built before the manifest existed must still score.
-        manifest_tsv.exists() ? manifest_tsv : []
+        manifest_tsv.exists() ? manifest_tsv : [],
+        // The sample's MEASURED read length, which turns the alignment-length gate
+        // from a constant into a fraction. MAKE_REPORT has had these all along;
+        // SCORE_EVIDENCE, the process that actually decides, did not - which is the
+        // only reason that gate was ever expressed as an absolute number.
+        SEQKIT_STATS.out.stats.map { meta, s -> s }.collect().ifEmpty([])
     )
 
     MAKE_REPORT(

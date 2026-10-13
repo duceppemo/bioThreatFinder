@@ -243,7 +243,8 @@ def resolve_identity_floor(thresholds: dict, group: str,
         else f"{group or 'default'}")
 
 
-def resolve_alignment_floor(thresholds: dict, platform: str) -> tuple[float, str]:
+def resolve_alignment_floor(thresholds: dict, platform: str,
+                            avg_read_len: float = 0.0) -> tuple[float, str]:
     """The minimum mean alignment length for this platform, and which rule applied.
 
     WHY THIS IS PER-PLATFORM AND WAS NOT. pack.yaml states the gate's rationale in its
@@ -265,9 +266,27 @@ def resolve_alignment_floor(thresholds: dict, platform: str) -> tuple[float, str
     fixture in the suite sets mean_alignment_length to exactly 100.0 - the single value
     that passes.
     """
+    # A FRACTION, BECAUSE THE PACK'S OWN RATIONALE IS A RATIO. "A 50 bp match inside a
+    # 10 kb read says almost nothing about where that read came from" is a statement
+    # about alignment length RELATIVE TO READ LENGTH, and a constant cannot express it.
+    # Measured, the mismatch is total: the same 100 bp constant is 99% of a 2x101 read
+    # (binding, and unreachable), 67% of a 150 bp read (slack), and 1.4% of the 7,276
+    # bp median ONT read on disk - where the minimum observed mean_alignment_length is
+    # 727.6, so the ONT branch could never fire on anything resembling real ONT data.
+    #
+    # It also fixes the defect ONE READ LENGTH DOWN. A flat 60 reproduces exactly what
+    # a flat 100 did: a 2x50 library aligns ~49 bp and could never be confirmed, and
+    # nothing on disk or in the suite would have shown it.
+    frac = (thresholds.get("min_alignment_fraction_of_read") or {}).get(platform)
+    if avg_read_len and avg_read_len > 0 and frac is not None:
+        floor = as_float(thresholds.get("min_alignment_length_floor"), 40.0)
+        want = max(floor, as_float(frac, 0.6) * avg_read_len)
+        return want, (f"{platform} {as_float(frac, 0.6):.0%} of {avg_read_len:.0f} bp read"
+                      + (f", floored at {floor:.0f}" if want == floor else ""))
     by_plat = (thresholds.get("min_alignment_length_by_platform") or {})
     if platform and platform in by_plat:
-        return as_float(by_plat[platform], thresholds["min_alignment_length"]), platform
+        return as_float(by_plat[platform], thresholds["min_alignment_length"]), (
+            f"{platform}, read length unknown")
     return as_float(thresholds.get("min_alignment_length"), 100.0), (
         f"{platform or 'default'}, no platform rule")
 
@@ -288,6 +307,8 @@ def load_pack_thresholds(pack_yaml: Path) -> dict:
         "min_mapped_fraction_of_assigned": 0.50,
         "min_alignment_length": 100.0,
         "min_alignment_length_by_platform": {},
+        "min_alignment_fraction_of_read": {},
+        "min_alignment_length_floor": 40.0,
         "min_read_identity_by_group": {},
         "min_read_identity_by_platform": {},
         "min_expected_reads_for_absence": 3.0,
@@ -327,6 +348,8 @@ def load_pack_thresholds(pack_yaml: Path) -> dict:
         out["min_read_identity_by_group"] = {}
     if not isinstance(out.get("min_alignment_length_by_platform"), dict):
         out["min_alignment_length_by_platform"] = {}
+    if not isinstance(out.get("min_alignment_fraction_of_read"), dict):
+        out["min_alignment_fraction_of_read"] = {}
     if not isinstance(out.get("min_read_identity_by_platform"), dict):
         out["min_read_identity_by_platform"] = {}
     return out
@@ -464,6 +487,11 @@ def main() -> int:
     ap.add_argument("--watchlist", required=True, type=Path,
                     help="watchlist.resolved.tsv")
     ap.add_argument("--pack-yaml", type=Path, default=None)
+    ap.add_argument("--read-stats", nargs="*", type=Path, default=[],
+                    help="seqkit_stats TSVs. Supplies each sample's avg_len, which turns "
+                         "the alignment-length floor from a constant into a fraction of "
+                         "the read. SCORE_EVIDENCE was the only process not given these, "
+                         "which is why that gate was a constant at all.")
     ap.add_argument("--refs-manifest", type=Path, default=None,
                     help="pack refs manifest.tsv; supplies the NAME of an "
                          "attributed-to neighbour. Absent = name by taxid only.")
@@ -519,6 +547,16 @@ def main() -> int:
     # taxid -> (name, role). Used ONLY to name an attributed-to neighbour in prose;
     # no gate reads it, so a missing manifest degrades the wording and nothing else.
     ref_names = load_ref_names(args.refs_manifest)
+
+    # sample -> mean read length, from the stats the pipeline already computes.
+    read_len_of: dict = {}
+    for path in args.read_stats:
+        for r in read_tsv(path):
+            samp, avg = (r.get("sample") or "").strip(), as_float(r.get("avg_len"))
+            if samp and avg > 0:
+                read_len_of[samp] = max(read_len_of.get(samp, 0.0), avg)
+    if read_len_of:
+        sys.stderr.write(f"[score] read lengths known for {len(read_len_of)} sample(s)\n")
 
     # ---- marker evidence and rules -------------------------------------
     # marker_state[sample][marker_id] = mr.TRUE / mr.FALSE. A marker that is
@@ -797,7 +835,8 @@ def main() -> int:
                 # origin. Only applied when the metric is present.
                 mean_aln = as_float(row.get("mean_alignment_length"), -1.0)
                 if mean_aln >= 0:
-                    aln_floor, aln_src = resolve_alignment_floor(thresholds, plat)
+                    aln_floor, aln_src = resolve_alignment_floor(
+                        thresholds, plat, read_len_of.get(row.get("sample", ""), 0.0))
                     gates[f"mean_alignment_length {mean_aln:.0f} >= {aln_floor:.0f} "
                           f"({aln_src})"] = mean_aln >= aln_floor
 

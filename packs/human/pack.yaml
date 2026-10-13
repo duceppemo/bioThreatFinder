@@ -171,10 +171,20 @@ thresholds:
   # the project's history is on 150 bp SIMULATED reads, for this reason and no other.
   # Fourth recurrence of "a threshold must be reachable, not merely strict" (D10, D11,
   # D20), invisible because the one fixture in the suite sits exactly on the boundary.
+  # Used ONLY when the read length is unknown (no seqkit_stats for that sample).
   min_alignment_length: 100
   min_alignment_length_by_platform:
       illumina: 60
       ont: 100
+  # PREFERRED. max(floor, fraction x the sample's measured avg_len), so the gate finally
+  # expresses the ratio its rationale has always claimed. Gives 61 on 2x101, 90 on 2x150,
+  # 151 on 2x251, 40 (the floor) on 2x50, and ~2,183 on the 7.3 kb median ONT read -
+  # turning a branch that could never fire into a live one. A FLAT 60 WOULD HAVE
+  # REPRODUCED THE ORIGINAL DEFECT AT 2x50, where the mean aligned length is ~49.
+  min_alignment_fraction_of_read:
+      illumina: 0.60
+      ont: 0.30
+  min_alignment_length_floor: 40
 
   # ---- DEPTH-CONDITIONAL STRAIN / SUB-SPECIES TYPING ----
   #

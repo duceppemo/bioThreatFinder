@@ -439,6 +439,7 @@ process SCORE_EVIDENCE {
     path marker_rules
     path samplesheet
     path refs_manifest
+    path read_stats
 
     output:
     path "findings.tsv", emit: findings
@@ -475,6 +476,7 @@ process SCORE_EVIDENCE {
         --pack-yaml ${pack_yaml} \\
         ${samplesheet ? "--samplesheet ${samplesheet}" : ''} \\
         ${refs_manifest ? "--refs-manifest ${refs_manifest}" : ''} \\
+        ${read_stats ? "--read-stats ${read_stats.join(' ')}" : ''} \\
         --control-ratio ${params.control_ratio} \\
         --min-neighbour-uniformity ${params.min_neighbour_uniformity} \\
         ${BtfBool.of('contest_attribution', params.contest_attribution) ? '--contest-attribution' : ''} \\
