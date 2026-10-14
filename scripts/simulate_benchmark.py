@@ -2614,6 +2614,48 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 f"       Defined: {', '.join(sc.sid for sc in scenarios)}")
         scenarios = tuple(sc for sc in scenarios if sc.sid in wanted)
 
+    # D16a: A DELIBERATELY CONTAMINATED CONTROL CANNOT SHARE A BATCH.
+    #
+    # `score_evidence.py` builds `control_rpm` across the WHOLE RUN, keyed on taxid
+    # alone, and suppresses any sample below `control_ratio` x that value. That is not
+    # an oversight to be scoped away: the `negative_host_only` matrix blank relies on it,
+    # and removing the run-global reach reinstates D14 - re-scoring lod_v4 without its
+    # controls turns 15 Toxoplasma gondii rows and 15 Escherichia coli rows back into
+    # false positives, the E. coli ones as `confirmed_in_silico`.
+    #
+    # So the incoherent combination is refused at the batch level instead. A scenario
+    # with `index_hop_fraction` puts REAL target reads into its own negative control on
+    # purpose - that is the whole point of the scenario, and it is correct in isolation.
+    # In company it imposes a 5x floor on that target across every other scenario in the
+    # batch. Measured 2026-10-13 by injecting one 1,000 RPM control row into the real
+    # zymo_rl100 coverage set: 5 rows flip, 2 of them genuine `supported` detections
+    # becoming `suppressed_control` - a true positive turned false negative, one of them
+    # a sample carrying 1.8x MORE of the organism than the control did. d12fine's 9
+    # Yersinia pestis rows sit at 2,149-2,925 RPM, every one below the 5,000 RPM floor
+    # such a control would impose.
+    #
+    # This mirrors the existing refusal of `include_matrix_blank` + `index_hop_fraction`
+    # in build_matrix_blank_plan(), for the same reason and with the same remedy: run the
+    # scenario alone. Refusing here rather than scoping in the scorer keeps the pipeline
+    # free of any benchmark-only concept - see docs/decisions.md D21 for the control_group
+    # column this was weighed against.
+    hoppers = [sc.sid for sc in scenarios if sc.index_hop_fraction]
+    if hoppers and len(scenarios) > 1:
+        others = [sc.sid for sc in scenarios if not sc.index_hop_fraction]
+        shown = ", ".join(others[:4]) + (f" and {len(others) - 4} other(s)"
+                                         if len(others) > 4 else "")
+        raise SystemExit(
+            f"ERROR: scenario(s) {', '.join(hoppers)} set controls.index_hop_fraction "
+            f"and cannot share a batch with another scenario.\n"
+            f"       A hopped control contains REAL target reads by design. "
+            f"score_evidence.py subtracts controls run-globally, so that control would "
+            f"impose a control_ratio floor (5x by default) on its target in "
+            f"{len(others)} other scenario(s): {shown}\n"
+            f"       - turning genuine detections into suppressed_control "
+            f"(docs/decisions.md D16a, D21).\n"
+            f"       Run it alone:  --scenario {hoppers[0]}\n"
+            f"       Or build the other scenarios in a separate batch.")
+
     genomes = GenomeIndex(refs_manifest, taxdump=args.taxdump)
 
     # The pack watchlist is what makes truth_absent exhaustive. Without it a false

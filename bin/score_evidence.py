@@ -505,11 +505,22 @@ def main() -> int:
                          "of `supported`. Empty string restores the old behaviour, where "
                          "`supported` was the bin for any finding that cleared unique_reads "
                          "and neighbour_ratio however badly it then failed.")
-    ap.add_argument("--min-neighbour-uniformity", type=float, default=0.50,
+    # DEFAULT 0, MATCHING nextflow.config, BECAUSE A DEFAULT THAT DISAGREES WITH WHAT
+    # SHIPS IS A TRAP FOR EVERY MANUAL RE-SCORE. D18 measured this gate on real reads and
+    # set `min_neighbour_uniformity = 0` in nextflow.config: on the Zymo isolates it ADDED
+    # false positives (25 vs 4 in zymo_rl100) without rescuing the true positives it exists
+    # for. The argparse default stayed 0.50, so every re-scoring of a published batch that
+    # forgot the flag silently reproduced PRE-D18 behaviour. That is not hypothetical - it
+    # happened during the D16a review (2026-10-13) and produced 7 tier changes where the
+    # shipped configuration produces 5, which read as an error in docs/decisions.md that
+    # was not there. 0.50 remains available; it is no longer what you get by accident.
+    ap.add_argument("--min-neighbour-uniformity", type=float, default=0.0,
                     help="a neighbour below this coverage uniformity is a cross-mapping "
                          "pedestal, not a competing organism, and cannot out-vote the "
-                         "target (D12). Measured gap: 0.1532 absent vs 0.9720-0.9913 "
-                         "present, so 0.50 sits mid-gap. 0 disables the check.")
+                         "target (D12). Calibrated gap: 0.1532 absent vs 0.9720-0.9913 "
+                         "present. DEFAULT 0 (disabled), matching nextflow.config: D18 "
+                         "measured the gate on real reads and it cost more than it "
+                         "bought. Set 0.50 to restore the D12 behaviour.")
     ap.add_argument("--contest-attribution", action="store_true",
                     help="when a neighbour out-counts the target BUT the target's own "
                          "breadth and occupancy pass, do not let the attribution stand "
@@ -664,11 +675,34 @@ def main() -> int:
                     control_samples.add(r["sample"].strip())
     n_controls = len(control_samples)
 
+    # CONTROL SUBTRACTION HAS BEEN INVISIBLE. Across the six published batches it moved
+    # 108 rows, and the only record of any of it was prose inside the `reasons` column -
+    # every number in the 2026-10-13 audit had to be recovered with a regex over that
+    # prose, which is precisely the artifact that breaks silently when a message is
+    # reworded. Worse, a control that carries a watchlist organism but happens to
+    # suppress nothing today left NO trace at all: lod_v3_threearm's NTC holds
+    # B. anthracis at 32.58 RPM, which at control_ratio 5.0 is a standing 162.9 RPM
+    # floor on a select agent, and nothing anywhere said so. These counters exist so the
+    # subtraction can be read off a table instead of reconstructed.
+    #
+    # `rows` and `eligible` differ on purpose. Suppression lives in the final else of the
+    # chain that starts at the read floor, so a row below min_unique_reads or already
+    # taken by attributed_to_neighbour NEVER REACHES IT. Counting only what reached the
+    # branch would understate every control's true reach; counting only the rows would
+    # imply a suppression that the ladder had already pre-empted. Both are reported.
+    control_reach: dict[str, dict] = defaultdict(
+        lambda: {"rows": 0, "eligible": 0, "suppressed": 0, "exceeds": 0})
+
     findings: list[dict] = []
 
     for row in coverage:
         taxid = row["taxid"]
         meta = watch.get(taxid, {})
+        # Machine-readable record of what control subtraction did to THIS row. The
+        # prose in `reasons` is for the analyst; this column is so that
+        # evaluate_benchmark.py can one day count the false negatives subtraction
+        # causes, which it cannot do today.
+        control_subtraction = ""
 
         # `as_float(x, default)` already falls back when the field is absent or
         # unparseable. The trailing `or thresholds[...]` that used to be here also
@@ -679,6 +713,9 @@ def main() -> int:
         min_reads = as_float(meta.get("min_unique_reads"),
                              thresholds["min_unique_reads"])
         min_breadth = as_float(meta.get("min_breadth"), thresholds["min_breadth"])
+
+        if row.get("role") != "control":
+            control_reach[taxid]["rows"] += 1
 
         unique_reads = as_float(row.get("unique_reads"))
         breadth = as_float(row.get("breadth"))
@@ -806,13 +843,38 @@ def main() -> int:
                     f"withheld; judged on its own evidence below."
                 )
             ctrl = control_rpm.get(taxid, 0.0)
+            ctrl_name = control_src.get(taxid, "?")
+            if row.get("role") != "control" and ctrl > 0:
+                control_reach[taxid]["eligible"] += 1
             if row.get("role") != "control" and ctrl > 0 and rpm < args.control_ratio * ctrl:
                 tier = "suppressed_control"
+                control_reach[taxid]["suppressed"] += 1
                 reasons.append(
-                    f"control {control_src.get(taxid, '?')} has {ctrl:.2f} RPM; "
+                    f"control {ctrl_name} has {ctrl:.2f} RPM; "
                     f"sample {rpm:.2f} RPM does not exceed {args.control_ratio}x"
                 )
+                # THE SAMPLE HAS MORE OF IT THAN THE BLANK DOES, AND ONLY THE MARGIN IS
+                # HOLDING IT DOWN. Measured 2026-10-13: 8 rows in lod_v4 and 3 in
+                # d12fine are suppressed at a sample/control ratio of 1.01-1.03, i.e.
+                # the contamination model did not decide them - control_ratio 5.0 did,
+                # and nothing in docs/decisions.md derives that 5.0 from anything. A
+                # reader seeing "does not exceed 5.0x" reasonably assumes the control
+                # held MORE of the organism. In these rows it held less.
+                if rpm > ctrl:
+                    control_reach[taxid]["exceeds"] += 1
+                    control_subtraction = f"exceeds_control:{ctrl_name}@{ctrl:.2f}"
+                    reasons.append(
+                        f"NOTE: this sample carries MORE of the organism than the "
+                        f"control does ({rpm:.2f} vs {ctrl:.2f} RPM, "
+                        f"{rpm / ctrl:.2f}x) - it is suppressed by the "
+                        f"{args.control_ratio}x MARGIN, not by having less than the "
+                        f"blank. Review before treating this as a negative."
+                    )
+                else:
+                    control_subtraction = f"suppressed:{ctrl_name}@{ctrl:.2f}"
             else:
+                if row.get("role") != "control" and ctrl > 0:
+                    control_subtraction = f"cleared:{ctrl_name}@{ctrl:.2f}"
                 # Identity floor is group-aware: 98% is the near-neighbour
                 # discriminator for bacteria (Wright et al. found ~96% meant
                 # genus-correct, species-wrong), but a divergent virus is
@@ -1207,6 +1269,10 @@ def main() -> int:
             "strain_typing": strain_typing,
             "strain_claim": strain_claim,
             "strain_claim_reason": strain_reason,
+            # "" | cleared:<ctrl>@<rpm> | suppressed:<ctrl>@<rpm> |
+            # exceeds_control:<ctrl>@<rpm>. Empty means no control raised this taxon,
+            # which is NOT the same as the control having cleared it.
+            "control_subtraction": control_subtraction,
             "reasons": " | ".join(reasons),
         })
 
@@ -1250,6 +1316,7 @@ def main() -> int:
                 "strain_typing": "", "strain_claim": "not_attempted_no_reference",
                 "strain_claim_reason": ("no reference genome, so neither depth nor "
                                         "marker typing could be assessed"),
+                "control_subtraction": "",
                 "reasons": "DATABASE GAP: no reference genome in pack; stage-2 "
                            "confirmation could not run. Build refs and rerun.",
             })
@@ -1260,7 +1327,8 @@ def main() -> int:
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     cols = list(findings[0]) if findings else [
-        "sample", "role", "tier", "taxid", "taxon", "group", "category", "reasons"
+        "sample", "role", "tier", "taxid", "taxon", "group", "category",
+        "control_subtraction", "reasons"
     ]
     with args.out.open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=cols, delimiter="\t", extrasaction="ignore")
@@ -1275,6 +1343,47 @@ def main() -> int:
     for tier in reversed(TIER_ORDER):
         if counts[tier]:
             sys.stderr.write(f"[score]   {tier}: {counts[tier]}\n")
+    # THE SUBTRACTION AUDIT. Every taxon ANY control raised gets a line, including the
+    # ones that suppressed nothing - those are the dangerous ones, because a control
+    # holding a select agent at a level too low to bite today is a standing floor that
+    # will bite the moment a sample arrives just under it, and today it is invisible.
+    if control_rpm:
+        taxon_of = {r["taxid"]: r.get("taxon", "") for r in coverage}
+        sys.stderr.write(
+            f"\n[score] CONTROL SUBTRACTION AUDIT (control_ratio {args.control_ratio}x)\n"
+            f"[score]   {'taxon':<28}{'control':<38}{'ctrl RPM':>12}"
+            f"{'floor RPM':>12}{'suppr':>7}{'elig':>6}{'rows':>6}\n")
+        for tid, ctrl in sorted(control_rpm.items(),
+                                key=lambda kv: -kv[1]):
+            if ctrl <= 0:
+                continue
+            reach = control_reach.get(tid, {"rows": 0, "eligible": 0,
+                                            "suppressed": 0, "exceeds": 0})
+            name = (taxon_of.get(tid, "") or f"taxid {tid}")[:27]
+            src = (control_src.get(tid, "?") or "?")[-37:]
+            flags = []
+            if reach["suppressed"] == 0:
+                # Not "clean". Armed and unfired.
+                flags.append("LATENT")
+            if reach["exceeds"]:
+                flags.append(f"{reach['exceeds']} EXCEED-CONTROL")
+            if reach["rows"] and not reach["eligible"]:
+                # Every row for this taxon was taken by an earlier gate, so the
+                # control never got a vote. Without this the table would imply the
+                # control had been consulted and had cleared them.
+                flags.append("all rows pre-empted by an earlier gate")
+            sys.stderr.write(
+                f"[score]   {name:<28}{src:<38}{ctrl:>12.2f}"
+                f"{args.control_ratio * ctrl:>12.2f}{reach['suppressed']:>7}"
+                f"{reach['eligible']:>6}{reach['rows']:>6}"
+                f"{('   <- ' + ', '.join(flags)) if flags else ''}\n")
+        n_exc = sum(v["exceeds"] for v in control_reach.values())
+        if n_exc:
+            sys.stderr.write(
+                f"[score]   {n_exc} suppressed row(s) carry MORE of the organism than "
+                f"the control does and are held down only by the "
+                f"{args.control_ratio}x margin.\n")
+
     if n_controls == 0:
         sys.stderr.write(
             "[score] WARNING: no negative control in this run. Contamination "

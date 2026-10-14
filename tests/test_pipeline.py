@@ -1460,6 +1460,198 @@ def _empty_markers(tmp: Path) -> Path:
     return f
 
 
+def test_control_subtraction_audit(tmp: Path) -> None:
+    """Control subtraction must be readable off a table, not regexed out of prose.
+
+    D21. Across six published batches control subtraction moved 108 rows and the only
+    record of any of it was the `reasons` column. Three things were invisible:
+
+      - WHICH control decided a suppression, in machine-readable form;
+      - that 11 suppressed rows carried MORE of the organism than the control did and
+        were held down purely by the 5x margin, not by the contamination model;
+      - that a control can carry a select agent at a level that suppresses nothing
+        TODAY while standing as a floor the moment a sample lands just under it.
+        lod_v3_threearm's NTC holds B. anthracis at 32.58 RPM and nothing said so.
+
+    Each world gets its OWN coverage file and its own score() call. Mixing worlds into
+    one coverage file poisons run-global `control_rpm` for every other row in it, which
+    is the fixture trap that cost a day during the D12 work.
+    """
+    shape = dict(taxid="1639", taxon="Listeria monocytogenes", group="bacteria",
+                 reference_bp=2900000, reference_contigs=1, breadth=0.9100,
+                 mean_depth=12.0, depth_cv=0.40, window_bp=1000, windows_expected=2900,
+                 windows_occupied=2700, window_occupancy=0.9310, mean_identity=0.9900,
+                 mean_alignment_length=95, neighbour_ratio="inf",
+                 mapped_fraction_of_assigned="0.9900", total_reads_screened=1000000,
+                 mapq_min=10)
+
+    def world(name, ctrl_rpm, sample_rpm):
+        cov = tmp / f"audit_{name}.tsv"
+        write_cov(cov, [
+            cov_row(sample="NTC", role="control", unique_reads=int(ctrl_rpm * 10),
+                    reads_per_million=ctrl_rpm,
+                    screen_assigned_reads=int(ctrl_rpm * 10) + 5, **shape),
+            cov_row(sample="SPECIMEN", role="sample", unique_reads=int(sample_rpm * 10),
+                    reads_per_million=sample_rpm,
+                    screen_assigned_reads=int(sample_rpm * 10) + 5, **shape),
+        ])
+        out = tmp / f"audit_{name}_out.tsv"
+        proc = run([sys.executable, BIN / "score_evidence.py", "--coverage", cov,
+                    "--watchlist", PACK / "watchlist.resolved.tsv",
+                    "--pack-yaml", PACK / "pack.yaml", "--control-ratio", "5.0",
+                    "--out", out])
+        with out.open() as fh:
+            rows = {r["sample"]: r for r in csv.DictReader(fh, delimiter="\t")}
+        return rows, proc.stderr
+
+    # (a) control 100 RPM, sample 200 RPM. 200 < 5 x 100, so suppressed - while the
+    #     sample holds TWICE what the control does. The margin decided this, not the
+    #     contamination.
+    rows, err = world("exceeds", 100.0, 200.0)
+    got = rows.get("SPECIMEN", {})
+    record("ctrlaudit:a sample above its control is still suppressed by the margin",
+           got.get("tier") == "suppressed_control", f"got {got.get('tier')}")
+    record("ctrlaudit:and the finding says so in words",
+           "carries MORE of the organism" in got.get("reasons", ""),
+           got.get("reasons", "")[:120])
+    record("ctrlaudit:control_subtraction marks it exceeds_control",
+           got.get("control_subtraction", "").startswith("exceeds_control:NTC@"),
+           got.get("control_subtraction", "<missing>"))
+    record("ctrlaudit:the audit table counts the exceed-control row",
+           "EXCEED-CONTROL" in err, err[-300:])
+
+    # (b) control 100, sample 50. Suppressed, and NOT an exceed case - the plain reading
+    #     of "does not exceed 5x" is true here, so the warning must NOT appear.
+    rows, err = world("plain", 100.0, 50.0)
+    got = rows.get("SPECIMEN", {})
+    record("ctrlaudit:a sample below its control is plainly suppressed",
+           got.get("tier") == "suppressed_control"
+           and got.get("control_subtraction", "").startswith("suppressed:NTC@"),
+           f"{got.get('tier')} / {got.get('control_subtraction')}")
+    record("ctrlaudit:and carries no exceed-control warning",
+           "carries MORE of the organism" not in got.get("reasons", ""), "")
+
+    # (c) control 10, sample 5000. Clears the margin. `cleared:` is NOT the same as an
+    #     empty column: it records that a control held this taxon and lost.
+    rows, err = world("cleared", 10.0, 5000.0)
+    got = rows.get("SPECIMEN", {})
+    record("ctrlaudit:a sample clearing the margin records cleared:, not empty",
+           got.get("tier") != "suppressed_control"
+           and got.get("control_subtraction", "").startswith("cleared:NTC@"),
+           f"{got.get('tier')} / {got.get('control_subtraction')}")
+
+    # (d) THE LATENT CASE, and the reason this test exists. The control carries the
+    #     organism but suppresses nothing, because the one sample row for it is below
+    #     the read floor and never reaches the suppression branch. A table printing only
+    #     realized suppressions would report this control as clean while it holds a
+    #     watchlist organism and imposes a standing floor.
+    cov = tmp / "audit_latent.tsv"
+    write_cov(cov, [
+        cov_row(sample="NTC", role="control", unique_reads=300,
+                reads_per_million=30.0, screen_assigned_reads=305, **shape),
+        cov_row(sample="SPECIMEN", role="sample", unique_reads=20,
+                reads_per_million=2.0, screen_assigned_reads=25, **shape),
+    ])
+    out = tmp / "audit_latent_out.tsv"
+    proc = run([sys.executable, BIN / "score_evidence.py", "--coverage", cov,
+                "--watchlist", PACK / "watchlist.resolved.tsv",
+                "--pack-yaml", PACK / "pack.yaml", "--control-ratio", "5.0",
+                "--out", out])
+    record("ctrlaudit:a control that suppresses nothing is still reported, as LATENT",
+           "LATENT" in proc.stderr and "Listeria monocytogenes" in proc.stderr,
+           proc.stderr[-300:])
+    record("ctrlaudit:the implied floor is printed, not left to be multiplied out",
+           "150.00" in proc.stderr, "want 5.0 x 30.00 = 150.00 in the audit table")
+    record("ctrlaudit:a row pre-empted by an earlier gate is named as such",
+           "pre-empted by an earlier gate" in proc.stderr, proc.stderr[-300:])
+
+
+def test_index_hop_batch_guard(tmp: Path) -> None:
+    """D16a: a deliberately contaminated control cannot share a batch.
+
+    The scenario is correct alone and incoherent in company - its NTC holds real target
+    reads by design, and `score_evidence.py` subtracts controls run-globally. Refused at
+    the batch level rather than scoped in the scorer, because that run-global reach is
+    exactly what D14's matrix blank depends on: re-scoring lod_v4 without its controls
+    turns 15 T. gondii and 15 E. coli rows back into false positives.
+
+    Asserted in BOTH directions. A guard that refuses everything passes the first check
+    and is the likelier mistake, since the hop scenario must stay runnable alone.
+    """
+    sim = SCRIPTS / "simulate_benchmark.py"
+    head = ("defaults:\n  replicates: 1\n  platforms: [illumina]\n  host: human\n"
+            "  host_fraction: 0.95\n  total_reads: 100000\nscenarios:\n")
+    hop = ("  - id: hop_one\n    description: hopped control\n"
+           "    kind: contamination\n    spikes:\n"
+           "        - taxon: Yersinia pestis\n          source: target\n"
+           "          levels_rpm: [5000]\n    truth:\n"
+           "        present: [Yersinia pestis]\n    controls:\n"
+           "        include_ntc: true\n        index_hop_fraction: 0.001\n")
+
+    def plain(sid):
+        return (f"  - id: {sid}\n    description: an ordinary series\n"
+                f"    kind: lod_series\n    spikes:\n"
+                f"        - taxon: Bacillus anthracis\n          source: target\n"
+                f"          levels_rpm: [100]\n    truth:\n"
+                f"        present: [Bacillus anthracis]\n")
+
+    def attempt(text, extra, tag):
+        f = tmp / f"hopguard_{tag}.yaml"
+        f.write_text(text)
+        proc = run([sys.executable, sim, "--scenarios", f, "--batch", "guardtest",
+                    "--dry-run"] + list(extra))
+        return proc.stdout + proc.stderr
+
+    MSG = "cannot share a batch"
+    mixed = attempt(head + hop + plain("plain_two"), [], "mixed")
+    record("hopguard:a hop scenario sharing a batch is refused", MSG in mixed,
+           mixed[-200:])
+    record("hopguard:the refusal names the escape hatch",
+           "--scenario hop_one" in mixed, mixed[-200:])
+    record("hopguard:the hop scenario alone is NOT refused",
+           MSG not in attempt(head + hop + plain("plain_two"),
+                              ["--scenario", "hop_one"], "alone"), "")
+    record("hopguard:two ordinary scenarios are NOT refused",
+           MSG not in attempt(head + plain("plain_two") + plain("plain_three"),
+                              [], "two_plain"), "")
+    record("hopguard:a hop scenario alone in its own file is NOT refused",
+           MSG not in attempt(head + hop, [], "solo"), "")
+
+
+def test_scorer_defaults_match_shipped_config(tmp: Path) -> None:
+    """An argparse default that disagrees with nextflow.config is a trap for re-scoring.
+
+    D18 set `min_neighbour_uniformity = 0` in nextflow.config after measuring the gate on
+    real reads. The argparse default stayed 0.50, so every manual re-score of a published
+    batch that forgot the flag silently reproduced PRE-D18 behaviour. That happened during
+    the D16a review (2026-10-13) and produced 7 tier changes where the shipped
+    configuration produces 5 - a discrepancy that read as an error in docs/decisions.md
+    which was not in fact there.
+
+    Only thresholds that exist on BOTH sides are compared; a param with no CLI
+    counterpart is not a mismatch. The final check fails if the pairs stop matching the
+    files at all, so this cannot silently degrade into testing nothing.
+    """
+    import re as _re
+    cfg = (REPO / "nextflow.config").read_text()
+    src = (REPO / "bin" / "score_evidence.py").read_text()
+    checked = 0
+    for param, flag in [("min_neighbour_uniformity", "--min-neighbour-uniformity"),
+                        ("pedestal_max_uniformity", "--pedestal-max-uniformity"),
+                        ("control_ratio", "--control-ratio")]:
+        m_cfg = _re.search(rf"^\s*{param}\s*=\s*([0-9.]+)", cfg, _re.M)
+        m_arg = _re.search(rf'add_argument\(\s*"{flag}".*?default=([0-9.]+)',
+                           src, _re.S)
+        if not m_cfg or not m_arg:
+            continue
+        checked += 1
+        record(f"defaults:{param} argparse default matches nextflow.config",
+               float(m_cfg.group(1)) == float(m_arg.group(1)),
+               f"config says {m_cfg.group(1)}, argparse says {m_arg.group(1)}")
+    record("defaults:the config/argparse pairs still resolve", checked >= 2,
+           f"only {checked} pair(s) matched both files")
+
+
 CASES = {
     "selftests": test_selftests,
     "tiering": test_tiering,
@@ -1479,6 +1671,9 @@ CASES = {
     "contest": test_contest_attribution,
     "reachable": test_gate_reachability,
     "d17a": test_marker_block_required_to_confirm,
+    "ctrlaudit": test_control_subtraction_audit,
+    "hopguard": test_index_hop_batch_guard,
+    "defaults": test_scorer_defaults_match_shipped_config,
 }
 
 

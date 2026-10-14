@@ -288,6 +288,45 @@ def main() -> int:
         parts.append(render_table(rows) if rows
                      else "<div class='empty'>None.</div>")
 
+    # WHAT CONTROL SUBTRACTION DID, IN THE REPORT RATHER THAN IN SCROLLBACK.
+    # This module's own principle is that a caveat belongs on the finding and in the
+    # HTML, not in terminal output nobody keeps. Control subtraction was the exception:
+    # it silently moved 108 rows across six batches with no record outside the prose of
+    # `reasons`. Two cases get their own emphasis because neither is what a reader
+    # assumes "suppressed by control" means:
+    #   - exceeds_control: the SAMPLE held more of the organism than the control did,
+    #     and only the control_ratio margin held it down.
+    #   - a control carrying a watchlist organism that suppressed nothing yet. That is
+    #     a standing floor, not a clean control, and it has never been displayed.
+    subtracted = [f for f in findings if (f.get("control_subtraction") or "").strip()]
+    if subtracted:
+        by_kind: dict = {}
+        for f in subtracted:
+            kind = (f.get("control_subtraction") or "").split(":", 1)[0]
+            by_kind.setdefault(kind, []).append(f)
+        n_exc = len(by_kind.get("exceeds_control", []))
+        parts.append("<h2>Control subtraction <span class='pill "
+                     f"{'warn' if n_exc else 'muted'}'>{len(subtracted)}</span></h2>")
+        blurb = (f"{len(by_kind.get('suppressed', []))} finding(s) suppressed, "
+                 f"{len(by_kind.get('cleared', []))} cleared the margin.")
+        if n_exc:
+            blurb += (f" {n_exc} suppressed finding(s) carry MORE of the organism than "
+                      f"the control does and are held down only by the control ratio - "
+                      f"review these before treating them as negative.")
+        parts.append(f"<p class='sub'>{esc(blurb)}</p>")
+        keys = ["sample", "taxon", "tier", "reads_per_million", "control_subtraction"]
+        head = "".join(f"<th>{esc(k)}</th>" for k in keys)
+        body = "".join(
+            "<tr>" + "".join(
+                f"<td class=\"{'num' if k == 'reads_per_million' else ''}\">"
+                f"{esc(r.get(k, '-'))}</td>" for k in keys) + "</tr>"
+            for r in sorted(subtracted,
+                            key=lambda r: (not (r.get("control_subtraction") or "")
+                                           .startswith("exceeds_control"),
+                                           r.get("taxon", ""))))
+        parts.append(f"<div class='scroll'><table><thead><tr>{head}</tr></thead>"
+                     f"<tbody>{body}</tbody></table></div>")
+
     stats_rows = []
     for p in args.read_stats:
         stats_rows.extend(read_tsv(p))
@@ -331,6 +370,10 @@ data alone - read the taxon caveats column.</p>
                     "n_classifiers", "classifiers", "distinct_kmers", "screen_flags",
                     "reads_in_masked_regions", "masked_fraction_of_reference",
                     "orthogonal_concordance", "marker_verdict",
+                    # What control subtraction did to this row, machine-readable. The
+                    # prose in `reasons` had to be regexed to audit it, and a regex over
+                    # a message is what breaks silently when the message is reworded.
+                    "control_subtraction",
                     # Sub-species typing and what the depth can carry. A reader must be
                     # able to see that genome-wide typing was NOT attempted, rather than
                     # assume it was checked and came back negative.

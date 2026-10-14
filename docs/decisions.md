@@ -991,6 +991,116 @@ matrix; it does nothing for a specimen type whose matrix was never blanked.
 
 ---
 
+## D21 — D16a closed by refusing the batch, not by scoping the scorer; and control subtraction stops being invisible
+
+2026-10-13. Fixing D16a meant first discovering that **the behaviour D16a calls a bug is
+the behaviour D14 depends on**, and that the defect nobody had looked at was larger than
+the one on the list.
+
+### The fix I started building would have reinstated D14
+
+The obvious remedy is D16a's own option 1: scope `control_rpm` by scenario so a
+deliberately contaminated NTC stops suppressing other scenarios. I designed a general
+version of it — an optional `control_group` samplesheet column — before finding this
+comment in `negative_host_only`'s `controls:` block:
+
+> ONE PER BATCH IS ENOUGH, and it belongs here rather than on every scenario:
+> `score_evidence.py` builds `control_rpm` across the whole RUN, not per scenario, so
+> this blank is what every sample in the batch is compared against.
+
+`[MEASURED]` The comment is behaviour, not intent. Re-scoring `lod_v4` with and without
+its controls — the controls are all `negative_host_only_*`, a **different scenario** from
+the 15 `lod_gram_negative` samples they act on:
+
+| variant | confirmed | suppressed | screened |
+|---|---|---|---|
+| all controls (today) | 6 | 36 | 71 |
+| NTCs only | 6 | 18 | 81 |
+| **no controls** | **24** | **0** | 69 |
+
+Removing the cross-scenario reach moves 30 rows and hands back 15 false
+`confirmed_in_silico` calls on *E. coli* plus 15 *T. gondii* false positives. **The
+run-global default is load-bearing and stays.** One nuance that revises D14's framing:
+under the current pack the *T. gondii* artefact lands at `screened_only` without a
+control rather than `supported` — the read floor and D20's alignment work already demote
+it — so the live cross-scenario exposure today is *E. coli*, not *T. gondii*.
+
+### So D16a is closed by refusing the batch
+
+Exactly **one** scenario in the repo declares `index_hop_fraction`, and
+`build_matrix_blank_plan` already refuses `include_matrix_blank` + `index_hop_fraction`
+for this exact reason. The guard is extended to the batch level: a scenario with
+`index_hop_fraction` cannot share a batch with another scenario, and the error names the
+`--scenario` escape hatch. It costs the ability to run the hop scenario alongside others
+in one batch, which per D16a's own text **nobody has ever done**, and it cannot regress
+D14 because it does not touch scoring.
+
+`control_group` is **not** shipped. It is the better long-term abstraction, but its
+trigger rule was wrong twice in two days (scenario id → `include_ntc` →
+`index_hop_fraction`), the samplesheet has no schema documentation anywhere in the repo
+to document it in, and it would arrive with exactly one writer and no non-benchmark
+consumer. A general mechanism with one benchmark call site is a benchmark annotation
+wearing a disguise. Revisit it with the `control_type` work, and reconcile the two then.
+
+### The larger defect: control subtraction has been invisible
+
+`[MEASURED]` Across six published batches control subtraction moved **108 rows**, and
+every number in this entry had to be recovered by regexing the prose of the `reasons`
+column — the artifact that breaks silently the moment a message is reworded. Three things
+were not visible anywhere:
+
+  1. **Which control decided a suppression**, in any machine-readable form.
+  2. **11 suppressed rows carry MORE of the organism than the control does** — 8 in
+     `lod_v4`, 3 in `d12fine`, at sample/control ratios of 1.01–1.03. The contamination
+     model did not decide these. `control_ratio 5.0` did, and nothing in this file
+     derives that 5.0 from anything.
+  3. **Controls carry watchlist pathogens that suppress nothing yet.** `lod_v4`'s
+     controls hold *Bacillus anthracis* at 40.09 RPM — a standing 200.46 RPM floor on a
+     select agent — plus *N. meningitidis*, *Shigella dysenteriae*, *L. monocytogenes*
+     and *S. enterica*. None suppresses anything today, because every row for them was
+     taken by the read floor or by `attributed_to_neighbour` before suppression could be
+     reached. A control holding a select agent and firing zero times is not a clean
+     control; it is an armed one, and the pipeline said nothing.
+
+Landed: a stderr audit table (one line per taxon ANY control raised, with the implied
+floor, and `LATENT` where nothing was suppressed), a `control_subtraction` column in
+`findings.tsv` and the summary TSV (`cleared:` / `suppressed:` / `exceeds_control:`, each
+naming the deciding control), an explicit reason string on the exceed-control rows, and a
+"Control subtraction" section in the HTML report. `[MEASURED]` Behaviour-neutral:
+**0 tier changes across all six batches.**
+
+### An argparse default that disagreed with what ships
+
+`[MEASURED]` D18 set `min_neighbour_uniformity = 0` in `nextflow.config`. The argparse
+default in `score_evidence.py` stayed **0.50**, so every manual re-score that forgot the
+flag silently reproduced **pre-D18** behaviour. This is not hypothetical: it happened
+during this review. Injecting one 1,000 RPM control row into `zymo_rl100` produces **5**
+tier changes under the shipped configuration and **7** under the argparse default, and
+the two extra rows are *E. faecalis* and *S. aureus*, which the shipped settings hand to
+`attributed_to_neighbour` before suppression can see them. The 7 was reported as a
+correction to this file's D16a note; **the note was right and no correction was needed.**
+The default is now 0, and `tests/test_pipeline.py defaults:` asserts that every threshold
+present on both sides agrees.
+
+### What this did not fix
+
+`control_rpm` is still `max()` over controls with **no prevalence requirement**, so a
+single contaminated control decides — the literature wants prevalence across ≥5 controls,
+flag-not-delete, which is roadmap item C. Grouping would have made this *worse*, not
+better: each group holds fewer controls, usually one, so `max()` becomes "this one
+control decides" by construction. `control_ratio 5.0` remains underived; the audit
+table's `floor RPM` column is what would let it be re-derived. And the mixed batch that
+would demonstrate D16a as a live defect rather than an injected one still does not
+exist — the guard now refuses to build it, which is the point, but it means the fix is
+pinned by fixtures and a synthetic injection rather than by a run.
+
+**What would reverse it:** a real deployment with several extraction batches under one
+samplesheet, where run-global subtraction is wrong for a reason that is not a benchmark
+artefact. That is when `control_group` should land — with a samplesheet schema document,
+a non-simulator fixture, and reconciled against `control_type`.
+
+---
+
 ## D20 — Three adversarial passes over everything, and what calibrating on two datasets actually cost
 
 2026-10-13. Three independent reviews — threshold provenance, the open backlog, and an
@@ -1138,7 +1248,8 @@ which is true and actionable.
 ### Backlog, verified against current code
 
 **Before any real use.** ✓ `min_alignment_length` (above). ✓ `--threshold
-min_read_identity` silently dead. **D17a**, which is dormant only because nothing can
+min_read_identity` silently dead. ✓ **D16a**, closed by refusing the batch rather than
+scoping the scorer (D21) — the scoping fix was measured to reinstate D14. **D17a**, which is dormant only because nothing can
 currently confirm: ✓ re-scoring at a reachable alignment floor produces the first
 real-data confirmation in project history, and it is *Salmonella enterica*, `notifiable`,
 `marker_verdict` EMPTY, with no block in `marker_rules.yaml` — so the two must land
@@ -1519,7 +1630,7 @@ Both surfaced in an adversarial review of the core scoring code. Neither is fixe
 each changes behaviour across all 89 taxa and the right setting is not obvious from one
 simulated batch.
 
-### D16a — a deliberately contaminated NTC poisons every OTHER scenario in the same batch
+### D16a — a deliberately contaminated NTC poisons every OTHER scenario in the same batch ✅ *closed 2026-10-13 by option 3; see D21*
 
 `contamination_index_hop` (benchmarks/scenarios/human_core.yaml) ships with `include_ntc:
 true` AND `index_hop_fraction: 0.001`, which is exactly what the scenario is for: it exists to
@@ -1550,6 +1661,14 @@ The options differ in what they cost:
      annotation.
   3. **Refuse to build a batch that mixes a hop scenario with others**, leaving the scenario
      runnable alone. Cheapest, and narrows what a single batch can test.
+
+**Option 3 was chosen (D21).** Option 1 was designed, built as far as the design, and
+abandoned on measurement: scoping `control_rpm` away from the whole run reinstates D14,
+because `negative_host_only`'s matrix blank deliberately relies on the run-global reach —
+re-scoring `lod_v4` without its controls returns 30 rows, 15 of them as false
+`confirmed_in_silico`. The three options above are therefore not equal-cost alternatives:
+option 1 trades this defect for a worse one. The batch-level guard lives next to the
+`include_matrix_blank` + `index_hop_fraction` refusal it mirrors.
 
 ### D16b — `mapped_fraction_of_assigned` mixes mates with pairs, so its floor is 0.25 on Illumina and 0.50 on ONT
 
