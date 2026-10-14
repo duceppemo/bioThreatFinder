@@ -461,6 +461,11 @@ def main() -> int:
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--rules", type=Path, help="marker_rules.yaml")
     ap.add_argument("--markers", type=Path, help="markers.tsv, for validation")
+    ap.add_argument("--watchlist", type=Path,
+                    help="watchlist.resolved.tsv. With --validate, cross-checks that "
+                         "rule-block names and catalogue taxon names are watchlist "
+                         "entries. The join between these three files is held together "
+                         "by hand-maintained literal strings with nothing checking it.")
     ap.add_argument("--validate", action="store_true",
                     help="compile all rules and check marker references")
     args = ap.parse_args()
@@ -483,6 +488,46 @@ def main() -> int:
                      if r.get("marker_id")}
             sys.stderr.write(f"[rules] {len(known)} markers in catalogue\n")
         problems = validate_rules(rules, known) if known else []
+
+        # THE THREE FILES AGREE ON LITERAL STRINGS AND NOTHING CHECKS THEM.
+        # markers.tsv.taxon, marker_rules.yaml's keys and watchlist.resolved.tsv.name
+        # must name the same organisms. They do today - 58 exact matches, verified
+        # byte-for-byte - but a typo in any one of them degrades SILENTLY: a rule block
+        # whose key no longer matches a watchlist name simply stops gating, which looks
+        # exactly like a taxon with no rules, which is D17a's permissive path. A marker
+        # whose taxon string drifts cannot ever raise or gate anything for its organism.
+        # Reported, not fatal, for the two asymmetries that exist on purpose.
+        if args.watchlist and args.watchlist.exists():
+            with args.watchlist.open() as fh:
+                wl = {r["name"].strip()
+                      for r in csv.DictReader(fh, delimiter="\t") if r.get("name")}
+            cat_taxa: set[str] = set()
+            if args.markers:
+                with args.markers.open() as fh:
+                    lines = [ln for ln in fh if not ln.startswith("#")]
+                cat_taxa = {(r.get("taxon") or "").strip()
+                            for r in csv.DictReader(lines, delimiter="\t")
+                            if (r.get("taxon") or "").strip()}
+            # Confuser taxa (B. cereus, Y. pseudotuberculosis, ...) carry markers on
+            # purpose and are deliberately NOT watchlist entries - their markers exist
+            # to veto, never to call. So a catalogue taxon outside the watchlist is
+            # normal; a RULE BLOCK outside it is not, because a block keyed on a name
+            # no watchlist row carries can never fire.
+            orphan_blocks = sorted(set(rules) - wl)
+            for t in orphan_blocks:
+                problems.append(
+                    f"rule block {t!r} is not a watchlist name - it can never fire")
+            no_own_marker = sorted(set(rules) - cat_taxa) if cat_taxa else []
+            for t in no_own_marker:
+                sys.stderr.write(
+                    f"[rules] NOTE: {t!r} has a rule block but no marker of its own; "
+                    f"its rules reference another taxon's markers, so a PRESENT call "
+                    f"there raises this taxon too\n")
+            no_block = sorted((cat_taxa & wl) - set(rules)) if cat_taxa else []
+            for t in no_block:
+                sys.stderr.write(
+                    f"[rules] NOTE: {t!r} is on the watchlist and has marker(s) but no "
+                    f"rule block, so marker evidence for it gates nothing (D17a)\n")
         if problems:
             sys.stderr.write(f"\nERROR: {len(problems)} rule problem(s):\n")
             for p in problems:

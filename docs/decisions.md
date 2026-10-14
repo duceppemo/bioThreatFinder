@@ -1126,6 +1126,130 @@ a non-simulator fixture, and reconciled against `control_type`.
 
 ---
 
+## D23 — The marker tier's false positives were a protein-identity discount, not the HMM tier; and half of D15 is not a reporting bug at all
+
+2026-10-14. Work on D15 (`marker_lead`) and D17b (the HMM tier) measured three things
+that redirect both.
+
+### D17b's own worked example survives D17b's own fix
+
+D17b says the HMM tier gates on `hmm_bits >= 25` alone and never applies the catalogue's
+`min_coverage`. True. `[MEASURED]` Applying it changes nothing — on every HMM-PRESENT
+marker in the filovirus sample, observed coverage already clears the catalogue floor:
+
+| marker | catalogue min_coverage | observed hmm_coverage | killed? |
+|---|---|---|---|
+| marburg_L | 0.50 | 0.7160 | **no** |
+| ebola_GP | 0.60 | 0.9972 | no |
+| ebolaS_GP | 0.60 | 0.7862 | no |
+| ecoli_stx2 | 0.80 | 1.0000 | **no** |
+
+The fix the entry points at is a no-op on the case the entry cites. And no bits
+threshold separates them either: `marburg_L` at 93.7 bits is *correct cross-genus
+filovirus homology* on a Bundibugyo sample — verified by the negative control, where
+every filovirus marker is ABSENT with empty HMM fields. `marburg_L` carries the lowest
+floors in the catalogue precisely because its note reads "most conserved filovirus gene;
+best HMM target". **Any threshold tight enough to suppress it on Bundibugyo also
+suppresses it on a divergent Marburg lineage detected only on L, which is the case it
+was curated for.** The HMM tier is not broken; the reporting unit is — see below.
+
+### The real false-positive route is the protein tier, and the catalogue already had the answer
+
+`aa_min_id = max(0.50, min_id_catalogue - 0.15)` subtracted 15 identity points from every
+marker regardless of curation. `[MEASURED]` On
+`divergent_bundibugyo_filovirus_illumina_r1` — one virus, no other watchlist pathogen —
+that made **six** markers PRESENT off unrelated background, every one a conserved
+housekeeping gene:
+
+| marker | catalogue min_id | old effective floor | observed aa_identity |
+|---|---|---|---|
+| mtb_rpoB | 0.98 | 0.83 | 0.877 |
+| cdiph_rpoB | 0.97 | 0.82 | 0.900 |
+| bholm_recA | 0.97 | 0.82 | 0.860 |
+| mtb_katG_inhA | 0.97 | 0.82 | 0.840 |
+| cburn_icd | 0.95 | 0.80 | 0.877 |
+| rprow_gltA | 0.95 | 0.80 | 0.833 |
+
+The premise ("protein floors are lower than nucleotide by nature") is true and the
+implementation inverted the curation that already expressed it: cross-matching
+housekeeping genes are floored at 0.95–0.98, while the divergent-virus block is floored
+at 0.78–0.90 **on purpose**, with a note saying identity floors there are deliberately
+low because the HMM tier carries detection. Honouring the catalogue removes all six and
+keeps both real filovirus hits — `ebola_NP` 0.880 and `ebolaS_NP` 1.000 against a
+deliberate 0.85 floor.
+
+`[MEASURED]` Corpus-wide, across **143 marker_states files**: **828 PRESENT observations
+lose their only passing tier, spanning 13 markers.** Six housekeeping genes account for
+820 of them. The other 8 are all false positives on real Zymo data, each with
+`nt_reads = 0` — including `banth_pxo2_capA`/`capB` in a mock community containing no
+*B. anthracis*, and `ypest_ppcp1_pla` in a *Salmonella* isolate. **Zero true positives
+are lost.** One of the six, `mtb_katG_inhA`, is `report_always`, i.e. it was eligible to
+surface as "isoniazid resistance" on samples with no mycobacteria.
+
+The slack is now a declared argument defaulting to **0**, with a separate, smaller ONT
+allowance that does not compound with the nucleotide relaxation.
+
+### Why this is behaviour-neutral today and would not have been tomorrow
+
+`[MEASURED]` Re-scoring `lod_v4`, `d12fine` and `zymo_rl100` with the new floor applied:
+**0 tier changes and 0 marker_verdict changes.** The reason is the whole point —
+*M. tuberculosis*, *C. diphtheriae*, *C. burnetii* and *R. prowazekii* have **no coverage
+rows** in those batches, and marker evidence can only gate a finding that already exists.
+The 828 false PRESENTs are inert **only because markers cannot raise findings**. D15
+proposes exactly that change. So the tier fix must precede any `marker_lead`, and the
+ordering in the backlog ("D15 must land with D17b") was right about the dependency and
+wrong about which defect.
+
+### Half of D15 is not a reporting failure
+
+`[MEASURED]` On `divergent_clostridium_bont_illumina_r1`, **all three BoNT markers are
+ABSENT** — `cbot_bont`, `cbot_ntnh`, `cbut_bont`, each searched via `dna,hmm,protein`,
+every tier empty. There is no marker evidence to raise under any rule. D15's second
+scenario is a **detection** failure, not a reporting one, and needs its own
+investigation starting with `cbut_bont`'s `partial` manifest status.
+
+### `marker_class` is not a usable gate, which kills the obvious `marker_lead` rule
+
+The tempting rule was "raise a lead only on a PRESENT `discriminating` marker" — clean on
+both samples tested. `[MEASURED]` It does not generalise:
+
+  - **24 of 89 watchlist taxa have a `discriminating` marker at all**, so 65 could never
+    lead. That is D17a's silent-coverage-gap shape with the sign flipped.
+  - **4 of those 24 have only a MULTI-COPY one** — *B. pertussis* (`IS481`),
+    *C. burnetii* (`IS1111`), *B. melitensis* (`IS711`), *B. mandrillaris*. The
+    catalogue header forbids exactly this: "multi markers must never be used alone", and
+    `IS481`'s own note calls it "the classic false positive".
+  - The classes are not sorted on cross-match risk. `required` holds both housekeeping
+    genes (`rpoB`, `recA`, `gltA`) and conserved viral cores (`marburg_L`, `ebola_NP`);
+    `discriminating` holds surface antigens and insertion sequences.
+
+### What is NOT being changed, and the open decision
+
+`marker_lead` is **not** built. For the filovirus sample the true answer is "a divergent
+filovirus is present"; `marker_lead` would report **Zaire ebolavirus** and **Sudan
+ebolavirus**, two species the scenario's own `truth.absent` names. Two wrong species is
+actionable in the wrong direction in a way silence is not. The finding needs to say
+"filovirus, species undetermined", and it cannot, because the resolved watchlist is 71
+`species` + 18 `no rank` with nothing above species — **which is the gap D15 originally
+named and the re-diagnosis discarded.** That decision (a lead-tier-only family rank entry
+versus closing D15 won't-fix) is open and is recorded as open rather than pre-empted by
+shipping a tier.
+
+Also landed: `hmm_qlen` and `aa_length` are emitted into `marker_states.tsv`. Both were
+computed and discarded, so neither `hmm_bits` nor `aa_coverage` could be interpreted from
+the artifact — a bitscore is roughly linear in profile length, and `marburg_L`'s ~2,100 aa
+profile against `ebola_GP`'s ~676 aa is the only thing distinguishing 94 bits from 106.
+And `marker_rules.py --validate --watchlist` now cross-checks the three hand-maintained
+files that agree only on literal strings; it reports the two real asymmetries today
+(*Brucella suis* has a rule block but no marker of its own, so a PRESENT call on
+*B. melitensis*'s markers raises it too; *Monkeypox virus* has a marker and no block).
+
+**What would reverse the protein change:** a true positive demonstrably lost to a
+catalogue floor. The ONT path is where to look first — translated identity is less
+error-sensitive than nucleotide, but no ONT batch has ever been scored.
+
+---
+
 ## D22 — `control_ratio = 5.0` is underived, and now there is an instrument that could derive it
 
 2026-10-13, split out of D21 because it is a threshold with no provenance rather than a
@@ -1664,7 +1788,7 @@ fail the run without one (loud, and blocks the pipeline on a curation backlog); 
 explicit `no_markers_available: true` so the omission has to be deliberate and is visible in
 `reasons`.
 
-### D17b — the HMM tier ignores the catalogue's own thresholds
+### D17b — the HMM tier ignores the catalogue's own thresholds ⚠️ *true, and the fix it implies is a no-op; the real route was the protein tier — see D23*
 
 `marker_evidence.py` gates the HMM tier on `hmm_bits >= --hmm-min-bits` (default 25.0) alone.
 `hmm_coverage` is computed and recorded but never gated, and the per-marker `min_coverage` /
@@ -1677,6 +1801,16 @@ is a weak bar. Direction of harm is false PRESENT, which fires a wrong veto or a
 Same file: the protein tier's coverage gate is skipped entirely when `aa_length == 0`, which
 happens for any marker whose header in `markers.aa.faa` does not follow `marker|<id>|...`,
 leaving identity as its only threshold.
+
+**2026-10-14, D23.** Measured, both halves of this entry are weaker than they read. Applying
+the catalogue `min_coverage` to `hmm_coverage` kills **nothing** — `marburg_L` observes
+0.7160 against a 0.50 floor, `ecoli_stx2` observes 1.0000 against 0.80 — and `marburg_L`'s
+94 bits turns out to be correct cross-genus filovirus homology rather than noise, so no bits
+threshold separates it from `ebola_GP` without also suppressing the divergent-Marburg case
+the marker exists for. The `aa_length == 0` bypass is real but **latent**: every row with
+`aa_hits > 0` also has `aa_coverage > 0` across the corpus. The live defect was the protein
+tier's undeclared blanket `-0.15` identity discount, which D23 fixes and which accounts for
+828 false PRESENT observations across 143 files.
 
 ### D17c — `resolution_note` is write-only
 
@@ -1822,6 +1956,16 @@ built from a database (see the DIVERGENT AGENT PROXY comment).
      could raise a flagged lead naming the neighbour. Keeps the species call honest, but
      doubles as a second use for a field that currently means "suppressor", which invites
      exactly the kind of unit confusion D12 and D13 came from.
+  **2026-10-14 (D23): option 3 is measured and does not work as stated; the entry's
+  original diagnosis — no reporting unit above species — is back as the live question.**
+  The filovirus markers DO fire (`ebola_NP`, `ebola_GP`, `ebolaS_NP`, `ebolaS_GP` all
+  PRESENT, `confirm_requires` satisfied for both Zaire and Sudan) and are discarded
+  because `score_evidence.py` builds findings only from coverage rows. But a
+  `marker_lead` tier would report **Zaire** and **Sudan ebolavirus**, two species this
+  scenario's own `truth.absent` names, for a specimen containing neither. And it does
+  nothing for the second scenario: all three BoNT markers are **ABSENT**, so that half
+  is a detection failure, not a reporting one. Option 1 is the open decision.
+
   3. **Lean on the marker/HMM tier instead**, which is what the scenario text actually
      anticipates ("Expect at least a flagged lead via the HMM tier"). `MARKER_SEARCH_HMM` ran
      on these samples and produced no filovirus lead either; why is unresolved and is the

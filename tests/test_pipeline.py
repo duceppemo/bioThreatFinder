@@ -1762,6 +1762,125 @@ def test_scorer_defaults_match_shipped_config(tmp: Path) -> None:
            both <= named, f"unchecked pair(s): {sorted(both - named)}")
 
 
+def test_protein_tier_honours_catalogue(tmp: Path) -> None:
+    """The protein tier must use the floor the curator wrote, not a blanket discount.
+
+    D23. `aa_min_id = max(0.50, min_id_catalogue - 0.15)` subtracted 15 identity points
+    from every marker regardless of curation. The catalogue already encodes the
+    distinction the slack was trying to express: housekeeping genes that cross-match
+    across genera carry floors of 0.95-0.98, and the divergent-virus block carries
+    0.78-0.90 ON PURPOSE, with a note saying the HMM tier is what carries detection
+    there. The blanket subtraction overwrote exactly that curation.
+
+    Both directions are asserted from one catalogue, because a change that merely
+    tightened everything would pass the first assertion alone - and tightening the
+    filovirus markers is the specific harm, since they are the evidence D15 needs.
+    """
+    cat = tmp / "markers_prot.tsv"
+    cat.write_text(
+        "# test catalogue\n"
+        "marker_id\ttaxon\tgene\taliases\tmarker_class\tevidence_type\tlocus\t"
+        "min_coverage\tmin_identity\tcopy_expectation\tquery_strategy\tsource_db\tnotes\n"
+        # A conserved housekeeping gene, floored high by the curator precisely because
+        # it cross-matches. Observed 0.877 is below 0.98 and above the old 0.83.
+        "mtb_rpoB\tMycobacterium tuberculosis\trpoB\t\trequired\tprotein\tchr\t"
+        "0.60\t0.98\tsingle\texact\ttest\thousekeeping, cross-matches\n"
+        # A deliberately low-floored divergent-virus marker. Observed 0.880 clears 0.85.
+        "ebola_NP\tZaire ebolavirus\tNP\t\trequired\tprotein\tgenome\t"
+        "0.60\t0.85\tsingle\texact\ttest\tdivergent virus, low floor on purpose\n")
+
+    # m8: query target fident alnlen mismatch gapopen qstart qend tstart tend evalue bits
+    hits = tmp / "prot.m8"
+    hits.write_text(
+        "r1\tmarker|mtb_rpoB|X|rpoB\t0.877\t100\t0\t0\t1\t100\t1\t100\t1e-40\t200.0\n"
+        "r2\tmarker|ebola_NP|Y|NP\t0.880\t100\t0\t0\t1\t100\t1\t100\t1e-40\t200.0\n")
+    faa = tmp / "prot.faa"
+    faa.write_text(">marker|mtb_rpoB|X|rpoB\n" + "M" * 100 + "\n"
+                   ">marker|ebola_NP|Y|NP\n" + "M" * 100 + "\n")
+
+    # A MANIFEST IS REQUIRED FOR THIS TEST TO MEAN ANYTHING. Without one, a marker
+    # that fails every tier is reported UNKNOWN rather than ABSENT - deliberately, so
+    # "never built" is not mistaken for "absent from sample". A fixture with no
+    # manifest therefore cannot tell a tightened floor from an unbuilt marker, and
+    # would pass whatever the floor did.
+    man = tmp / "markers_prot.manifest.tsv"
+    man.write_text(
+        "marker_id\ttaxon\tgene\tmarker_class\tevidence_type\tquery_strategy\tstatus\n"
+        "mtb_rpoB\tMycobacterium tuberculosis\trpoB\trequired\tprotein\texact\tbuilt\n"
+        "ebola_NP\tZaire ebolavirus\tNP\trequired\tprotein\texact\tbuilt\n")
+
+    def states(extra):
+        out = tmp / f"ms_{abs(hash(str(extra)))}.tsv"
+        run([sys.executable, BIN / "marker_evidence.py", "--markers", cat,
+             "--manifest", man,
+             "--aa-hits", hits, "--aa-fasta", faa, "--sample", "S1",
+             "--out", out] + list(extra))
+        with out.open() as fh:
+            return {r["marker_id"]: r for r in csv.DictReader(fh, delimiter="\t")}
+
+    got = states([])
+    record("protfloor:a housekeeping gene below its catalogue floor is ABSENT",
+           got.get("mtb_rpoB", {}).get("state") == "ABSENT",
+           f"got {got.get('mtb_rpoB', {}).get('state')} "
+           f"(aa_id 0.877 vs catalogue 0.98)")
+    record("protfloor:a divergent-virus marker above its own low floor is PRESENT",
+           got.get("ebola_NP", {}).get("state") == "PRESENT",
+           f"got {got.get('ebola_NP', {}).get('state')} "
+           f"(aa_id 0.880 vs catalogue 0.85)")
+
+    # The old behaviour is still reachable, declared rather than implicit.
+    old = states(["--protein-identity-slack", "0.15"])
+    record("protfloor:the old blanket slack is still reachable when asked for",
+           old.get("mtb_rpoB", {}).get("state") == "PRESENT",
+           f"got {old.get('mtb_rpoB', {}).get('state')} at slack 0.15")
+
+    # ONT keeps a small protein allowance, and it must NOT compound with the much
+    # larger nucleotide relaxation - the bug the file already records for min_id.
+    ont = states(["--platform", "ont", "--ont-identity-slack", "0.20"])
+    record("protfloor:ONT protein slack does not compound with the nucleotide one",
+           ont.get("mtb_rpoB", {}).get("state") == "ABSENT",
+           f"got {ont.get('mtb_rpoB', {}).get('state')}; 0.877 must stay below "
+           f"0.98-0.05, not 0.98-0.20")
+
+    # aa_length and hmm_qlen exist so the tiers can be re-examined from the artifact.
+    record("protfloor:aa_length is emitted, so aa_coverage has a denominator",
+           (got.get("ebola_NP", {}).get("aa_length") or "") not in ("", "0"),
+           f"aa_length={got.get('ebola_NP', {}).get('aa_length')!r}")
+
+
+def test_marker_catalogue_watchlist_join(tmp: Path) -> None:
+    """Three hand-maintained files agree on literal strings; something must check.
+
+    markers.tsv.taxon, marker_rules.yaml's keys and watchlist.resolved.tsv.name name the
+    same organisms. A drift in any one degrades SILENTLY - a rule block whose key stops
+    matching simply stops gating, which is indistinguishable from a taxon that has no
+    rules, which is D17a's permissive path.
+    """
+    proc = run([sys.executable, BIN / "marker_rules.py",
+                "--rules", PACK / "marker_rules.yaml",
+                "--markers", PACK / "markers.tsv",
+                "--watchlist", PACK / "watchlist.resolved.tsv", "--validate"])
+    record("markerjoin:the shipped pack validates", proc.returncode == 0,
+           proc.stderr[-300:])
+    record("markerjoin:a rule block with no marker of its own is reported",
+           "Brucella suis" in proc.stderr, proc.stderr[-300:])
+    record("markerjoin:a watchlist taxon with markers but no rule block is reported",
+           "Monkeypox virus" in proc.stderr, proc.stderr[-300:])
+
+    # A rule block keyed on a name no watchlist row carries can never fire. That must
+    # be an ERROR, not a note - it is silent permissiveness.
+    bad = tmp / "bad_rules.yaml"
+    bad.write_text('"Not A Real Organism":\n'
+                   '    confirm_requires: mtb_rpoB\n'
+                   '    rationale: test\n')
+    proc = run([sys.executable, BIN / "marker_rules.py", "--rules", bad,
+                "--markers", PACK / "markers.tsv",
+                "--watchlist", PACK / "watchlist.resolved.tsv", "--validate"])
+    record("markerjoin:a rule block that is not a watchlist name FAILS validation",
+           proc.returncode != 0 and "can never fire" in proc.stderr,
+           f"rc={proc.returncode} {proc.stderr[-200:]}")
+
+
 CASES = {
     "selftests": test_selftests,
     "tiering": test_tiering,
@@ -1783,6 +1902,8 @@ CASES = {
     "d17a": test_marker_block_required_to_confirm,
     "ctrlaudit": test_control_subtraction_audit,
     "crossbleed": test_cross_scenario_control_bleed,
+    "protfloor": test_protein_tier_honours_catalogue,
+    "markerjoin": test_marker_catalogue_watchlist_join,
     "hopguard": test_index_hop_batch_guard,
     "defaults": test_scorer_defaults_match_shipped_config,
 }

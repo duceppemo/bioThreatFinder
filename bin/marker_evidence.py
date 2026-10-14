@@ -366,6 +366,14 @@ def hmm_evidence(domtbl: Path) -> dict[str, dict]:
             "hmm_bits": best[mid],
             "hmm_coverage": (union_length(ivs) / length) if length else 0.0,
             "hmm_domains": len(ivs),
+            # THE PROFILE LENGTH, because without it `hmm_bits` cannot be interpreted.
+            # A bitscore is roughly linear in profile length, so 94 bits on marburg_L's
+            # ~2,100 aa L polymerase and 106 bits on ebola_GP's ~676 aa glycoprotein are
+            # not comparable numbers - per position they differ by more than 3x, and
+            # that ratio is the only thing that distinguishes them. It was computed here
+            # and discarded, so the question "is this hit strong for this profile?"
+            # could not be asked of marker_states.tsv at all. D23.
+            "hmm_qlen": length,
         }
     return out
 
@@ -406,6 +414,17 @@ def main() -> int:
                          "has run. [0.05]")
     ap.add_argument("--hmm-min-bits", type=float, default=25.0,
                     help="minimum domain bitscore for the HMM tier [25]")
+    ap.add_argument("--protein-identity-slack", type=float, default=0.0,
+                    help="subtracted from the catalogue's min_identity for the PROTEIN "
+                         "tier. Default 0: honour what the curator wrote. This was an "
+                         "undeclared blanket 0.15, which made six housekeeping genes "
+                         "PRESENT off unrelated background on a single-organism sample "
+                         "(D23).")
+    ap.add_argument("--ont-protein-identity-slack", type=float, default=0.05,
+                    help="protein-tier slack on ONT, where translated identity still "
+                         "carries some basecalling error - but far less than nucleotide, "
+                         "so this is deliberately smaller than --ont-identity-slack and "
+                         "does NOT compound with it [0.05]")
     ap.add_argument("--out", required=True, type=Path)
     args = ap.parse_args()
 
@@ -500,7 +519,12 @@ def main() -> int:
             "state": UNKNOWN, "tier_used": "", "reason": "",
             "nt_reads": "", "nt_breadth": "", "nt_identity": "",
             "aa_hits": "", "aa_coverage": "", "aa_identity": "", "aa_bits": "",
-            "hmm_domains": "", "hmm_coverage": "", "hmm_bits": "",
+            "hmm_domains": "", "hmm_coverage": "", "hmm_bits": "", "hmm_qlen": "",
+            # Emitted for the same reason as hmm_qlen: `aa_coverage` is a ratio whose
+            # denominator was thrown away, so an aa_coverage of 0 could not be told
+            # apart from a marker whose FASTA header did not parse and whose coverage
+            # gate was therefore SKIPPED entirely (the aa_length == 0 bypass below).
+            "aa_length": "",
             # Carried so score_evidence.py can compute, from the target's observed
             # depth, whether a marker that was not found would have been SAMPLED at
             # all. Without the length, "searched and not found" cannot be told apart
@@ -583,12 +607,42 @@ def main() -> int:
                     "aa_coverage": f"{e['aa_coverage']:.4f}",
                     "aa_identity": f"{e['aa_identity']:.4f}",
                     "aa_bits": f"{e['aa_bits']:.1f}",
+                    "aa_length": e.get("aa_length", ""),
                 })
                 tried.append("protein")
-                # Protein identity floors are lower than nucleotide by nature;
-                # scale rather than reusing min_identity directly, since a
-                # synonymous-divergent allele is the case this tier exists for.
-                aa_min_id = max(0.50, min_id_catalogue - 0.15)
+                # THE CATALOGUE'S FLOOR, NOT A BLANKET SUBTRACTION FROM IT.
+                #
+                # This was `max(0.50, min_id_catalogue - 0.15)`: every marker lost 15
+                # identity points regardless of what the curator wrote, on the reasoning
+                # that "protein floors are lower than nucleotide by nature". The premise
+                # is true and the implementation inverted the curation that encodes it.
+                # The catalogue ALREADY carries the distinction: housekeeping genes that
+                # cross-match across genera are floored at 0.95-0.98, and the divergent
+                # virus block is floored at 0.78-0.90 on purpose, with a note saying
+                # "identity floors here are deliberately LOW and the HMM tier carries
+                # the detection". The blanket -0.15 overwrote exactly that.
+                #
+                # `[MEASURED]` on divergent_bundibugyo_filovirus_illumina_r1, a sample
+                # containing one virus and no other watchlist pathogen, the old floor
+                # made SIX markers PRESENT off unrelated background, every one a
+                # conserved housekeeping gene: mtb_rpoB 0.877 (catalogue 0.98),
+                # cdiph_rpoB 0.900 (0.97), bholm_recA 0.860 (0.97), cburn_icd 0.877
+                # (0.95), rprow_gltA 0.833 (0.95), mtb_katG_inhA 0.840 (0.97). Honouring
+                # the catalogue removes all six and keeps both real filovirus hits -
+                # ebola_NP 0.880 and ebolaS_NP 1.000 against a deliberate 0.85 floor.
+                # One of the six, mtb_katG_inhA, is `report_always`, so it was being
+                # surfaced to analysts as isoniazid resistance on samples with no
+                # mycobacteria in them.
+                #
+                # The slack is now DECLARED and defaults to zero. ONT keeps a small one
+                # because translated identity still carries some basecalling error - but
+                # far less than nucleotide, so it is not the nucleotide slack. Note this
+                # reads min_id_catalogue, NOT min_id: the ONT nucleotide relaxation must
+                # not compound with this one, which is the bug the comment above records.
+                aa_slack = max(0.0, args.protein_identity_slack)
+                if (args.platform or "").strip().lower() == "ont":
+                    aa_slack = max(aa_slack, max(0.0, args.ont_protein_identity_slack))
+                aa_min_id = max(0.50, min_id_catalogue - aa_slack)
                 if e["aa_identity"] >= aa_min_id and (
                         e["aa_coverage"] >= min_cov or e["aa_length"] == 0):
                     passed.append(
