@@ -274,11 +274,30 @@ fi
 REF="${OUTDIR}/all_arms/score_evidence/findings.tsv"
 [[ -s "$REF" ]] || REF="$(echo "${EVAL_ARGS[1]}" | cut -d= -f2-)"
 
+# The descendants file is BUILT BY THE RUN, not shipped in the pack: it is derived
+# from whichever taxdump the pipeline was pointed at, and a stale copy would join a
+# group lead to the wrong species set. Taken from the first arm that published one;
+# every arm resolves the same watchlist against the same taxdump, so they agree.
+# Absent (an older run, or a pack with no group-rank entry) the evaluator simply
+# scores no leads, which is the behaviour before this existed.
+DESCENDANTS=""
+for _arm in "${OUTDIR}"/*/watchlist/watchlist.descendants.tsv; do
+  [[ -s "$_arm" ]] && { DESCENDANTS="$_arm"; break; }
+done
+DESC_ARGS=()
+if [[ -n "$DESCENDANTS" ]]; then
+  DESC_ARGS=(--descendants "$DESCENDANTS")
+  log "descendants  : ${DESCENDANTS}"
+else
+  log "no watchlist.descendants.tsv published; group-rank leads will not be scored"
+fi
+
 log "evaluating ..."
 python3 "${REPO_DIR}/bin/evaluate_benchmark.py" \
   --scenarios "$SCENARIOS" \
   --manifest "$MANIFEST" \
   --watchlist "$WATCHLIST" \
+  "${DESC_ARGS[@]}" \
   --findings "$REF" \
   "${EVAL_ARGS[@]}" \
   --out-dir "${OUTDIR}/evaluation" || log "evaluator reported failing expectations (exit non-zero)"

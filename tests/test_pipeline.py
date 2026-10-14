@@ -1881,6 +1881,61 @@ def test_marker_catalogue_watchlist_join(tmp: Path) -> None:
            f"rc={proc.returncode} {proc.stderr[-200:]}")
 
 
+def test_lead_join_seam(tmp: Path) -> None:
+    """resolve_watchlist writes the descendants file; evaluate_benchmark reads it.
+
+    Two files, one hand-written column contract, and a rename on either side degrades
+    SILENTLY: load_covers() would return an empty mapping, every group lead would read
+    as an unlisted false positive, and every species it covered would go back to being
+    a flat miss - with no error anywhere. The evaluator's own self-test checks the join
+    logic against a hand-built dict; this checks that a real file feeds it.
+    """
+    sys.path.insert(0, str(BIN))
+    import evaluate_benchmark as eb
+
+    # The contract, asserted on a file written by hand so it fails loudly on a
+    # rename rather than skipping when no taxdump is around.
+    d = tmp / "desc_min.tsv"
+    d.write_text("watchlist_taxid\twatchlist_name\tdescendant_taxid\tdescendant_name\n"
+                 "11266\tFiloviridae\t565995\tBundibugyo ebolavirus\n"
+                 "11266\tFiloviridae\t186538\tZaire ebolavirus\n"
+                 # A retired id with no current scientific name. It stays in the file
+                 # for parse_screen, which matches taxids, and must be dropped here
+                 # rather than inserting an empty name that matches nothing.
+                 "11266\tFiloviridae\t999999\t\n")
+    covers = eb.load_covers(d)
+    record("leadjoin:load_covers reads the file resolve_watchlist writes",
+           covers.get("Filoviridae") == {"Bundibugyo ebolavirus", "Zaire ebolavirus"},
+           f"got {dict(covers)}")
+    record("leadjoin:a descendant with no scientific name is dropped",
+           "" not in covers.get("Filoviridae", set()), f"got {dict(covers)}")
+    record("leadjoin:a missing descendants file is not an error",
+           eb.load_covers(None) == {} and eb.load_covers(tmp / "nope.tsv") == {},
+           "load_covers must return empty, not raise - --descendants is optional")
+
+    # Round trip against the real taxdump: the writer's header must still parse.
+    real = tmp / "desc_real.tsv"
+    proc = run([sys.executable, BIN / "resolve_watchlist.py",
+                "--watchlist", PACK / "watchlist.tsv",
+                "--taxdump", os.environ.get(
+                    "BTF_TAXDUMP", "/media/8tb/bioThreatFinder/taxdump/2026-09-29"),
+                "--out", tmp / "wl_rt.tsv", "--descendants-out", real])
+    if proc.returncode != 0 or not real.exists():
+        skip("leadjoin:the real writer round-trips", "no usable taxdump (set BTF_TAXDUMP)")
+        skip("leadjoin:descendant names are real scientific names", "no usable taxdump")
+        return
+    rt = eb.load_covers(real)
+    record("leadjoin:the real writer round-trips",
+           bool(rt) and all(isinstance(v, set) and v for v in rt.values()),
+           f"{len(rt)} entries covered")
+    # Casing matters: the join is against watchlist and manifest strings, which carry
+    # NCBI casing. A lowercased name would match nothing and fail silently.
+    mm = rt.get("Marburg marburgvirus", set())
+    record("leadjoin:descendant names are real scientific names",
+           any(n[:1].isupper() for n in mm) if mm else False,
+           f"sample of {len(mm)}: {sorted(mm)[:3]}")
+
+
 WATCH_COLS = ["taxid", "name", "resolved_rank", "group", "category",
               "min_unique_reads", "min_breadth", "near_neighbour_taxids",
               "n_descendants", "notes", "source", "resolution_note"]
@@ -1958,11 +2013,11 @@ def test_supra_specific_entries_are_leads(tmp: Path) -> None:
     f = score(tmp, cov, extra=["--watchlist", str(wl)])
 
     fam = f.get("FAMILY", {})
-    record("leadcap:a family-rank entry is capped at screened_only",
-           fam.get("tier") == "screened_only",
+    record("leadcap:a group-rank entry is capped at group_lead",
+           fam.get("tier") == "group_lead",
            f"got {fam.get('tier')}, geometry was breadth 0.92 occupancy 0.92")
     record("leadcap:the cap names the rank and the tier it replaced",
-           "CAPPED AT SCREENED_ONLY" in fam.get("reasons", "")
+           "CAPPED AT GROUP_LEAD" in fam.get("reasons", "")
            and "family" in fam.get("reasons", ""),
            fam.get("reasons", "")[-200:])
 
@@ -1987,7 +2042,7 @@ def test_supra_specific_entries_are_leads(tmp: Path) -> None:
               window_occupancy=0.4000, total_reads_screened=2500000),
     ])
     g = score(tmp, cov2, extra=["--watchlist", str(wl)])
-    record("leadcap:a suppressed family row is not lifted to screened_only",
+    record("leadcap:a suppressed group row is not lifted to a lead",
            g.get("SUPPRESSED", {}).get("tier") == "suppressed_control",
            f"got {g.get('SUPPRESSED', {}).get('tier')}")
     record("leadcap:a family row in a control stays control_background",
@@ -2033,6 +2088,7 @@ CASES = {
     "hopguard": test_index_hop_batch_guard,
     "defaults": test_scorer_defaults_match_shipped_config,
     "leadcap": test_supra_specific_entries_are_leads,
+    "leadjoin": test_lead_join_seam,
 }
 
 

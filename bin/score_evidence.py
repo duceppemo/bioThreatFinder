@@ -80,6 +80,11 @@ except ImportError:  # pragma: no cover - marker gating simply disabled
 ASSERTS_PRESENCE = {
     "supported", "confirmed_in_silico", "vaccine_strain", "marker_veto",
     "indistinguishable_complex",
+    # Inert in practice - `group_lead` is produced only by the supra-specific cap,
+    # which runs after the control reclassification and only on tiers already in this
+    # set, so no control row can carry it. Listed anyway: the set means "asserts
+    # something is present", and a lead asserts a group member is.
+    "group_lead",
 }
 
 # Ranks that cannot name an organism. A watchlist entry resolved to one of these
@@ -104,6 +109,11 @@ TIER_ORDER = [
     "control_background",
     "screened_only",
     "attributed_to_neighbour",
+    # Above `attributed_to_neighbour` for the same reason as the tier below it: a
+    # silent attribution asserts the target is NOT here, and a lead asserts something
+    # in its group IS. Below `indistinguishable_complex`, which narrows the claim to a
+    # named pair - a group of 103 descendants is the weaker statement of the two.
+    "group_lead",
     # Below `supported` because it asserts no single organism, above
     # `attributed_to_neighbour` because it asserts that one of a named pair IS
     # present - which a silent attribution does not.
@@ -1228,7 +1238,14 @@ def main() -> int:
         # Bundibugyo case, where Kraken2 assigns 3992 reads that roll up through
         # Filoviridae and every species-keyed row stays silent. What the pipeline can
         # honestly say about such a row is "something in this family is here", which is
-        # `screened_only`: reported, never scored as a species call.
+        # `group_lead`: reported and measurable, never scored as a species call.
+        #
+        # Its own tier, not `screened_only`. `screened_only` is the initial value of
+        # the tier chain - the bucket every row starts in and falls back to when
+        # nothing else fires - so it means "stage 2 established nothing", and on three
+        # real runs it holds 74, 59 and 23 rows against 6, 24 and 43 positives. A lead
+        # routed there would be indistinguishable from the pile, and promoting that
+        # pile to make leads countable would have made every unresolved row a call.
         #
         # Capped explicitly rather than left to geometry. A family bundle's breadth is
         # the covered span over the summed ref_bp of every genome sharing the taxid, so
@@ -1245,9 +1262,9 @@ def main() -> int:
                 and (meta.get("resolved_rank") or "").strip().lower()
                 in SUPRA_SPECIFIC_RANKS):
             was = tier
-            tier = "screened_only"
+            tier = "group_lead"
             reasons.append(
-                f"CAPPED AT SCREENED_ONLY (was {was}): this watchlist entry resolves to "
+                f"CAPPED AT GROUP_LEAD (was {was}): this watchlist entry resolves to "
                 f"rank {meta.get('resolved_rank')}, which names a group and not an "
                 f"organism. The evidence supports 'a member of this group is present'; "
                 f"it cannot say which member, and a group is not a reportable call. "

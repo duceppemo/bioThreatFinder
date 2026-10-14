@@ -93,7 +93,28 @@ CONFIRMED_TIERS = {"confirmed_in_silico"}
 VACCINE_TIERS = {"vaccine_strain"}
 NOT_ASSESSED_TIERS = {"no_reference"}
 
+# A LEAD IS NEITHER A HIT NOR A MISS, AND BOTH OF THOSE WOULD BE A LIE.
+#
+# `group_lead` says a member of a taxonomic group is present without saying which.
+# Scoring it POSITIVE would credit the pipeline with a species call it explicitly
+# declined to make, and would let a group entry covering 103 descendants collect a
+# true positive for any one of them. Scoring it NEGATIVE records a total miss on a
+# sample where the tool put the right group in front of the analyst - which is the
+# whole reason the tier exists.
+#
+# So it is its own outcome with its own table, and SENSITIVITY DOES NOT IMPROVE: a
+# lead-covered species stays in the denominator and stays a non-positive, because the
+# pipeline did not detect the species. The lead table says what was recovered
+# alongside that unchanged number rather than inside it. The figure worth reading
+# there is not a rate but a count - how many organisms were reachable ONLY as a lead,
+# because each one is a species entry the watchlist is missing.
+#
+# Specificity is untouched in the other direction: LEAD is deliberately absent from
+# PRESENCE_ASSERTING, since a lead names no member and so accuses none of them.
+LEAD_TIERS = {"group_lead"}
+
 POSITIVE, VACCINE, NEGATIVE, NOT_ASSESSED = "POSITIVE", "VACCINE", "NEGATIVE", "NOT_ASSESSED"
+LEAD = "LEAD"
 
 # Both of these ASSERT THE ORGANISM IS THERE. On a taxon the truth says is absent,
 # "vaccine strain of Variola is present" is a false positive exactly as much as
@@ -182,6 +203,8 @@ def outcome_of(tier: str | None) -> str:
         return NOT_ASSESSED
     if tier in VACCINE_TIERS:
         return VACCINE
+    if tier in LEAD_TIERS:
+        return LEAD
     if tier in POSITIVE_TIERS:
         return POSITIVE
     return NEGATIVE
@@ -238,7 +261,27 @@ def load_findings(paths: list[Path]) -> dict[tuple[str, str], dict]:
 
 # ---------------------------------------------------------------------------
 
-def evaluate(scenarios, manifest, findings, targeted: set[str] | None = None):
+def load_covers(path: Path | None) -> dict[str, set[str]]:
+    """Map a group-rank watchlist name -> the set of descendant names it covers.
+
+    Written by resolve_watchlist.py --descendants-out. Keyed and valued on NAMES
+    because that is what both the findings table and the benchmark manifest's
+    truth_present column carry; the taxids in that file are for parse_screen.
+    """
+    covers: dict[str, set[str]] = defaultdict(set)
+    for r in read_tsv(path):
+        name = (r.get("descendant_name") or "").strip()
+        parent = (r.get("watchlist_name") or "").strip()
+        # A retired descendant with no current scientific name is written with an
+        # empty name on purpose - it is still a classifier target. It just cannot
+        # take part in a name join, so it is skipped here rather than inserting "".
+        if parent and name:
+            covers[parent].add(name)
+    return covers
+
+
+def evaluate(scenarios, manifest, findings, targeted: set[str] | None = None,
+             covers: dict[str, set[str]] | None = None):
     """Build per-observation records: one per (sample, taxon-of-interest).
 
     `targeted` is the pack's watchlist. A spiked organism that is NOT on the
@@ -248,6 +291,7 @@ def evaluate(scenarios, manifest, findings, targeted: set[str] | None = None):
     put "LOD not reached" in the report for an organism no LOD exists for. They
     are marked `present_untargeted` and excluded from sensitivity and LOD.
     """
+    covers = covers or {}
     obs = []
     for m in manifest:
         sample = m["sample"]
@@ -261,9 +305,35 @@ def evaluate(scenarios, manifest, findings, targeted: set[str] | None = None):
         # called for this sample. The latter is essential - a false positive on a
         # taxon nobody listed still has to be counted.
         called = {t for (s, t) in findings if s == sample and t}
+
+        # DESCENDANT-AWARE JOIN. Every other join in this file is an exact name
+        # match, which is right for a species call and wrong for a group one: the
+        # truth says "Bundibugyo ebolavirus" and the finding says "Filoviridae", so
+        # the strings never meet. Left alone, the group finding lands in `unlisted`
+        # as if it were a false positive on a taxon nobody listed, AND the species it
+        # covers still scores as a flat miss - the one outcome that is wrong in both
+        # directions at once.
+        #
+        # Resolved by name, not by taxid, because the manifest's truth columns carry
+        # names only; resolve_watchlist.py writes descendant_name for exactly this.
+        lead_cover: dict[str, str] = {}   # truth taxon -> the group that covers it
+        covering: set[str] = set()        # groups that covered something true
+        for g in sorted(called):
+            if (findings.get((sample, g)) or {}).get("tier") not in LEAD_TIERS:
+                continue
+            for t in sorted(covers.get(g, ())):
+                # Only taxa the truth says are PRESENT. A lead names no member, so
+                # it does not accuse the absent ones - charging it for every absent
+                # descendant would make a 103-member group unusable by construction,
+                # and crediting it for them would be worse.
+                if t in present or t in vaccine:
+                    lead_cover.setdefault(t, g)
+                    covering.add(g)
+
         for taxon in present | absent | vaccine | called:
             f = findings.get((sample, taxon))
             tier = f.get("tier") if f else None
+            covered_by = lead_cover.get(taxon, "")
             if taxon in vaccine:
                 truth = "vaccine"
             elif taxon in present:
@@ -275,14 +345,23 @@ def evaluate(scenarios, manifest, findings, targeted: set[str] | None = None):
                 # Not mentioned by the truth set at all. In a scenario where the
                 # spike list is exhaustive this is a false positive; treat it as
                 # 'unlisted' and report separately rather than guessing.
-                truth = "unlisted"
+                # A group entry that covered a truth-present taxon is not an
+                # unlisted call - it is the mechanism working. Marked so the tier-PPV
+                # table stops counting it against the pipeline.
+                truth = "group_cover" if taxon in covering else "unlisted"
+            outcome = outcome_of(tier)
+            # The species itself was missed; the group lead reached it. Record the
+            # lead rather than a bare NEGATIVE, and only when nothing better exists -
+            # a real call on the species always outranks being covered by its group.
+            if covered_by and outcome == NEGATIVE:
+                outcome = LEAD
             obs.append({
                 "sample": sample, "scenario_id": sid, "kind": sc.get("kind", ""),
                 "platform": m.get("platform", ""), "role": m.get("role", "sample"),
                 "level_rpm": m.get("level_rpm", ""),
                 "replicate": m.get("replicate", ""),
                 "taxon": taxon, "truth": truth, "tier": tier or "",
-                "outcome": outcome_of(tier),
+                "outcome": outcome, "covered_by": covered_by,
                 "unique_reads": (f or {}).get("unique_reads", ""),
                 "reasons": (f or {}).get("reasons", ""),
             })
@@ -301,11 +380,16 @@ def sensitivity_table(obs):
         n = len(assessable)
         pos = sum(1 for i in assessable if i["outcome"] == POSITIVE)
         conf = sum(1 for i in assessable if i["tier"] in CONFIRMED_TIERS)
+        # Counted but NOT added to `pos`. A lead is a miss on the species, and
+        # detection_rate must keep saying so; this column sits beside the miss to
+        # show it was not a total one, and a scenario where it is consistently
+        # non-zero is naming a species the watchlist should hold outright.
+        lead = sum(1 for i in assessable if i["outcome"] == LEAD)
         rows.append({
             "scenario_id": sid, "taxon": taxon, "platform": plat, "level_rpm": level,
             "n_replicates": len(items), "n_assessable": n,
             "n_not_assessed": len(items) - n,
-            "n_positive": pos, "n_confirmed": conf,
+            "n_positive": pos, "n_confirmed": conf, "n_lead_only": lead,
             "detection_rate": f"{pos / n:.3f}" if n else "",
             "confirm_rate": f"{conf / n:.3f}" if n else "",
         })
@@ -378,6 +462,11 @@ def tier_ppv_table(obs):
             c["true"] += 1
         elif o["truth"] == "absent":
             c["false"] += 1
+        elif o["truth"] == "group_cover":
+            # The group entry did its job. Counting it `unlisted` would charge the
+            # tier for the detection it just made, and tier PPV for group_lead would
+            # read 0.000 on a run where every lead was correct.
+            c["true"] += 1
         else:
             c["unlisted"] += 1
     rows = []
@@ -388,6 +477,46 @@ def tier_ppv_table(obs):
             "tier": tier, "n_calls": c["n"], "n_truth_present": c["true"],
             "n_truth_absent": c["false"], "n_unlisted": c["unlisted"],
             "ppv": f"{c['true'] / denom:.3f}" if denom else "",
+        })
+    return rows
+
+
+def lead_table(obs):
+    """What the group-rank entries actually reached, per scenario and group.
+
+    Two numbers carry the weight. `n_species_recovered` is how many spiked organisms
+    were reachable ONLY as a lead - each one is a species the watchlist should
+    arguably hold in its own right, so a number that stays high is a watchlist gap,
+    not a success. `n_leads_covering_nothing` is the other side: a group that fired
+    on a sample where the truth lists no member of it. That is the cost of carrying a
+    group entry, and it belongs next to the benefit rather than in a footnote.
+    """
+    recovered = defaultdict(set)
+    fired = defaultdict(set)
+    hit = defaultdict(set)
+    for o in obs:
+        if o["role"] == "control":
+            continue
+        key = (o["scenario_id"], o["platform"])
+        if o["outcome"] == LEAD and o.get("covered_by"):
+            recovered[(key, o["covered_by"])].add(o["taxon"])
+        if o["tier"] in LEAD_TIERS:
+            fired[(key, o["taxon"])].add(o["sample"])
+            if o["truth"] == "group_cover":
+                hit[(key, o["taxon"])].add(o["sample"])
+    rows = []
+    for (key, group) in sorted(set(fired) | set(recovered)):
+        sid, plat = key
+        n_fired = len(fired.get((key, group), ()))
+        n_hit = len(hit.get((key, group), ()))
+        species = sorted(recovered.get((key, group), ()))
+        rows.append({
+            "scenario_id": sid, "platform": plat, "group": group,
+            "n_samples_led": n_fired,
+            "n_leads_covering_truth": n_hit,
+            "n_leads_covering_nothing": n_fired - n_hit,
+            "n_species_recovered": len(species),
+            "species_recovered": ";".join(species),
         })
     return rows
 
@@ -834,6 +963,31 @@ def write_summary(path: Path, tables: dict, exp_results: list[dict], abl):
                      f"{r['n_reported_as_disease']} |")
         L.append("")
 
+    leads = tables.get("lead", [])
+    if leads:
+        L.append("## Group-rank leads")
+        L.append("")
+        L.append("A group-rank watchlist entry says a member of a taxonomic group is "
+                 "present without saying which. These are NOT counted as detections "
+                 "and sensitivity above is unchanged by them - the pipeline did not "
+                 "call the species.")
+        L.append("")
+        L.append("Read both columns. `recovered` is how many spiked organisms were "
+                 "reachable ONLY as a lead: each one is arguably a species the "
+                 "watchlist should hold outright, so a number that stays high is a "
+                 "gap, not a win. `covering nothing` is a lead fired where the truth "
+                 "lists no member of the group - the cost of carrying the entry.")
+        L.append("")
+        L.append("| scenario | platform | group | samples led | covering truth | "
+                 "covering nothing | recovered | species |")
+        L.append("|---|---|---|---|---|---|---|---|")
+        for r in leads:
+            L.append(f"| {r['scenario_id']} | {r['platform']} | {r['group']} | "
+                     f"{r['n_samples_led']} | {r['n_leads_covering_truth']} | "
+                     f"{r['n_leads_covering_nothing']} | "
+                     f"{r['n_species_recovered']} | {r['species_recovered'] or '-'} |")
+        L.append("")
+
     bo = tables.get("bakeoff", [])
     if bo:
         L.append("## Tool bake-off")
@@ -913,6 +1067,12 @@ def main() -> int:
                     help="packs/<pack>/watchlist.resolved.tsv - spiked organisms not on "
                          "the watchlist are excluded from sensitivity/LOD, since the "
                          "pipeline is not looking for them")
+    ap.add_argument("--descendants", type=Path,
+                    help="descendants TSV from resolve_watchlist.py "
+                         "--descendants-out. Required to score a group-rank "
+                         "watchlist entry: without it a group_lead finding cannot "
+                         "be connected to the species the truth names, and both "
+                         "the lead and the species read as failures.")
     ap.add_argument("--out-dir", required=True, type=Path)
     ap.add_argument("--fail-on-skip", action="store_true",
                     help="treat SKIPped expectations as failures (for CI)")
@@ -974,12 +1134,14 @@ def main() -> int:
     variant_paths = split_named(args.variant, "variant")
     trace_paths = split_named(args.variant_trace, "variant-trace")
 
-    obs = evaluate(scenarios, manifest, findings, targeted)
+    covers = load_covers(args.descendants)
+    obs = evaluate(scenarios, manifest, findings, targeted, covers)
     tables = {
         "sensitivity": sensitivity_table(obs),
         "specificity": specificity_table(obs),
         "tier_ppv": tier_ppv_table(obs),
         "vaccine": vaccine_table(obs),
+        "lead": lead_table(obs),
     }
     tables["lod"] = lod_table(tables["sensitivity"])
     exp_results = check_expectations(scenarios, obs)
@@ -991,7 +1153,8 @@ def main() -> int:
             missing = [str(p) for p in paths if not p.exists()]
             if missing:
                 sys.exit(f"ERROR: variant {name!r} findings not found: {', '.join(missing)}")
-            variants[name] = evaluate(scenarios, manifest, load_findings(paths), targeted)
+            variants[name] = evaluate(scenarios, manifest, load_findings(paths),
+                                      targeted, covers)
         for name, paths in trace_paths.items():
             if name not in variants:
                 sys.stderr.write(
@@ -1005,8 +1168,10 @@ def main() -> int:
 
     abl = None
     if args.ablation_findings:
+        # covers passed here too: the ablation arm must be scored by the same rules
+        # as the main arm, or the delta measures the scoring change, not the ablation.
         obs_wo = evaluate(scenarios, manifest,
-                          load_findings(args.ablation_findings), targeted)
+                          load_findings(args.ablation_findings), targeted, covers)
         abl = ablation(obs, obs_wo)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -1249,6 +1414,74 @@ def self_test() -> int:
     pt = bakeoff_per_taxon({"good": v_good, "bad": v_bad})
     check(any("detect__good" in r and "detect__bad" in r for r in pt),
           "per-taxon bake-off emits a column per variant")
+
+    # ---- descendant-aware join -------------------------------------------
+    # A group-rank finding and the species the truth names share no string, so the
+    # exact-name join every other table uses connects them not at all. Both halves
+    # are checked: that the species is recovered as a LEAD, and that the group row
+    # itself stops reading as an unlisted false positive.
+    lead_scen = {"led": {"id": "led", "kind": "specificity", "expect": []}}
+    lead_man = [
+        {"sample": "g1", "scenario_id": "led", "platform": "illumina",
+         "replicate": "1", "level_rpm": "200", "role": "sample",
+         "truth_present": "Bundibugyo ebolavirus", "truth_absent": "Yersinia pestis",
+         "truth_vaccine": ""},
+        # Same group fires where the truth lists no member of it. That is the cost
+        # of carrying a group entry and it has to be visible, not absorbed.
+        {"sample": "g2", "scenario_id": "led", "platform": "illumina",
+         "replicate": "2", "level_rpm": "200", "role": "sample",
+         "truth_present": "Yersinia pestis", "truth_absent": "", "truth_vaccine": ""},
+    ]
+    lead_find = {
+        ("g1", "Filoviridae"): {"sample": "g1", "taxon": "Filoviridae",
+                                "tier": "group_lead"},
+        ("g2", "Filoviridae"): {"sample": "g2", "taxon": "Filoviridae",
+                                "tier": "group_lead"},
+    }
+    lead_covers = {"Filoviridae": {"Bundibugyo ebolavirus", "Zaire ebolavirus"}}
+
+    o_no = {(o["sample"], o["taxon"]): o
+            for o in evaluate(lead_scen, lead_man, lead_find)}
+    check(o_no[("g1", "Bundibugyo ebolavirus")]["outcome"] == NEGATIVE,
+          "without --descendants the covered species is a flat miss")
+    check(o_no[("g1", "Filoviridae")]["truth"] == "unlisted",
+          "without --descendants the group reads as an unlisted call")
+
+    o_y = {(o["sample"], o["taxon"]): o
+           for o in evaluate(lead_scen, lead_man, lead_find, None, lead_covers)}
+    check(o_y[("g1", "Bundibugyo ebolavirus")]["outcome"] == LEAD,
+          f"covered species is a LEAD, got {o_y[('g1','Bundibugyo ebolavirus')]['outcome']}")
+    check(o_y[("g1", "Bundibugyo ebolavirus")]["covered_by"] == "Filoviridae",
+          "the covered species names the group that reached it")
+    check(o_y[("g1", "Filoviridae")]["truth"] == "group_cover",
+          f"covering group is not unlisted, got {o_y[('g1','Filoviridae')]['truth']}")
+    # A lead names no member, so it must not accuse the absent ones.
+    check(o_y[("g1", "Yersinia pestis")]["outcome"] == NEGATIVE,
+          "a lead does not make a truth-absent taxon a positive")
+    # g2's group covers nothing true; it stays unlisted and is counted as such.
+    check(o_y[("g2", "Filoviridae")]["truth"] == "unlisted",
+          "a group covering nothing true is still an unlisted call")
+
+    # SENSITIVITY MUST NOT IMPROVE. The pipeline did not detect the species.
+    sens_lead = sensitivity_table(o_y.values())
+    bund = [r for r in sens_lead if r["taxon"] == "Bundibugyo ebolavirus"]
+    check(len(bund) == 1 and bund[0]["n_positive"] == 0
+          and bund[0]["detection_rate"] == "0.000",
+          f"a lead is not a detection in the sensitivity table: {bund}")
+    check(len(bund) == 1 and bund[0]["n_lead_only"] == 1,
+          f"the lead is still counted beside the miss: {bund}")
+
+    lt = {r["group"]: r for r in lead_table(list(o_y.values()))}
+    check("Filoviridae" in lt, f"lead table has a row for the group: {lt}")
+    if "Filoviridae" in lt:
+        r = lt["Filoviridae"]
+        check(r["n_samples_led"] == 2, f"two samples led, got {r['n_samples_led']}")
+        check(r["n_leads_covering_truth"] == 1,
+              f"one lead covered truth, got {r['n_leads_covering_truth']}")
+        check(r["n_leads_covering_nothing"] == 1,
+              f"one lead covered nothing, got {r['n_leads_covering_nothing']}")
+        check(r["species_recovered"] == "Bundibugyo ebolavirus",
+              f"names the species recovered, got {r['species_recovered']!r}")
 
     # Duration and memory parsing, which decide the cost half of the comparison.
     check(abs(_dur_min("2h 30m") - 150.0) < 1e-6, f"2h 30m -> 150 min, got {_dur_min('2h 30m')}")

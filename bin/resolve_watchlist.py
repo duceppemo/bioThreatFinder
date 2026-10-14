@@ -117,6 +117,27 @@ def load_names(taxdump: Path) -> dict[str, list[tuple[int, str]]]:
     return index
 
 
+def load_sci_names(taxdump: Path) -> dict[int, str]:
+    """Map taxid -> scientific name, in the taxdump's own casing.
+
+    load_names() lowercases its keys, which is right for lookup and wrong for output:
+    the descendants file is joined against benchmark truth columns and watchlist
+    entries, both of which carry NCBI casing. Reversing the lowercased index would
+    emit "bundibugyo ebolavirus" and match nothing.
+    """
+    out: dict[int, str] = {}
+    with (taxdump / "names.dmp").open(encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) < 4 or parts[3] != "scientific name":
+                continue
+            try:
+                out[int(parts[0])] = parts[1]
+            except ValueError:
+                continue
+    return out
+
+
 def load_nodes(taxdump: Path) -> tuple[dict[int, int], dict[int, str]]:
     """Return (child -> parent, taxid -> rank)."""
     nodes_dmp = taxdump / "nodes.dmp"
@@ -393,11 +414,21 @@ def main() -> int:
     sys.stderr.write(f"[resolve] wrote {len(resolved)} resolved entries to {args.out}\n")
 
     if args.descendants_out:
+        # The NAME goes out beside the taxid. parse_screen matches on taxids, but
+        # evaluate_benchmark joins findings to benchmark truth on the taxon NAME, and
+        # the manifest's truth_present column carries names only. Without this column
+        # a group-rank finding cannot be connected to the species the truth names, so
+        # the lead reads as a call on an unlisted taxon and the species it covers
+        # still scores as a miss. A retired descendant with no current scientific
+        # name keeps its row and an empty name - it is still a valid classifier
+        # target, it just cannot participate in the name join.
+        sci = load_sci_names(args.taxdump)
         with args.descendants_out.open("w") as fh:
-            fh.write("watchlist_taxid\twatchlist_name\tdescendant_taxid\n")
+            fh.write("watchlist_taxid\twatchlist_name\tdescendant_taxid"
+                     "\tdescendant_name\n")
             for r in resolved:
                 for d in sorted(r["_descendants"]):
-                    fh.write(f"{r['taxid']}\t{r['name']}\t{d}\n")
+                    fh.write(f"{r['taxid']}\t{r['name']}\t{d}\t{sci.get(d, '')}\n")
         total = sum(len(r["_descendants"]) for r in resolved)
         sys.stderr.write(
             f"[resolve] wrote {total} descendant mappings to {args.descendants_out}\n"

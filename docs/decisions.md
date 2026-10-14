@@ -991,6 +991,90 @@ matrix; it does nothing for a specimen type whose matrix was never blanked.
 
 ---
 
+## D24 — A group-rank watchlist entry needs its own tier and its own join, or it is wrong in both directions at once
+
+2026-10-14. D15's divergent filovirus is classified **correctly** and reported **not at
+all**: Kraken2 and Metabuli each put all 3,992 spiked reads on *Bundibugyo virus* and roll
+them up through Filoviridae, while every species-keyed watchlist row stays silent. The
+obvious repair is a family-rank watchlist entry. Verifying that repair before building it
+turned up two things that would each have made it useless.
+
+**The rollup itself needs no code.** Checked against the published run and the real
+taxdump, four of five links already hold: Filoviridae carries clade_reads 3,992 in the
+Kraken2 report with 0 direct; `clade_or_sum()` takes the node's own clade_reads, so a
+family row is credited all of them; `resolve_watchlist.py` resolves `Filoviridae` to taxid
+11266 at rank `family` with 103 descendants, no warning and no rank-mismatch note; all
+five filovirus taxids are inside that descendant set. `build_pack_refs.py` queries the
+taxid's subtree with a reference-first pass, so a family entry fetches one curated
+assembly per species.
+
+**But a group entry scored on alignment geometry would be a species call.** Breadth for a
+taxid divides the covered span by the summed `reference_bp` of every genome sharing it, so
+a family bundle of eight filovirus genomes covered only in its Bundibugyo member lands
+near 0.13 occupancy — just under the 0.15 floor, which is the tier we want, reached by
+arithmetic that a ninth genome would overturn. Hence an explicit cap: an entry whose
+`resolved_rank` is supra-specific is capped at a lead, by construction rather than by
+accident.
+
+**The cap must be an allowlist of group ranks, not `!= "species"`.** 18 of the 89 shipped
+entries resolve to NCBI rank `no rank` and every one of them names a real organism —
+Variola virus, Zaire ebolavirus, SARS-CoV-2. A denylist would have capped Variola.
+
+**Two measurements then redirected the design.**
+
+*The lead cannot reuse `screened_only`.* That tier is the **initial value** of the tier
+chain — the bucket every coverage row starts in and falls back to — so it means "stage 2
+established nothing". It holds 74, 59 and 23 rows on lod_v4, lod_v3_threearm and
+zymo_rl100, against 6, 24 and 43 positives respectively. A lead routed there is
+indistinguishable from the pile. The alternative considered and rejected was adding
+`screened_only` to `POSITIVE_TIERS`, which would have turned 74 unresolved rows into
+positive calls on a run that makes 6. So `group_lead` is its own tier, placed above
+`attributed_to_neighbour` (which asserts the target is NOT here) and below
+`indistinguishable_complex` (which narrows the claim to a named pair — a group of 103 is
+the weaker statement).
+
+*The evaluator could not have scored it.* `evaluate()` joins findings to benchmark truth
+on the **exact taxon name**. The truth says `Bundibugyo ebolavirus`; the finding says
+`Filoviridae`; the strings never meet. Left alone the group finding lands in `unlisted` as
+if it were a false positive on a taxon nobody listed, **and** the species it covers still
+scores a flat miss — wrong in both directions simultaneously, which is why the family
+entry would have measured as a regression. Fixed with a descendant-aware join:
+`resolve_watchlist.py --descendants-out` now writes `descendant_name` beside each taxid
+(the manifest's truth columns carry names only), and `load_covers()` feeds the join. The
+extra column is backward compatible — `parse_screen.py` reads that file positionally with
+`len(parts) >= 3`.
+
+**A lead is neither a hit nor a miss, and both would be a lie.** Scoring it POSITIVE would
+credit a species call the pipeline explicitly declined to make, and would let one entry
+collect a true positive for any of 103 descendants. Scoring it NEGATIVE erases the fact
+that the right group was put in front of the analyst. So `LEAD` is its own outcome, and
+**sensitivity does not improve**: a lead-covered species stays in the denominator and
+stays a non-positive, with `n_lead_only` beside it. Specificity is untouched in the other
+direction — `LEAD` is deliberately absent from `PRESENCE_ASSERTING`, because a lead names
+no member and so accuses none of them. `lead.tsv` reports both sides: species recovered
+only as a lead (each one arguably a species entry the watchlist is missing, so a number
+that stays high is a gap, not a win) and leads that fired where the truth lists no member
+of the group (the cost of carrying the entry).
+
+**Ordering bug caught by its own test.** The cap first ran before the control
+reclassification, which keys on `ASSERTS_PRESENCE`. A capped control row was no longer in
+that set, so a contaminated control stood as an open lead in its own report instead of
+being named as background. The cap now runs after it.
+
+**Nothing in the shipped pack is above species rank, so no finding changes today**, and a
+test asserts that — it is the notice if it stops being true. Re-running the evaluator over
+lod_v4 (24 samples, 202 findings) against HEAD on identical inputs: `specificity`,
+`tier_ppv`, `lod` and `vaccine` byte-identical, `sensitivity` and `observations` differing
+only by the new columns.
+
+**Still open, and the reason D15 is not closed here.** This is the machinery, not the
+entry. Whether to actually add Filoviridae is a specificity question that needs a run of
+`negative_host_only` and `divergent_v1` to price, and the half of D15 that is a detection
+failure — all three BoNT markers ABSENT with every tier empty — is untouched by any of
+this.
+
+---
+
 ## D21 — D16a closed by refusing the batch, not by scoping the scorer; and control subtraction stops being invisible
 
 2026-10-13. Fixing D16a meant first discovering that **the behaviour D16a calls a bug is
@@ -1889,7 +1973,7 @@ that can measure what the new floor rejects.
 
 ---
 
-## D15 — A divergent agent is invisible because it is classified CORRECTLY, and the watchlist registers its sibling as a suppressor ⚠️ *the amino-acid arm does not fix this, and was tested on the scenario built to favour it*
+## D15 — A divergent agent is invisible because it is classified CORRECTLY, and the watchlist registers its sibling as a suppressor ⚠️ *partially addressed: see D24 for the lead tier and the descendant-aware join; the entry itself and the BoNT detection failure are still open* *the amino-acid arm does not fix this, and was tested on the scenario built to favour it*
 
 `divergent_bundibugyo_filovirus` and `divergent_clostridium_bont` exist to answer one question:
 does the pipeline raise a lead for a divergent or novel agent, or does it go silent? Batch

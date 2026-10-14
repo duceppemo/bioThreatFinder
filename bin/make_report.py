@@ -52,6 +52,12 @@ TIERS = [
      "out-counts it only slightly. One of the two IS present; this evidence does not "
      "say which. Resolve with lineage markers or a targeted assay - do not read this "
      "as either a detection or a negative."),
+    ("group_lead", "Lead - a member of this group, species unresolved",
+     "The watchlist entry is a taxonomic group, not an organism, and the evidence "
+     "says a member of it is present without saying which. This exists so a "
+     "divergent member with no reference of its own still surfaces instead of "
+     "vanishing. It is a lead to follow up, not a species call - and not a negative "
+     "either."),
     ("control_background", "Negative-control background",
      "Organisms detected in the negative control itself. QC information about "
      "the run, not findings about any specimen."),
@@ -69,6 +75,9 @@ TIER_TONE = {
     # Not "muted": an unresolved complex needs an analyst to act on it, which is the
     # whole reason it exists as a tier rather than a silent attribution.
     "indistinguishable_complex": "warn",
+    # Not "muted", for the same reason: a lead that nobody looks at is the Bundibugyo
+    # miss happening again one step later.
+    "group_lead": "warn",
     "screened_only": "muted",
     "control_background": "muted",
     "marker_veto": "muted",
