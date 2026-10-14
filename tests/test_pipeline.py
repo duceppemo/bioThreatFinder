@@ -705,8 +705,12 @@ def test_pack_integrity(tmp: Path) -> None:
             assessed, breadth_binds = _num("taxa assessed"), _num("breadth is the real gate")
             # KNOWN DEBT, recorded so it cannot drift unnoticed. Lowering this number is
             # an improvement; raising it means a pack edit made the mismatch worse.
+            # 89 -> 90 and 75 -> 76 when the Filoviridae group entry was added (D25).
+            # It inherits the filovirus species' 10-read floor against a 220 kb
+            # 12-genome bundle, so breadth binds first, exactly as for the species
+            # rows it sits above. One more instance of known debt, not a new kind.
             record("pack:read/breadth gate coherence is tracked",
-                   assessed == 89 and breadth_binds == 75,
+                   assessed == 90 and breadth_binds == 76,
                    f"{breadth_binds} of {assessed} taxa have a decorative read floor "
                    f"(baseline 75 of 89). See docs/decisions.md D11.")
     except Exception as exc:
@@ -1925,6 +1929,20 @@ def test_lead_join_seam(tmp: Path) -> None:
         skip("leadjoin:descendant names are real scientific names", "no usable taxdump")
         return
     rt = eb.load_covers(real)
+    # THE NAME THE TRUTH USES IS OFTEN NOT THE SCIENTIFIC NAME. NCBI files
+    # "Bundibugyo ebolavirus" as an equivalent name of "Bundibugyo virus", and the
+    # benchmark manifest, like the published outbreak lists it was built from, uses
+    # the equivalent. Emitting scientific names alone made the join miss every one of
+    # them silently: the group read as an unlisted false positive and the species it
+    # covered stayed a flat miss. This is the string that caught it.
+    filo = rt.get("Filoviridae", set())
+    if filo:
+        record("leadjoin:an equivalent name joins, not just the scientific name",
+               "Bundibugyo ebolavirus" in filo and "Bundibugyo virus" in filo,
+               f"both must be present; got {sorted(n for n in filo if 'undibugyo' in n)}")
+    else:
+        skip("leadjoin:an equivalent name joins, not just the scientific name",
+             "no Filoviridae entry in the shipped watchlist")
     record("leadjoin:the real writer round-trips",
            bool(rt) and all(isinstance(v, set) and v for v in rt.values()),
            f"{len(rt)} entries covered")
@@ -2058,8 +2076,13 @@ def test_supra_specific_entries_are_leads(tmp: Path) -> None:
     import score_evidence
     supra = sorted(n for n, r in ranks.items()
                    if r.strip().lower() in score_evidence.SUPRA_SPECIFIC_RANKS)
-    record("leadcap:the shipped watchlist has no supra-specific entry yet",
-           not supra, f"capped entries: {supra}")
+    # Filoviridae was added deliberately (D25) and is the only one. Pinning the exact
+    # list, not just "non-empty": a group entry caps every finding under it at a lead,
+    # so one arriving by accident - a watchlist name that happens to resolve to a
+    # genus - would silently stop a species from ever being called, and this is the
+    # only place that would say so.
+    record("leadcap:exactly the intended supra-specific entries are present",
+           supra == ["Filoviridae"], f"capped entries: {supra}")
 
 
 CASES = {

@@ -57,6 +57,7 @@ Monkeypox virus	no rank	virus	notifiable	20	0.20	Vaccinia virus;Cowpox virus;Var
 Zaire ebolavirus	no rank	virus	high_consequence	10	0.20	Sudan ebolavirus;Bundibugyo ebolavirus;Reston ebolavirus;Marburg marburgvirus	Reston is non-pathogenic to humans - species resolution is essential, not optional.	seed
 Sudan ebolavirus	no rank	virus	high_consequence	10	0.20	Zaire ebolavirus;Bundibugyo ebolavirus;Reston ebolavirus	See Zaire note.	seed
 Marburg marburgvirus	species	virus	high_consequence	10	0.20	Zaire ebolavirus	-	seed
+Filoviridae	family	virus	high_consequence	10	0.20	-	GROUP-RANK ENTRY - capped at group_lead, never a species call. Exists so a divergent or novel filovirus with no reference of its own still surfaces: the classifier assigns its reads correctly to a species the watchlist does not hold, they roll up to this node, and every species-keyed row stays silent. Filoviridae has no commensal or environmental members, so a lead here is always worth following. Read lead.tsv, not sensitivity, to judge it.	seed
 Lassa mammarenavirus	species	virus	high_consequence	10	0.20	Lujo virus;Mopeia virus;Lymphocytic choriomeningitis virus	Segmented; require both L and S segments.	seed
 Junin mammarenavirus	species	virus	high_consequence	10	0.20	Machupo mammarenavirus;Guanarito mammarenavirus;Sabia mammarenavirus	New World arenaviruses; vaccine strain Candid#1 exists.	seed
 Rift Valley fever phlebovirus	species	virus	high_consequence	10	0.20	Toscana virus;Sandfly fever Naples phlebovirus	Segmented (L/M/S); require multiple segments. Overlaps animal pack.	seed

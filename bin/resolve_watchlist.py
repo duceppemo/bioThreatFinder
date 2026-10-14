@@ -117,24 +117,48 @@ def load_names(taxdump: Path) -> dict[str, list[tuple[int, str]]]:
     return index
 
 
-def load_sci_names(taxdump: Path) -> dict[int, str]:
-    """Map taxid -> scientific name, in the taxdump's own casing.
+def load_descendant_names(taxdump: Path) -> dict[int, list[str]]:
+    """Map taxid -> every name it can legitimately be called, NCBI casing first.
 
-    load_names() lowercases its keys, which is right for lookup and wrong for output:
-    the descendants file is joined against benchmark truth columns and watchlist
-    entries, both of which carry NCBI casing. Reversing the lowercased index would
-    emit "bundibugyo ebolavirus" and match nothing.
+    EVERY ACCEPTED CLASS, NOT JUST THE SCIENTIFIC NAME. The descendants file is
+    joined against benchmark truth columns and operator watchlists, and those carry
+    whatever name the authoritative disease list used - which lags NCBI by years.
+    Measured on taxid 565995: the taxdump's scientific name is "Bundibugyo virus",
+    while the benchmark truth and the published outbreak lists all say "Bundibugyo
+    ebolavirus", which NCBI files as an `equivalent name`. Emitting the scientific
+    name alone made those two strings never meet, so the group lead read as an
+    unlisted false positive AND the species it covered stayed a flat miss - the exact
+    failure the join exists to remove, one layer further down, and visible only as a
+    bad number after a run.
+
+    NAME_CLASS_PREFERENCE already encodes this, for the same stated reason, on the
+    resolution side. This is the same list applied to the output side.
+
+    Order matters: the scientific name is emitted first so a reader that takes the
+    first row per taxid still gets the canonical name.
+
+    Casing is preserved. load_names() lowercases its keys, which is right for lookup
+    and wrong here - reversing that index would emit "bundibugyo ebolavirus" and
+    match nothing.
     """
-    out: dict[int, str] = {}
+    by_class: dict[int, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
     with (taxdump / "names.dmp").open(encoding="utf-8", errors="replace") as fh:
         for line in fh:
             parts = [p.strip() for p in line.split("|")]
-            if len(parts) < 4 or parts[3] != "scientific name":
+            if len(parts) < 4 or parts[3] not in NAME_CLASS_PREFERENCE:
                 continue
             try:
-                out[int(parts[0])] = parts[1]
+                by_class[int(parts[0])][parts[3]].append(parts[1])
             except ValueError:
                 continue
+    out: dict[int, list[str]] = {}
+    for taxid, classes in by_class.items():
+        seen: list[str] = []
+        for cls in NAME_CLASS_PREFERENCE:
+            for name in classes.get(cls, ()):
+                if name and name not in seen:
+                    seen.append(name)
+        out[taxid] = seen
     return out
 
 
@@ -422,16 +446,24 @@ def main() -> int:
         # still scores as a miss. A retired descendant with no current scientific
         # name keeps its row and an empty name - it is still a valid classifier
         # target, it just cannot participate in the name join.
-        sci = load_sci_names(args.taxdump)
+        sci = load_descendant_names(args.taxdump)
+        n_rows = 0
         with args.descendants_out.open("w") as fh:
             fh.write("watchlist_taxid\twatchlist_name\tdescendant_taxid"
                      "\tdescendant_name\n")
             for r in resolved:
                 for d in sorted(r["_descendants"]):
-                    fh.write(f"{r['taxid']}\t{r['name']}\t{d}\t{sci.get(d, '')}\n")
+                    # One row per NAME, not per taxid. A descendant with no accepted
+                    # name keeps a single row with an empty one: it is still a valid
+                    # classifier target for parse_screen, which matches taxids and
+                    # ignores this column, it just cannot take part in a name join.
+                    for name in sci.get(d) or [""]:
+                        fh.write(f"{r['taxid']}\t{r['name']}\t{d}\t{name}\n")
+                        n_rows += 1
         total = sum(len(r["_descendants"]) for r in resolved)
         sys.stderr.write(
-            f"[resolve] wrote {total} descendant mappings to {args.descendants_out}\n"
+            f"[resolve] wrote {total} descendant mappings ({n_rows} name rows) to "
+            f"{args.descendants_out}\n"
         )
 
     notes = [r for r in resolved if r["resolution_note"]]
