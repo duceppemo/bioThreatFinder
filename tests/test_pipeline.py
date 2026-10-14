@@ -1881,6 +1881,132 @@ def test_marker_catalogue_watchlist_join(tmp: Path) -> None:
            f"rc={proc.returncode} {proc.stderr[-200:]}")
 
 
+WATCH_COLS = ["taxid", "name", "resolved_rank", "group", "category",
+              "min_unique_reads", "min_breadth", "near_neighbour_taxids",
+              "n_descendants", "notes", "source", "resolution_note"]
+
+
+def _watch(path: Path, rows: list[dict]) -> Path:
+    out = [ "\t".join(WATCH_COLS) ]
+    for r in rows:
+        unknown = sorted(set(r) - set(WATCH_COLS))
+        if unknown:
+            raise KeyError(f"_watch() got column(s) not in WATCH_COLS: {unknown}")
+        out.append("\t".join(str(r.get(c, "")) for c in WATCH_COLS))
+    path.write_text("\n".join(out) + "\n")
+    return path
+
+
+def test_supra_specific_entries_are_leads(tmp: Path) -> None:
+    """A family cannot be confirmed as an organism, however good the geometry.
+
+    A watchlist entry resolved above species exists so a divergent member with no
+    reference of its own still surfaces - Kraken2 rolls Bundibugyo's reads up through
+    Filoviridae and every species-keyed row stays silent. What that supports is "a
+    member of this group is here", which is a lead. Scoring it as a species call would
+    put a family name in the `confirmed_in_silico` column.
+
+    The cap is explicit rather than left to breadth arithmetic, because a family
+    bundle's breadth divides the covered span by the summed ref_bp of every genome
+    sharing the taxid - so whether it clears `min_occupancy` depends on how many
+    genomes the family happens to have, and adding one more would change the verdict.
+    """
+    wl = _watch(tmp / "ranks.tsv", [
+        # Identical category and thresholds; `resolved_rank` is the only variable.
+        dict(taxid="11266", name="Filoviridae", resolved_rank="family", group="virus",
+             category="high_consequence", min_unique_reads=20, min_breadth=0.30,
+             n_descendants=103, source="test"),
+        dict(taxid="632", name="Yersinia pestis", resolved_rank="species",
+             group="bacteria", category="high_consequence", min_unique_reads=100,
+             min_breadth=0.01, near_neighbour_taxids="633;630", n_descendants=287,
+             source="test"),
+        # 18 of the 89 shipped entries resolve to NCBI rank "no rank" and every one
+        # names a real organism. A `!= "species"` test would cap Variola.
+        dict(taxid="10255", name="Variola virus", resolved_rank="no rank",
+             group="virus", category="high_consequence", min_unique_reads=20,
+             min_breadth=0.30, near_neighbour_taxids="10245;10243;10244;28873;12643",
+             n_descendants=4, source="test"),
+    ])
+
+    def viral(sample, taxid, taxon, **kw):
+        d = dict(sample=sample, role="sample", taxid=taxid, taxon=taxon, group="virus",
+                 reference_bp=19000, unique_reads=400, reads_per_million=80.0,
+                 breadth=0.9200, mean_depth=4.80, depth_cv=0.90, window_bp=190,
+                 windows_expected=100, windows_occupied=92, window_occupancy=0.9200,
+                 mean_identity=0.9960, neighbour_ratio="inf",
+                 screen_assigned_reads=420, mapped_fraction_of_assigned="0.9523",
+                 total_reads_screened=5000000, mapq_min=10)
+        d.update(kw)
+        return cov_row(**d)
+
+    cov = tmp / "leadcap.tsv"
+    write_cov(cov, [
+        viral("FAMILY", "11266", "Filoviridae"),
+        viral("NORANK", "10255", "Variola virus", reference_bp=185000,
+              window_bp=1850, windows_expected=100),
+        # Same bacterial geometry that reaches confirmed_in_silico in test_tiering.
+        cov_row(sample="SPECIES", role="sample", taxid="632", taxon="Yersinia pestis",
+                group="bacteria", reference_bp=4650000, unique_reads=820,
+                reads_per_million=164.0, breadth=0.3400, mean_depth=0.88, depth_cv=1.15,
+                window_bp=1000, windows_expected=4650, windows_occupied=2790,
+                window_occupancy=0.6000, mean_identity=0.9950,
+                best_neighbour_taxid="633", best_neighbour_reads=12,
+                neighbour_ratio="68.33", screen_assigned_reads=1000,
+                mapped_fraction_of_assigned="0.8200", total_reads_screened=5000000,
+                mapq_min=10),
+    ])
+    f = score(tmp, cov, extra=["--watchlist", str(wl)])
+
+    fam = f.get("FAMILY", {})
+    record("leadcap:a family-rank entry is capped at screened_only",
+           fam.get("tier") == "screened_only",
+           f"got {fam.get('tier')}, geometry was breadth 0.92 occupancy 0.92")
+    record("leadcap:the cap names the rank and the tier it replaced",
+           "CAPPED AT SCREENED_ONLY" in fam.get("reasons", "")
+           and "family" in fam.get("reasons", ""),
+           fam.get("reasons", "")[-200:])
+
+    sp = f.get("SPECIES", {})
+    record("leadcap:identical evidence at species rank is NOT capped",
+           sp.get("tier") == "confirmed_in_silico", f"got {sp.get('tier')}")
+    nr = f.get("NORANK", {})
+    record("leadcap:NCBI rank 'no rank' is NOT capped",
+           nr.get("tier") in ("supported", "confirmed_in_silico"),
+           f"got {nr.get('tier')} - Variola and 17 others resolve to 'no rank'")
+
+    # THE CAP MUST ONLY LOWER. `marker_veto` and `suppressed_control` outrank
+    # `screened_only` in TIER_ORDER but assert the OPPOSITE of presence; lowering them
+    # would turn a recorded negative into an open lead, and a control row reclassified
+    # to `control_background` would be promoted into a finding.
+    cov2 = tmp / "leadcap_floor.tsv"
+    write_cov(cov2, [
+        viral("SUPPRESSED", "11266", "Filoviridae", reads_per_million=30.0,
+              unique_reads=150),
+        viral("NTC", "11266", "Filoviridae", role="control", reads_per_million=22.0,
+              unique_reads=110, breadth=0.4000, windows_occupied=40,
+              window_occupancy=0.4000, total_reads_screened=2500000),
+    ])
+    g = score(tmp, cov2, extra=["--watchlist", str(wl)])
+    record("leadcap:a suppressed family row is not lifted to screened_only",
+           g.get("SUPPRESSED", {}).get("tier") == "suppressed_control",
+           f"got {g.get('SUPPRESSED', {}).get('tier')}")
+    record("leadcap:a family row in a control stays control_background",
+           g.get("NTC", {}).get("tier") == "control_background",
+           f"got {g.get('NTC', {}).get('tier')}")
+
+    # The shipped pack holds nothing supra-specific, so the cap changes no finding
+    # today. If that stops being true this assertion is the notice.
+    with (PACK / "watchlist.resolved.tsv").open() as fh:
+        ranks = {r["name"]: r["resolved_rank"]
+                 for r in csv.DictReader(fh, delimiter="\t")}
+    sys.path.insert(0, str(BIN))
+    import score_evidence
+    supra = sorted(n for n, r in ranks.items()
+                   if r.strip().lower() in score_evidence.SUPRA_SPECIFIC_RANKS)
+    record("leadcap:the shipped watchlist has no supra-specific entry yet",
+           not supra, f"capped entries: {supra}")
+
+
 CASES = {
     "selftests": test_selftests,
     "tiering": test_tiering,
@@ -1906,6 +2032,7 @@ CASES = {
     "markerjoin": test_marker_catalogue_watchlist_join,
     "hopguard": test_index_hop_batch_guard,
     "defaults": test_scorer_defaults_match_shipped_config,
+    "leadcap": test_supra_specific_entries_are_leads,
 }
 
 

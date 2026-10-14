@@ -82,6 +82,23 @@ ASSERTS_PRESENCE = {
     "indistinguishable_complex",
 }
 
+# Ranks that cannot name an organism. A watchlist entry resolved to one of these
+# is a LEAD: the classifier rolled reads up to it, which is grounds to look, not
+# grounds to call. Capped at `screened_only` below.
+#
+# An allowlist, not `!= "species"`, because 18 of the 89 current entries resolve to
+# NCBI rank "no rank" and every one of them names a real organism - Variola virus,
+# Zaire ebolavirus, SARS-CoV-2. A denylist would cap Variola. Nothing in the shipped
+# watchlist is in this set, so adding it changes no finding today; it exists so that
+# the first supra-specific entry is a lead by construction rather than by whatever
+# breadth arithmetic its genome bundle happens to produce.
+SUPRA_SPECIFIC_RANKS = {
+    "subgenus", "genus", "subtribe", "tribe", "subfamily", "family",
+    "superfamily", "parvorder", "infraorder", "suborder", "order",
+    "superorder", "subclass", "class", "superclass", "subphylum", "phylum",
+    "kingdom", "superkingdom", "domain", "realm", "subrealm",
+}
+
 TIER_ORDER = [
     "no_reference",
     "control_background",
@@ -1201,6 +1218,40 @@ def main() -> int:
             reasons.append(f"negative control background at {rpm:.2f} RPM "
                            f"(was {tier} before control reclassification)")
             tier = "control_background"
+
+        # AFTER the control reclassification above, not before. That branch keys on
+        # ASSERTS_PRESENCE, and a tier this cap has already lowered to `screened_only`
+        # is not in that set - so capping first left a contaminated control standing as
+        # an open lead in its own report instead of being named as background.
+        # A FAMILY IS NOT AN ORGANISM. A watchlist entry resolved above species exists
+        # so that a divergent member with no reference of its own still surfaces - the
+        # Bundibugyo case, where Kraken2 assigns 3992 reads that roll up through
+        # Filoviridae and every species-keyed row stays silent. What the pipeline can
+        # honestly say about such a row is "something in this family is here", which is
+        # `screened_only`: reported, never scored as a species call.
+        #
+        # Capped explicitly rather than left to geometry. A family bundle's breadth is
+        # the covered span over the summed ref_bp of every genome sharing the taxid, so
+        # whether it clears `min_occupancy` is a function of how many genomes the family
+        # happens to have - eight small filovirus genomes land near 0.13 and miss the
+        # 0.15 floor, and adding a ninth would change the answer. That is arithmetic
+        # accident, not a decision.
+        #
+        # Only `supported` and `confirmed_in_silico` are capped. `marker_veto` and
+        # `suppressed_control` rank higher in TIER_ORDER but assert the opposite of
+        # presence; lowering them to `screened_only` would turn a recorded negative into
+        # an open lead.
+        if (tier in ("supported", "confirmed_in_silico")
+                and (meta.get("resolved_rank") or "").strip().lower()
+                in SUPRA_SPECIFIC_RANKS):
+            was = tier
+            tier = "screened_only"
+            reasons.append(
+                f"CAPPED AT SCREENED_ONLY (was {was}): this watchlist entry resolves to "
+                f"rank {meta.get('resolved_rank')}, which names a group and not an "
+                f"organism. The evidence supports 'a member of this group is present'; "
+                f"it cannot say which member, and a group is not a reportable call. "
+                f"Add the species as its own watchlist entry to score it.")
 
         scr = screen.get((row.get("sample", ""), taxid), {})
         sylph_support = scr.get("sylph_abundance", "")
