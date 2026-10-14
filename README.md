@@ -20,6 +20,7 @@ across human, animal and plant health.
 | Document | What it is for |
 |---|---|
 | [`docs/decisions.md`](docs/decisions.md) | **Why each tool was chosen**, the evidence behind it, and what would reverse it. Evidence is tagged independent / tool-paper / read-from-source / measured-here / reasoned, so judgement is distinguishable from measurement. Includes two decisions that were reversed. |
+| [`docs/samplesheet.md`](docs/samplesheet.md) | The input format, column by column — and what `role=control` actually does, including the run-global scope of control subtraction and how to read the audit table before trusting a negative. |
 | [`docs/verification.md`](docs/verification.md) | What has actually been checked, how to re-run it, and an explicit list of what has **not** been checked. |
 | [`docs/benchmarking.md`](docs/benchmarking.md) | Benchmark design, the tool bake-off, and what simulation cannot tell you. |
 | [`docs/validation.md`](docs/validation.md) | The route to a defensible result: normative standards, reference materials, EQA, regulatory position. |

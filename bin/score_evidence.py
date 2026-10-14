@@ -717,6 +717,16 @@ def main() -> int:
         if row.get("role") != "control":
             control_reach[taxid]["rows"] += 1
 
+        # HOISTED OUT OF THE TIER CHAIN ON PURPOSE. These used to be bound inside the
+        # final `else`, which meant a row pre-empted by the read floor or by
+        # attributed_to_neighbour never bound them at all - and Python leaks loop locals
+        # across iterations, so reading them from outside the `else` would have handed
+        # that row the PREVIOUS row's control name. A wrong attribution that looks right
+        # is worse than a blank one, and this file already carries that exact bug's scar
+        # for `platform`. Binding unconditionally, once per row, removes the class.
+        ctrl = control_rpm.get(taxid, 0.0)
+        ctrl_name = control_src.get(taxid, "?")
+
         unique_reads = as_float(row.get("unique_reads"))
         breadth = as_float(row.get("breadth"))
         occupancy = as_float(row.get("window_occupancy"))
@@ -842,8 +852,6 @@ def main() -> int:
                     f"cross-mapping and not a competing organism (D12). Attribution "
                     f"withheld; judged on its own evidence below."
                 )
-            ctrl = control_rpm.get(taxid, 0.0)
-            ctrl_name = control_src.get(taxid, "?")
             if row.get("role") != "control" and ctrl > 0:
                 control_reach[taxid]["eligible"] += 1
             if row.get("role") != "control" and ctrl > 0 and rpm < args.control_ratio * ctrl:
@@ -1178,6 +1186,17 @@ def main() -> int:
                 "diagnostic deletion. Add a block to marker_rules.yaml, or declare "
                 "`no_markers_available: true` there to state that none exist.")
 
+        # A ROW A CONTROL NEVER GOT TO VOTE ON IS NOT A ROW NO CONTROL TOUCHED.
+        # Suppression lives in the final else of the tier chain, so a row below the read
+        # floor or already taken by attributed_to_neighbour exits before the control is
+        # consulted. Those rows used to carry "" - the same value as a taxon no control
+        # ever raised - which made the column unable to express the very case the stderr
+        # table was built to expose. Measured on lod_v3_threearm: 18 B. anthracis rows
+        # sitting under a 40.09 RPM control (a standing 200.46 RPM floor) were
+        # indistinguishable from 6 Y. pestis rows no control had raised at all.
+        if row.get("role") != "control" and ctrl > 0 and not control_subtraction:
+            control_subtraction = f"not_evaluated:{ctrl_name}@{ctrl:.2f}"
+
         if row.get("role") == "control" and tier in ASSERTS_PRESENCE:
             reasons.append(f"negative control background at {rpm:.2f} RPM "
                            f"(was {tier} before control reclassification)")
@@ -1269,9 +1288,11 @@ def main() -> int:
             "strain_typing": strain_typing,
             "strain_claim": strain_claim,
             "strain_claim_reason": strain_reason,
-            # "" | cleared:<ctrl>@<rpm> | suppressed:<ctrl>@<rpm> |
-            # exceeds_control:<ctrl>@<rpm>. Empty means no control raised this taxon,
-            # which is NOT the same as the control having cleared it.
+            # "" | cleared:<c>@<rpm> | suppressed:<c>@<rpm> | exceeds_control:<c>@<rpm>
+            # | not_evaluated:<c>@<rpm>. Empty means NO CONTROL RAISED THIS TAXON in
+            # this run - distinct from `cleared:` (a control held it and the sample beat
+            # the margin) and from `not_evaluated:` (a control held it, but an earlier
+            # gate decided the row before subtraction could vote).
             "control_subtraction": control_subtraction,
             "reasons": " | ".join(reasons),
         })
@@ -1347,11 +1368,30 @@ def main() -> int:
     # ones that suppressed nothing - those are the dangerous ones, because a control
     # holding a select agent at a level too low to bite today is a standing floor that
     # will bite the moment a sample arrives just under it, and today it is invisible.
-    if control_rpm:
+    # `if control_rpm:` alone is truthy when every entry is 0.0, and the per-row
+    # `ctrl <= 0` skip below then prints a header with no body.
+    if any(v > 0 for v in control_rpm.values()):
         taxon_of = {r["taxid"]: r.get("taxon", "") for r in coverage}
+        live = [t for t, v in control_rpm.items() if v > 0]
+
+        # WIDTHS COME FROM THE DATA, AND TRUNCATION IS VISIBLE WHEN IT HAPPENS.
+        # The first version of this table padded to constants and sliced `src` with
+        # [-37:], which truncates from the LEFT and without a marker. d12fine's control
+        # names are 38-40 characters, so every one of them printed as an identifier that
+        # does not exist - `od_gram_negative_fine_illumina_r1_NTC` is not a sample, is
+        # not in the samplesheet, and greps to nothing. In the one table whose whole
+        # purpose is to name the control responsible, a silently altered identifier is
+        # worse than no table: it reads as a data error rather than a display one.
+        def fit(text: str, width: int) -> str:
+            return text if len(text) <= width else text[:width - 1] + "\u2026"
+
+        w_name = max(12, min(40, max(len(taxon_of.get(t, "") or f"taxid {t}")
+                                     for t in live)))
+        w_src = max(12, min(48, max(len(control_src.get(t, "?") or "?")
+                                    for t in live)))
         sys.stderr.write(
             f"\n[score] CONTROL SUBTRACTION AUDIT (control_ratio {args.control_ratio}x)\n"
-            f"[score]   {'taxon':<28}{'control':<38}{'ctrl RPM':>12}"
+            f"[score]   {'taxon':<{w_name}}  {'control':<{w_src}}{'ctrl RPM':>12}"
             f"{'floor RPM':>12}{'suppr':>7}{'elig':>6}{'rows':>6}\n")
         for tid, ctrl in sorted(control_rpm.items(),
                                 key=lambda kv: -kv[1]):
@@ -1359,12 +1399,15 @@ def main() -> int:
                 continue
             reach = control_reach.get(tid, {"rows": 0, "eligible": 0,
                                             "suppressed": 0, "exceeds": 0})
-            name = (taxon_of.get(tid, "") or f"taxid {tid}")[:27]
-            src = (control_src.get(tid, "?") or "?")[-37:]
+            name = fit(taxon_of.get(tid, "") or f"taxid {tid}", w_name)
+            src = fit(control_src.get(tid, "?") or "?", w_src)
             flags = []
             if reach["suppressed"] == 0:
-                # Not "clean". Armed and unfired.
-                flags.append("LATENT")
+                # Armed and unfired - but only when there was something to fire AT.
+                # A taxon with no sample row in this run at all is merely unexercised,
+                # and calling that LATENT would bury the dangerous case (rows present,
+                # every one pre-empted) among harmless ones.
+                flags.append("LATENT" if reach["rows"] else "UNEXERCISED")
             if reach["exceeds"]:
                 flags.append(f"{reach['exceeds']} EXCEED-CONTROL")
             if reach["rows"] and not reach["eligible"]:
@@ -1373,7 +1416,7 @@ def main() -> int:
                 # control had been consulted and had cleared them.
                 flags.append("all rows pre-empted by an earlier gate")
             sys.stderr.write(
-                f"[score]   {name:<28}{src:<38}{ctrl:>12.2f}"
+                f"[score]   {name:<{w_name}}  {src:<{w_src}}{ctrl:>12.2f}"
                 f"{args.control_ratio * ctrl:>12.2f}{reach['suppressed']:>7}"
                 f"{reach['eligible']:>6}{reach['rows']:>6}"
                 f"{('   <- ' + ', '.join(flags)) if flags else ''}\n")

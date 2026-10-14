@@ -31,7 +31,7 @@ What it requires, and where this repo stands:
 | Reproducibility: inter-assay ≥3 specimens × 3 days; intra-assay ≥3 × triplicate | **Not started** |
 | **Single locked-down pipeline version** for validation | Partially — version and command are recorded; container digests are not pinned |
 | Revalidate on **≥3 previously analysed runs** after any pipeline change | **Not implemented** |
-| No-template control in **every** amplification step; process positive control; PhiX; internal/inhibition control when sequencing direct from primary specimen | Samplesheet has only `role=sample\|control`. **Gap** — see roadmap item B |
+| No-template control in **every** amplification step; process positive control; PhiX; internal/inhibition control when sequencing direct from primary specimen | Samplesheet has only `role=sample\|control`. **Gap** — see roadmap item B; the schema itself is now documented in `docs/samplesheet.md` |
 | SOP must describe database update procedures | **Not written** |
 
 Two findings from it that are counter-intuitive and load-bearing:

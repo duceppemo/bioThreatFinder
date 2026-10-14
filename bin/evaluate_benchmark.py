@@ -104,6 +104,51 @@ PRESENCE_ASSERTING = {POSITIVE, VACCINE}
 MANIFEST_REQUIRED = ["sample", "scenario_id", "platform", "truth_present", "truth_absent"]
 
 
+def check_hopped_control_isolation(manifest: list[dict], path) -> None:
+    """D16a: a deliberately contaminated control may not share a RUN with other scenarios.
+
+    simulate_benchmark.py refuses to BUILD such a batch, but that guard sits at batch
+    construction and three routes get past it: hand-merging two samplesheets, building
+    two batches and running the pipeline over both, and re-scoring two batches' published
+    coverage TSVs together. In each case score_evidence.py sees one run, `control_rpm`
+    goes run-global, and the hopped control imposes a control_ratio floor on its target
+    in every unrelated scenario - which is the defect, arriving with the build-time guard
+    satisfied.
+
+    The manifest is the only artifact that knows both facts, and it already records them:
+    the simulator writes `index_hop=<frac>|from=<donor>|reads=<n>` into `notes` for every
+    recipient, beside `ntc` and `matrix_blank`. So this is checkable wherever a manifest
+    is, which is everywhere a benchmark is evaluated.
+
+    A WARNING AND NOT A REFUSAL, deliberately: by the time anything reads a manifest the
+    reads exist and the pipeline has run, so exiting here destroys a completed run's
+    evaluation without preventing anything. The build-time guard is the refusal; this is
+    the detector for the run that got built some other way. It names the mechanism rather
+    than only the rule, because whoever reaches this did not go through the simulator.
+    """
+    hopped = sorted({(r.get("scenario_id") or "?") for r in manifest
+                     if "index_hop=" in (r.get("notes") or "")})
+    if not hopped:
+        return
+    sids = sorted({(r.get("scenario_id") or "?") for r in manifest})
+    others = [s for s in sids if s not in hopped]
+    if not others:
+        return
+    sys.stderr.write(
+        f"[bench] WARNING: {path} mixes deliberately index-hopped control(s) from "
+        f"{', '.join(hopped)} with {len(others)} other scenario(s): "
+        f"{', '.join(others[:4])}"
+        f"{f' and {len(others) - 4} more' if len(others) > 4 else ''}\n"
+        f"[bench]   A hopped control holds REAL target reads by design, and "
+        f"score_evidence.py subtracts controls RUN-GLOBALLY. Every finding for that "
+        f"target in the other scenario(s) is under a control_ratio floor it should "
+        f"never have been under, so a genuine detection can read as "
+        f"suppressed_control. LOD results from this run are not trustworthy for the "
+        f"hopped taxon (docs/decisions.md D16a, D21).\n"
+        f"[bench]   simulate_benchmark.py refuses to build this; it was assembled "
+        f"some other way. Re-run the hopped scenario on its own.\n")
+
+
 def check_tier_name(name, sid: str, taxon: str, check: str) -> dict | None:
     """A FAIL row when an expectation names a tier that does not exist.
 
@@ -885,6 +930,8 @@ def main() -> int:
     if missing:
         sys.exit(f"ERROR: manifest is missing required column(s): {', '.join(missing)}")
 
+    check_hopped_control_isolation(manifest, args.manifest)
+
     targeted = None
     if args.watchlist:
         wl = read_tsv(args.watchlist)
@@ -1086,6 +1133,33 @@ def self_test() -> int:
     check(outcome_of("vaccine_strain") == VACCINE, "vaccine -> VACCINE")
     check(outcome_of("marker_veto") == NEGATIVE, "veto -> NEGATIVE")
     check(outcome_of("suppressed_control") == NEGATIVE, "suppressed -> NEGATIVE")
+
+    # D16a/D21: the manifest-level detector for a mixed run that the build-time guard
+    # in simulate_benchmark.py never saw - a hand-merged samplesheet, two batches run
+    # together, or two batches' coverage re-scored as one. Asserted in BOTH directions,
+    # because a detector that fires on everything would pass the first check alone.
+    import io as _io
+    import contextlib as _ctx
+
+    def _warned(rows):
+        buf = _io.StringIO()
+        with _ctx.redirect_stderr(buf):
+            check_hopped_control_isolation(rows, "<self-test>")
+        return "WARNING" in buf.getvalue()
+
+    hop_row = {"sample": "hop_ntc", "scenario_id": "contamination_index_hop",
+               "notes": "ntc|index_hop=0.001|from=hop_s1|reads=200"}
+    lod_row = {"sample": "lod_s1", "scenario_id": "lod_gram_negative", "notes": ""}
+    hop_s1 = {"sample": "hop_s1", "scenario_id": "contamination_index_hop",
+              "notes": "index_hop=0.001|from=hop_s1|reads=200"}
+    check(_warned([hop_row, hop_s1, lod_row]),
+          "hopped control mixed with another scenario warns")
+    check(not _warned([hop_row, hop_s1]),
+          "hopped control alone in its batch does NOT warn")
+    check(not _warned([lod_row, {"sample": "lod_s2",
+                                 "scenario_id": "negative_host_only", "notes": "ntc"}]),
+          "two ordinary scenarios do NOT warn")
+    check(not _warned([]), "an empty manifest does NOT warn")
     check(outcome_of("no_reference") == NOT_ASSESSED, "no_reference -> NOT_ASSESSED")
     check(outcome_of(None) == NEGATIVE, "no finding -> NEGATIVE")
     check(tier_rank(None) == -1, "no finding ranks below all tiers")

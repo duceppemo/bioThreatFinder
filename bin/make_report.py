@@ -305,14 +305,26 @@ def main() -> int:
             kind = (f.get("control_subtraction") or "").split(":", 1)[0]
             by_kind.setdefault(kind, []).append(f)
         n_exc = len(by_kind.get("exceeds_control", []))
+        # exceeds_control rows ARE suppressed rows - the kind only records why. Counting
+        # the two buckets separately reported "28 suppressed" on a batch that suppressed
+        # 36, which is wrong on its own terms even though the next sentence named the
+        # other 8.
+        n_suppressed = len(by_kind.get("suppressed", [])) + n_exc
+        n_notev = len(by_kind.get("not_evaluated", []))
         parts.append("<h2>Control subtraction <span class='pill "
                      f"{'warn' if n_exc else 'muted'}'>{len(subtracted)}</span></h2>")
-        blurb = (f"{len(by_kind.get('suppressed', []))} finding(s) suppressed, "
-                 f"{len(by_kind.get('cleared', []))} cleared the margin.")
+        blurb = (f"{n_suppressed} finding(s) suppressed"
+                 + (f" ({n_exc} of them carrying more of the organism than the control "
+                    f"does)" if n_exc else "")
+                 + f", {len(by_kind.get('cleared', []))} cleared the margin.")
         if n_exc:
-            blurb += (f" {n_exc} suppressed finding(s) carry MORE of the organism than "
-                      f"the control does and are held down only by the control ratio - "
-                      f"review these before treating them as negative.")
+            blurb += (f" Those {n_exc} are held down only by the control ratio, not by "
+                      f"the control having more - review before treating them as "
+                      f"negative.")
+        if n_notev:
+            blurb += (f" A further {n_notev} finding(s) sit under a control floor but "
+                      f"were decided by an earlier gate, so control subtraction never "
+                      f"voted on them.")
         parts.append(f"<p class='sub'>{esc(blurb)}</p>")
         keys = ["sample", "taxon", "tier", "reads_per_million", "control_subtraction"]
         head = "".join(f"<th>{esc(k)}</th>" for k in keys)

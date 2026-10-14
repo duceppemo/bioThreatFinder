@@ -1035,6 +1035,21 @@ for this exact reason. The guard is extended to the batch level: a scenario with
 in one batch, which per D16a's own text **nobody has ever done**, and it cannot regress
 D14 because it does not touch scoring.
 
+**"Closed" means the benchmark manifestation, not the defect.** A real laboratory with a
+genuinely contaminated NTC reproduces D16a with no benchmark anywhere near it, and
+nothing here prevents that — run-global subtraction is *correct* for that lab, and what
+was missing was any way to see it happening. The audit below is that remedy. Refusing
+the batch closes the way this project can build the defect; it does not close the way the
+world can present it. Those are different claims and this file should not blur them.
+
+Three routes also get past a build-time guard even inside the benchmark: hand-merging two
+samplesheets, running the pipeline over two separately-built batches, and re-scoring two
+batches' published coverage TSVs together — the last of which is how most measurement in
+this project is done. `evaluate_benchmark.py` therefore warns when a manifest contains
+any `index_hop=` row **and** more than one `scenario_id`. A warning rather than a
+refusal: by the time a manifest is read the reads exist and the pipeline has run, so
+exiting destroys a completed evaluation without preventing anything.
+
 `control_group` is **not** shipped. It is the better long-term abstraction, but its
 trigger rule was wrong twice in two days (scenario id → `include_ntc` →
 `index_hop_fraction`), the samplesheet has no schema documentation anywhere in the repo
@@ -1080,7 +1095,17 @@ the two extra rows are *E. faecalis* and *S. aureus*, which the shipped settings
 `attributed_to_neighbour` before suppression can see them. The 7 was reported as a
 correction to this file's D16a note; **the note was right and no correction was needed.**
 The default is now 0, and `tests/test_pipeline.py defaults:` asserts that every threshold
-present on both sides agrees.
+present on both sides agrees — including a check that the list of compared pairs is still
+the complete list, since an uncompared new pair is how this one survived.
+
+`[MEASURED]` A consequence worth stating plainly: **the published findings under `runs/`
+are no longer reproducible at the shipped configuration.** The config moved to 0 at
+`c49beb1` (2026-10-08) and `zymo_rl100` was produced on 2026-10-07 — its published
+findings carry 16 `attributed_to_neighbour` rows, which a re-score reproduces at 0.50 and
+turns into 45 at 0. D20's alignment floor moved too. **A re-score of a published batch is
+a different measurement from the batch**, and every comparison in this file that
+re-scores must state which configuration it used. The `defaults:` test removes one cause
+of that drift, not all of them.
 
 ### What this did not fix
 
@@ -1098,6 +1123,47 @@ pinned by fixtures and a synthetic injection rather than by a run.
 samplesheet, where run-global subtraction is wrong for a reason that is not a benchmark
 artefact. That is when `control_group` should land — with a samplesheet schema document,
 a non-simulator fixture, and reconciled against `control_type`.
+
+---
+
+## D22 — `control_ratio = 5.0` is underived, and now there is an instrument that could derive it
+
+2026-10-13, split out of D21 because it is a threshold with no provenance rather than a
+defect with a fix.
+
+A finding is tiered `suppressed_control` when `sample_rpm < control_ratio x control_rpm`,
+with `control_ratio` defaulting to **5.0**. `[REASONED]` Nothing in this file, in
+`nextflow.config`'s comments, or in the pack derives that 5. It is not traceable to a
+measurement, a guideline or a citation; it is a round number that has been load-bearing
+since the first run.
+
+`[MEASURED]` What it decides, from the audit added in D21:
+
+  - **11 suppressed rows across `lod_v4` and `d12fine` carry MORE of the organism than
+    the control does** — sample/control ratios of 1.01–1.03. The contamination model did
+    not decide these. The margin did, alone.
+  - The margin sets an implied floor per taxon per run that nobody chose: *E. coli* at
+    **1,665,171 RPM** in `d12fine`, *T. gondii* at 21,204, *B. anthracis* at **159** —
+    the last on a select agent, from a control holding 31.83 RPM.
+  - A 5x margin means a control at 1,000 RPM owns everything below 5,000 RPM. All 9 of
+    `d12fine`'s genuine *Y. pestis* detections sit at 2,149–2,925 RPM, inside that band.
+
+**Why it is not being changed here.** Lowering it admits contamination; raising it
+suppresses more true positives; and this entry cannot say which, because the project has
+never measured the distribution of sample/control ratios for *known* contamination
+against *known* presence. Changing an underived number to a different underived number
+is not progress.
+
+**What would derive it.** The audit table's `floor RPM` column is the missing instrument:
+it makes every implied floor visible per run, so a batch containing both genuine
+low-level positives and genuine carry-over contamination would show where the two
+populations separate — the same shape of argument D12 used for neighbour uniformity, and
+the same caution, since that separation looked clean on five bundles and narrowed to a
+0.07 gap across 182 rows. Until then 5.0 stays, declared rather than justified.
+
+**What would reverse it:** any measurement of the ratio distribution; or a single
+documented case of a true positive suppressed by the margin alone, which the
+`exceeds_control` marker will now surface.
 
 ---
 

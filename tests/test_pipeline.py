@@ -1564,6 +1564,104 @@ def test_control_subtraction_audit(tmp: Path) -> None:
            "150.00" in proc.stderr, "want 5.0 x 30.00 = 150.00 in the audit table")
     record("ctrlaudit:a row pre-empted by an earlier gate is named as such",
            "pre-empted by an earlier gate" in proc.stderr, proc.stderr[-300:])
+    # A row the control never got to vote on must NOT look like a row no control
+    # touched. These two were the same empty string, which made the column unable to
+    # express the case the whole audit exists for.
+    with (tmp / "audit_latent_out.tsv").open() as fh:
+        latent = {r["sample"]: r for r in csv.DictReader(fh, delimiter="\t")}
+    record("ctrlaudit:a pre-empted row records not_evaluated, not empty",
+           latent.get("SPECIMEN", {}).get("control_subtraction", "").startswith(
+               "not_evaluated:NTC@"),
+           latent.get("SPECIMEN", {}).get("control_subtraction", "<missing>"))
+
+    # (e) THE CONTROL NAME MUST BE THE CONTROL'S NAME. The first version of the table
+    #     padded to a constant and sliced [-37:], truncating from the LEFT with no
+    #     marker, so d12fine's 38-40 character control names all printed as identifiers
+    #     that do not exist - `od_gram_negative_fine_illumina_r1_NTC` greps to nothing.
+    #     In the one table built to name the control responsible, that reads as a data
+    #     error rather than a display one.
+    long_name = "lod_gram_negative_fine_illumina_r1_NTC_and_then_some_more"
+    cov = tmp / "audit_longname.tsv"
+    write_cov(cov, [
+        cov_row(sample=long_name, role="control", unique_reads=1000,
+                reads_per_million=100.0, screen_assigned_reads=1005, **shape),
+        cov_row(sample="SPECIMEN", role="sample", unique_reads=2000,
+                reads_per_million=200.0, screen_assigned_reads=2005, **shape),
+    ])
+    proc = run([sys.executable, BIN / "score_evidence.py", "--coverage", cov,
+                "--watchlist", PACK / "watchlist.resolved.tsv",
+                "--pack-yaml", PACK / "pack.yaml", "--control-ratio", "5.0",
+                "--out", tmp / "audit_longname_out.tsv"])
+    # Left truncation drops the START of the name, so the discriminator is whether the
+    # beginning survived - not whether some fragment appears. ("od_gram_negative" is a
+    # substring of this very fixture's name, which is how the first version of this
+    # check managed to fail against correct code.)
+    record("ctrlaudit:a long control name keeps its beginning, not its end",
+           long_name[:24] in proc.stderr, proc.stderr[-300:])
+    record("ctrlaudit:and is visibly elided when it does not fit",
+           long_name in proc.stderr or "\u2026" in proc.stderr, proc.stderr[-300:])
+
+    # (f) A taxon with a control but no sample row at all is UNEXERCISED, not LATENT.
+    #     Calling it LATENT buries the dangerous case - rows present, every one
+    #     pre-empted - among harmless ones.
+    cov = tmp / "audit_unexercised.tsv"
+    write_cov(cov, [
+        cov_row(sample="NTC", role="control", unique_reads=300,
+                reads_per_million=30.0, screen_assigned_reads=305, **shape),
+    ])
+    proc = run([sys.executable, BIN / "score_evidence.py", "--coverage", cov,
+                "--watchlist", PACK / "watchlist.resolved.tsv",
+                "--pack-yaml", PACK / "pack.yaml", "--control-ratio", "5.0",
+                "--out", tmp / "audit_unexercised_out.tsv"])
+    record("ctrlaudit:a control with no sample row to act on reads UNEXERCISED",
+           "UNEXERCISED" in proc.stderr and "LATENT" not in proc.stderr,
+           proc.stderr[-300:])
+
+
+def test_cross_scenario_control_bleed(tmp: Path) -> None:
+    """D16a's mechanism, preserved as a test rather than as a batch on a disk.
+
+    `simulate_benchmark.py` now refuses to BUILD a batch mixing a hopped control with
+    other scenarios, so the batch that would demonstrate this is unconstructible by
+    design. That makes this fixture the only standing record of what is at stake: a
+    control belonging to one scenario suppressing genuine detections in another, because
+    `score_evidence.py` keys `control_rpm` on taxid alone across the whole run.
+
+    The numbers are the measured ones - injecting a 1,000 RPM control row into the real
+    zymo_rl100 coverage set turns a 1,816.7 RPM *supported* call into
+    `suppressed_control`. If anyone relaxes the hop guard, or revisits scoping
+    `control_rpm` by scenario, this is the behaviour that moves.
+    """
+    shape = dict(taxid="1639", taxon="Listeria monocytogenes", group="bacteria",
+                 reference_bp=2900000, reference_contigs=1, breadth=0.9100,
+                 mean_depth=12.0, depth_cv=0.40, window_bp=1000, windows_expected=2900,
+                 windows_occupied=2700, window_occupancy=0.9310, mean_identity=0.9900,
+                 mean_alignment_length=95, neighbour_ratio="inf",
+                 mapped_fraction_of_assigned="0.9900", total_reads_screened=1000000,
+                 mapq_min=10)
+    cov = tmp / "crossbleed.tsv"
+    write_cov(cov, [
+        # scenB's deliberately contaminated NTC. Correct in isolation.
+        cov_row(sample="scenB_NTC", role="control", unique_reads=10000,
+                reads_per_million=1000.0, screen_assigned_reads=10005, **shape),
+        # scenA's samples, a different scenario entirely. Both genuinely positive.
+        cov_row(sample="scenA_s1", role="sample", unique_reads=18167,
+                reads_per_million=1816.7, screen_assigned_reads=18200, **shape),
+        cov_row(sample="scenA_s2", role="sample", unique_reads=3555,
+                reads_per_million=355.5, screen_assigned_reads=3600, **shape),
+    ])
+    got = score(tmp, cov)
+    for s_id in ("scenA_s1", "scenA_s2"):
+        tier = got.get(s_id, {}).get("tier", "<missing>")
+        record(f"crossbleed:{s_id} is suppressed by another scenario's control",
+               tier == "suppressed_control", f"got {tier}")
+    record("crossbleed:the 1816 RPM row is flagged as exceeding its suppressor",
+           got.get("scenA_s1", {}).get("control_subtraction", "").startswith(
+               "exceeds_control:scenB_NTC@"),
+           got.get("scenA_s1", {}).get("control_subtraction", "<missing>"))
+    record("crossbleed:and the suppressing control is named, not just its RPM",
+           "scenB_NTC" in got.get("scenA_s2", {}).get("reasons", ""),
+           got.get("scenA_s2", {}).get("reasons", "")[:120])
 
 
 def test_index_hop_batch_guard(tmp: Path) -> None:
@@ -1651,6 +1749,18 @@ def test_scorer_defaults_match_shipped_config(tmp: Path) -> None:
     record("defaults:the config/argparse pairs still resolve", checked >= 2,
            f"only {checked} pair(s) matched both files")
 
+    # THE LIST ABOVE MUST NOT SILENTLY STOP BEING THE WHOLE LIST. A new numeric param
+    # that exists on both sides and is not named above would escape the check entirely,
+    # which is how the min_neighbour_uniformity mismatch survived in the first place.
+    # Derive the pairs from the files and require the hand-written list to match.
+    cfg_params = set(_re.findall(r"^\s*([a-z_]+)\s*=\s*[0-9.]+\s*$", cfg, _re.M))
+    cli_flags = set(_re.findall(r'add_argument\(\s*"--([a-z-]+)"[^)]*?default=[0-9.]',
+                                src, _re.S))
+    both = {f.replace("-", "_") for f in cli_flags} & cfg_params
+    named = {"min_neighbour_uniformity", "pedestal_max_uniformity", "control_ratio"}
+    record("defaults:every numeric param on both sides is actually checked",
+           both <= named, f"unchecked pair(s): {sorted(both - named)}")
+
 
 CASES = {
     "selftests": test_selftests,
@@ -1672,6 +1782,7 @@ CASES = {
     "reachable": test_gate_reachability,
     "d17a": test_marker_block_required_to_confirm,
     "ctrlaudit": test_control_subtraction_audit,
+    "crossbleed": test_cross_scenario_control_bleed,
     "hopguard": test_index_hop_batch_guard,
     "defaults": test_scorer_defaults_match_shipped_config,
 }

@@ -199,6 +199,17 @@ carries an explicit metadata enum set:
 Our samplesheet has only role=sample|control, which cannot distinguish an extraction
 blank from a no-template control from a mock community - and those fail differently.
 
+**A `control_group` column was designed, measured and rejected for this slot (D21,
+2026-10-13).** It would have scoped `control_rpm` per group so one scenario's
+contaminated control could not suppress another's. Do not redesign it from scratch:
+the measurement that killed it is that scoping `control_rpm` away from the whole run
+REINSTATES D14 - re-scoring lod_v4 without its cross-scenario controls returns 30 rows,
+15 of them as false `confirmed_in_silico` on E. coli, because `negative_host_only`'s
+matrix blank deliberately relies on the run-global reach. Whatever `control_type`
+becomes, it must leave a blank that covers the whole run expressible, and the two
+mechanisms must be reconciled rather than stacked. See also D22: the `control_ratio`
+multiplier that turns any control into a floor is itself underived.
+
 ### C. Negative-control-derived contaminant watchlist
 Taxa present in >=50% of negative controls at >0.5 CPM go on a per-site watchlist,
 **flagged not deleted** (decontam; Ibanez-Lligona et al. 2026, Front Microbiol,
