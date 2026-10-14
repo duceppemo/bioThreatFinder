@@ -2068,6 +2068,11 @@ def test_supra_specific_entries_are_leads(tmp: Path) -> None:
     ])
     h = score(tmp, cov3, extra=["--watchlist", str(wl)])
     dil = h.get("DILUTED", {})
+    record("leadcap:the substitution is recorded in the reasons",
+           "GROUP GEOMETRY" in dil.get("reasons", "")
+           and "NC_014373.1" in dil.get("reasons", ""),
+           "the published row keeps the bundle breadth, so a reader comparing it to "
+           f"the floor needs to be told: {dil.get('reasons','')[:160]}")
     record("leadcap:a group row is judged on its best reference, not the bundle",
            dil.get("tier") == "group_lead",
            f"got {dil.get('tier')}; bundle breadth 0.0858 is below the 0.20 floor, "

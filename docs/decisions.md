@@ -991,6 +991,91 @@ matrix; it does nothing for a specimen type whose matrix was never blanked.
 
 ---
 
+## D25 — The Filoviridae entry, measured: it costs nothing and recovers the agent, but only after both geometry statistics were replaced
+
+2026-10-14. D24 built the machinery; this is the entry and its price. Two batches were
+run against it: `divergent_v1` (6 samples, does the lead fire) and `lod_v4` (24 samples,
+9 of them `negative_host_only`, does it misfire).
+
+**The benefit.** `Filoviridae` fires on 3 of 3 divergent replicates at 4,017 RPM and
+5.43x depth, with its member covered end to end. The baseline it replaces is **zero
+findings on all six samples** — complete silence on a correctly classified agent. The
+descendant-aware join recovers the species: `Bundibugyo ebolavirus → LEAD via
+Filoviridae`, 3 of 3, and `lead.tsv` reads `samples_led 3, covering_truth 3,
+covering_nothing 0, recovered 1`. Tier PPV for `group_lead` is 1.000.
+
+**The cost is zero.** On `lod_v4` the entry produces no findings row in any of the 24
+samples and is not even nominated at stage 1 in any of them — the family node gets no
+reads to roll up where no filovirus exists. `lod.tsv` and `vaccine.tsv` are
+byte-identical to the pre-entry baseline. Not a cache artefact: the coverage files carry
+the new `best_reference_*` columns, so `COVERAGE_STATS` re-ran under current code.
+
+**Two defects had to be fixed first, and either would have priced the entry as a
+failure.**
+
+*The join matched nothing.* The benchmark truth says `Bundibugyo ebolavirus`. NCBI's
+scientific name for 565995 is `Bundibugyo virus`; the truth string is an **equivalent
+name**. The descendants writer emitted scientific names only, so the group lead would
+have read as an unlisted false positive and the species it covered would have stayed a
+flat miss. `NAME_CLASS_PREFERENCE` already encodes this on the resolution side, with the
+comment that the official disease lists lag NCBI by years; the same list now applies to
+the output side. Cost: 134,516 → 146,744 rows, 11 MB → 12 MB.
+
+*Both geometry statistics were diluted, not one.* The first run produced the right
+finding at the wrong tier: `screened_only`, the bucket for classifier noise. `breadth`
+read **0.0858, which is 18,940 / 220,597** — the covered member's share of a 12-genome
+bundle, and nothing about the evidence. D24 predicted geometry might let a group row
+through by accident; what happened is that it kept one out by accident. `coverage_stats`
+now also reports `best_reference_breadth`, `best_reference_occupancy` and names the
+reference, accumulated free in a loop that already has the contig name.
+
+**Substituting breadth alone was not enough, and this is the part worth remembering.**
+The gate admitting a row to `supported` requires breadth **and** occupancy, and occupancy
+is windows over the whole bundle — diluted by the identical denominator. The first fix
+read correctly, survived review by eye, and changed nothing: the row failed on occupancy
+and stayed in `screened_only`. The test built from the measured row is what caught it.
+
+The substitution is for group-rank entries **only**. A species whose bundle carries three
+assemblies must keep being judged on all of them, or a target covered in one of three
+reads as fully covered. Asserted in both directions.
+
+**The published row keeps the measured bundle numbers**, so a reader comparing breadth
+0.0858 against a 0.20 floor would conclude the gate is broken. A `GROUP GEOMETRY:` reason
+now names the reference used and what it scored.
+
+**Seven observations moved in `lod_v4`, and none of them are this work.** Six *Y. pestis*
+and one *P. vivax*, `screened_only → attributed_to_neighbour`. No group-rank taxon is
+among them, and the substitution executes only for group-rank entries, which had zero
+rows in that batch — so it ran zero times. The same row carries identical numbers in both
+runs (2,328 reads, ratio 0.8553, uniformity 0.1524) and differs only in verdict: the
+stored `findings.tsv` says *"NOT CREDIBLE: uniformity 0.1522 < 0.5, attribution
+withheld"* while this run says *"reads favour Yersinia enterocolitica (ratio 0.8553 <
+1.5)"*. That is the `min_neighbour_uniformity` discrepancy recorded in D21 — argparse
+defaulted to 0.50 while `nextflow.config` ships 0 — and the stored findings predate the
+correction. The new run follows the shipped config.
+
+**Regenerating the resolved watchlist also refreshed `n_descendants` for the other 89
+entries**, which had been resolved against an older taxdump: *B. anthracis* 51 → 56,
+*Y. pestis* 287 → 291, *F. tularensis* 117 → 123. The pipeline always resolves at runtime,
+so this affects only the committed copy that the tests and `build_pack_refs.py` read.
+
+**Operational cost paid once.** `bin/` is on the Nextflow task PATH — not staged, not
+hashed. Editing `coverage_stats.py` while `lod_v4` was in flight meant a live task picked
+up a half-applied edit and died with `too many values to unpack`, taking the batch with
+it. The same property means `-resume` does not invalidate on a `bin/` change, which is
+the quieter half of the hazard.
+
+**Still open.** The benchmark expectation
+`divergent_bundibugyo_filovirus / Zaire ebolavirus / min_tier >= screened_only` still
+FAILs with *no finding*. It was written assuming the divergent reads would cross-map onto
+Zaire; they do not, and all 3,992 go to Bundibugyo. The expectation encodes the old theory
+of how this should be caught and should probably become an expectation on the lead — but
+that is editing the benchmark's own ground truth and has not been done. The other half of
+D15, the BoNT detection failure with all three markers ABSENT and every tier empty, is
+untouched by any of this.
+
+---
+
 ## D24 — A group-rank watchlist entry needs its own tier and its own join, or it is wrong in both directions at once
 
 2026-10-14. D15's divergent filovirus is classified **correctly** and reported **not at
@@ -1973,7 +2058,7 @@ that can measure what the new floor rejects.
 
 ---
 
-## D15 — A divergent agent is invisible because it is classified CORRECTLY, and the watchlist registers its sibling as a suppressor ⚠️ *partially addressed: see D24 for the lead tier and the descendant-aware join; the entry itself and the BoNT detection failure are still open* *the amino-acid arm does not fix this, and was tested on the scenario built to favour it*
+## D15 — A divergent agent is invisible because it is classified CORRECTLY, and the watchlist registers its sibling as a suppressor ⚠️ *the divergent-filovirus half is CLOSED: see D24 for the lead tier and descendant-aware join, D25 for the measured entry (3/3 recovered, zero specificity cost). The BoNT detection failure is still open.* *the amino-acid arm does not fix this, and was tested on the scenario built to favour it*
 
 `divergent_bundibugyo_filovirus` and `divergent_clostridium_bont` exist to answer one question:
 does the pipeline raise a lead for a divergent or novel agent, or does it go silent? Batch

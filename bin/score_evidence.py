@@ -779,7 +779,20 @@ def main() -> int:
         group_rank = (meta.get("resolved_rank") or "").strip().lower() in SUPRA_SPECIFIC_RANKS
         best_ref_breadth = as_float(row.get("best_reference_breadth"), -1.0)
         best_ref_occ = as_float(row.get("best_reference_occupancy"), -1.0)
+        group_geometry_note = ""
         if group_rank and best_ref_breadth >= 0:
+            # Recorded, because the published row keeps the MEASURED bundle numbers
+            # and a reader comparing them to the floors would otherwise see a row that
+            # cleared a 0.20 breadth gate at breadth 0.0858 and conclude the gate is
+            # broken. Say which reference was used and what it scored.
+            group_geometry_note = (
+                f"GROUP GEOMETRY: judged on its best single reference "
+                f"{row.get('best_reference') or '?'} "
+                f"(breadth {best_ref_breadth:.4f}, occupancy "
+                f"{best_ref_occ if best_ref_occ >= 0 else float('nan'):.4f}), not on the "
+                f"{as_float(row.get('reference_bp')):.0f} bp bundle, whose breadth "
+                f"{breadth:.4f} is the covered member's share of a multi-organism "
+                f"reference set and says nothing about the evidence.")
             breadth = best_ref_breadth
             if best_ref_occ >= 0:
                 occupancy = best_ref_occ
@@ -822,6 +835,8 @@ def main() -> int:
                                                      occupancy, args.min_occupancy))
 
         reasons: list[str] = []
+        if group_geometry_note:
+            reasons.append(group_geometry_note)
         tier = "screened_only"
 
         if unique_reads < min_reads:
