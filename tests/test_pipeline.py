@@ -54,6 +54,9 @@ COV_COLS = [
     # boundary" - never executed. It was simultaneously unreachable on real 2x100 data,
     # which is how the project's entire top tier stayed broken while 110 tests passed.
     "mean_alignment_length",
+    # Per-reference breadth, and which reference it was. Only differs from `breadth`
+    # on a bundle holding more than one organism, which is what a group-rank entry is.
+    "best_reference_breadth", "best_reference_occupancy", "best_reference",
     "best_neighbour_taxid", "best_neighbour_reads",
     # The D12 credibility gate's ONLY input. It was absent from this list while
     # being present in every real coverage TSV, so cov_row() rejected it and no
@@ -2046,6 +2049,52 @@ def test_supra_specific_entries_are_leads(tmp: Path) -> None:
     record("leadcap:NCBI rank 'no rank' is NOT capped",
            nr.get("tier") in ("supported", "confirmed_in_silico"),
            f"got {nr.get('tier')} - Variola and 17 others resolve to 'no rank'")
+
+    # BUNDLE DILUTION. Measured on the real run, not invented: the Filoviridae entry
+    # fired on all three Bundibugyo replicates at 4,017 RPM and 5.4x depth with its
+    # member covered end to end, and `breadth` read 0.0858 - which is 18,940 / 220,597,
+    # the member's share of a 12-genome bundle. Under the 0.20 floor that row landed in
+    # `screened_only`, the bucket for classifier noise, so the entry bought nothing an
+    # analyst would see. best_reference_breadth is the measure that answers the question
+    # a group entry actually asks.
+    cov3 = tmp / "leadcap_bundle.tsv"
+    write_cov(cov3, [
+        viral("DILUTED", "11266", "Filoviridae", reference_bp=220597,
+              unique_reads=7984, reads_per_million=4016.64,
+              breadth=0.085813, window_occupancy=0.084071, windows_occupied=8,
+              mean_depth=5.4289, depth_cv=3.3154,
+              best_reference_breadth=0.998, best_reference_occupancy=0.990,
+              best_reference="NC_014373.1"),
+    ])
+    h = score(tmp, cov3, extra=["--watchlist", str(wl)])
+    dil = h.get("DILUTED", {})
+    record("leadcap:a group row is judged on its best reference, not the bundle",
+           dil.get("tier") == "group_lead",
+           f"got {dil.get('tier')}; bundle breadth 0.0858 is below the 0.20 floor, "
+           f"best-reference breadth 0.998 is not")
+
+    # The substitution is for group entries ONLY. A species whose bundle happens to
+    # carry several assemblies must keep being judged on the whole thing, or a target
+    # covered in one of its three genomes would read as fully covered.
+    cov4 = tmp / "leadcap_species_bundle.tsv"
+    write_cov(cov4, [
+        cov_row(sample="SPBUNDLE", role="sample", taxid="632", taxon="Yersinia pestis",
+                group="bacteria", reference_bp=13950000, unique_reads=820,
+                reads_per_million=164.0, breadth=0.0050, mean_depth=0.30, depth_cv=4.10,
+                window_bp=1000, windows_expected=13950, windows_occupied=70,
+                window_occupancy=0.0050, mean_identity=0.9950,
+                best_neighbour_taxid="633", best_neighbour_reads=12,
+                neighbour_ratio="68.33", screen_assigned_reads=1000,
+                mapped_fraction_of_assigned="0.8200", total_reads_screened=5000000,
+                mapq_min=10, best_reference_breadth=0.980,
+                best_reference_occupancy=0.975,
+                best_reference="NZ_CP009973.1"),
+    ])
+    i = score(tmp, cov4, extra=["--watchlist", str(wl)])
+    record("leadcap:a SPECIES row is still judged on the whole bundle",
+           i.get("SPBUNDLE", {}).get("tier") not in ("supported", "confirmed_in_silico"),
+           f"got {i.get('SPBUNDLE', {}).get('tier')}; 0.005 bundle breadth must not be "
+           f"rescued by one well-covered assembly")
 
     # THE CAP MUST ONLY LOWER. `marker_veto` and `suppressed_control` outrank
     # `screened_only` in TIER_ORDER but assert the OPPOSITE of presence; lowering them

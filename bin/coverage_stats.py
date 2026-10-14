@@ -445,6 +445,19 @@ def depth_profile(bam: Path, mapq_min: int, target_refs: set[str], window: int,
     lengths = lengths or {}
     covered = 0
     covered10 = 0
+    # PER-REFERENCE BREADTH, FOR BUNDLES THAT ARE NOT ONE ORGANISM.
+    # `breadth` below divides covered bases by the summed length of every reference
+    # under the taxid. For a species that is one genome and the right question. For a
+    # group-rank entry it is the wrong denominator: a bundle holding one genome per
+    # member of the group is mostly references for organisms that are NOT present, so
+    # a member covered end to end still scores covered/n_members. Measured on the
+    # Filoviridae bundle: the member present was covered 100% and `breadth` read
+    # 0.0858, which is 18,940 / 220,597 - the member's share of the bundle, nothing
+    # about the evidence. Accumulated here because this loop already has the contig
+    # name and pays one dict write per window; the cost is a handful of operations
+    # per contig, not per base.
+    ref_covered: dict[str, int] = {}
+    ref_total: dict[str, int] = {}
     total = 0
     masked_positions = 0
     _n = 0
@@ -500,6 +513,9 @@ def depth_profile(bam: Path, mapq_min: int, target_refs: set[str], window: int,
                 continue
             d = int(f[2])
             total += 1
+            ref_total[cur_ref] = ref_total.get(cur_ref, 0) + 1
+            if d > 0:
+                ref_covered[cur_ref] = ref_covered.get(cur_ref, 0) + 1
             _n += 1
             _delta = d - _mean
             _mean += _delta / _n
@@ -525,8 +541,30 @@ def depth_profile(bam: Path, mapq_min: int, target_refs: set[str], window: int,
 
     mean_depth = _mean if _n else 0.0
     sd = math.sqrt(_m2 / _n) if _n else 0.0
+    # The best-covered SINGLE reference, and which one it was. A group bundle's
+    # strongest claim is "some member is well covered"; naming the member is what
+    # turns a lead into something an analyst can act on without opening the BAM.
+    best_ref, best_ref_breadth = "", 0.0
+    for ref, tot in ref_total.items():
+        if tot <= 0:
+            continue
+        b = ref_covered.get(ref, 0) / tot
+        if b > best_ref_breadth:
+            best_ref, best_ref_breadth = ref, b
+    # OCCUPANCY IS DILUTED BY THE SAME DENOMINATOR AND NEEDS THE SAME TREATMENT.
+    # Substituting breadth alone is not enough: the gate that admits a row to
+    # `supported` requires both, so a group row rescued on breadth still failed on
+    # occupancy and stayed in `screened_only` - the fix looked right and changed
+    # nothing. Both are counted over the whole bundle, so both must be re-measured
+    # against the one reference the evidence is actually on.
+    best_ref_occ = 0.0
+    if best_ref:
+        hit = sum(1 for (ref, _w) in window_hits if ref == best_ref)
+        poss = sum(1 for (ref, _w) in window_possible if ref == best_ref)
+        best_ref_occ = (hit / poss) if poss else 0.0
     return (covered, total, (mean_depth, sd), len(window_hits), covered10,
-            masked_positions, len(window_possible))
+            masked_positions, len(window_possible), best_ref, best_ref_breadth,
+            best_ref_occ)
 
 
 def main() -> int:
@@ -588,8 +626,8 @@ def main() -> int:
 
     per_taxid = collect_alignments(args.bam, args.mapq_min, mask)
     (covered, total_bases, depth_stats, occupied_windows, covered10, masked_positions,
-     possible_windows) = depth_profile(args.bam, args.mapq_min, target_refs,
-                                       window, mask, lengths)
+     possible_windows, best_ref, best_ref_breadth, best_ref_occ) = depth_profile(
+        args.bam, args.mapq_min, target_refs, window, mask, lengths)
 
     tgt = per_taxid.get(args.taxid, {"reads": 0, "nm": 0, "aln": 0, "bases": 0})
     unique_reads = tgt["reads"]
@@ -672,6 +710,13 @@ def main() -> int:
         "reads_per_million": f"{rpm:.4f}",
         "aligned_bases": tgt["bases"],
         "breadth": f"{breadth:.6f}",
+        # For a one-genome target these are breadth and the genome; they differ only
+        # for a bundle holding more than one organism's reference. score_evidence
+        # reads them for group-rank watchlist entries, where `breadth` answers the
+        # wrong question. Always emitted, so the two can be compared on any row.
+        "best_reference_breadth": f"{best_ref_breadth:.6f}",
+        "best_reference_occupancy": f"{best_ref_occ:.6f}",
+        "best_reference": best_ref,
         "coverage_10x": f"{breadth10:.6f}",
         "mean_depth": f"{mean_depth:.4f}",
         "depth_cv": f"{depth_cv:.4f}",

@@ -757,6 +757,32 @@ def main() -> int:
         unique_reads = as_float(row.get("unique_reads"))
         breadth = as_float(row.get("breadth"))
         occupancy = as_float(row.get("window_occupancy"))
+
+        # A GROUP BUNDLE IS MOSTLY REFERENCES FOR ORGANISMS THAT ARE NOT THERE, so
+        # `breadth` - covered bases over the SUMMED length of every reference under
+        # the taxid - answers the wrong question for a group-rank entry. Measured on
+        # the first one: the member actually present was covered end to end and
+        # breadth read 0.0858, which is 18,940 / 220,597, the member's share of a
+        # 12-genome bundle and nothing about the evidence. At 4,017 RPM and 5.4x
+        # depth the row fell under a 0.20 floor and landed in `screened_only`, the
+        # bucket that exists for classifier noise.
+        #
+        # For these entries the honest question is "is SOME member well covered",
+        # so the best single reference is the measure.
+        #
+        # BOTH statistics, not breadth alone. The gate that admits a row to
+        # `supported` requires breadth AND occupancy, and occupancy is windows
+        # occupied over windows across the whole bundle - diluted by exactly the same
+        # denominator. Substituting breadth by itself left the row failing on
+        # occupancy and still sitting in `screened_only`: a fix that read correctly
+        # and changed nothing, caught by the test built from the measured row.
+        group_rank = (meta.get("resolved_rank") or "").strip().lower() in SUPRA_SPECIFIC_RANKS
+        best_ref_breadth = as_float(row.get("best_reference_breadth"), -1.0)
+        best_ref_occ = as_float(row.get("best_reference_occupancy"), -1.0)
+        if group_rank and best_ref_breadth >= 0:
+            breadth = best_ref_breadth
+            if best_ref_occ >= 0:
+                occupancy = best_ref_occ
         depth_cv = as_float(row.get("depth_cv"))
         identity = as_float(row.get("mean_identity"))
         nb_ratio = as_float(row.get("neighbour_ratio"), math.inf)
