@@ -187,6 +187,17 @@ MANIFEST_COLUMNS = [
     "marker_id", "taxon", "gene", "marker_class", "evidence_type",
     "query_strategy", "status", "n_nt_seqs", "n_aa_seqs", "has_hmm",
     "accessions", "nt_path", "aa_path", "hmm_path", "md5", "retrieved_utc",
+    # HOW MANY ENTREZ REQUESTS FAILED WHILE THIS ROW WAS BUILT.
+    #
+    # A `built` row is trusted and SKIPPED by the resume path, so a row built
+    # while the service was refusing requests is pinned in with no way to tell
+    # it apart from a clean one. The 2026-10-15 --force rebuild lost 14 requests
+    # across 6 markers and all 6 recovered from other rungs, which was only
+    # knowable by correlating the log against the manifest by hand. Without this
+    # column "re-run the ones that were affected" is not an executable
+    # instruction - which is the whole recovery plan STATUS_RETRIEVAL_ERROR
+    # assumes.
+    "retrieval_errors",
     "note",
 ]
 
@@ -1686,7 +1697,8 @@ def write_manifest(path: Path, rows: Iterable[dict]) -> None:
     tmp.replace(path)
 
 
-def blank_manifest_row(row: dict, status: str, note: str) -> dict:
+def blank_manifest_row(row: dict, status: str, note: str,
+                       retrieval_errors: int = 0) -> dict:
     """A manifest row with no sequence: explicit status, empty paths."""
     return {
         "marker_id": row["marker_id"], "taxon": row["taxon"], "gene": row["gene"],
@@ -1694,7 +1706,8 @@ def blank_manifest_row(row: dict, status: str, note: str) -> dict:
         "query_strategy": row["query_strategy"], "status": status,
         "n_nt_seqs": "0", "n_aa_seqs": "0", "has_hmm": "no", "accessions": "",
         "nt_path": "", "aa_path": "", "hmm_path": "", "md5": "",
-        "retrieved_utc": utc_now(), "note": note,
+        "retrieved_utc": utc_now(), "retrieval_errors": str(retrieval_errors),
+        "note": note,
     }
 
 
@@ -1982,7 +1995,8 @@ def process_marker(row: dict, ctx: Context, prior: Dict[str, dict]) -> dict:
                         "service is reachable.")
         LOG.error("  %s: %d Entrez request(s) failed - recorded as %s, NOT as a "
                   "negative result", marker_id, n_errors, STATUS_RETRIEVAL_ERROR)
-        return blank_manifest_row(row, STATUS_RETRIEVAL_ERROR, " | ".join(notes))
+        return blank_manifest_row(row, STATUS_RETRIEVAL_ERROR, " | ".join(notes),
+                                  retrieval_errors=n_errors)
 
     if not obtained:
         # A ROW THAT BUILT NO QUERY WAS NEVER SEARCHED, AND MUST NOT SAY `failed`.
@@ -2065,6 +2079,7 @@ def process_marker(row: dict, ctx: Context, prior: Dict[str, dict]) -> dict:
         "hmm_path": str(hmm_path) if has_hmm else "",
         "md5": combined_md5(paths),
         "retrieved_utc": utc_now(),
+        "retrieval_errors": str(n_errors),
         "note": " | ".join(notes),
     }
 
@@ -3307,14 +3322,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # throttled end to end exits 0 and the manifest it leaves behind is read as a
     # measurement of what NCBI holds.
     errored = [r for r in manifest_rows if r["status"] == STATUS_RETRIEVAL_ERROR]
+    touched = [r for r in manifest_rows
+               if (r.get("retrieval_errors") or "0") not in ("", "0")]
     if errored or ez.n_errors:
         LOG.error("--- %d Entrez request(s) FAILED during this run ---", ez.n_errors)
+        # NAME THE ROWS, because "re-run the affected markers" is only an
+        # instruction if the affected markers are identifiable. A `built` row is
+        # skipped by the resume path, so one built under a failing service is
+        # otherwise indistinguishable from a clean one.
         for r in errored:
-            LOG.error("  %s (%s): not established, retry when reachable",
+            LOG.error("  NOT ESTABLISHED  %-20s (%s) - retry when reachable",
                       r["marker_id"], r["taxon"])
-        LOG.error("exiting non-zero: this build is INCOMPLETE, not a result. "
-                  "Re-run when the service is reachable; completed markers are "
-                  "skipped, so a retry is cheap.")
+        for r in touched:
+            if r["status"] == STATUS_RETRIEVAL_ERROR:
+                continue
+            LOG.error("  SUSPECT %-8s %-20s (%s) - %s request(s) failed while it was "
+                      "built; it recovered from other rungs, but its set may be "
+                      "short", r["status"], r["marker_id"], r["taxon"],
+                      r["retrieval_errors"])
+        if touched:
+            LOG.error("  refresh just these: %s",
+                      " ".join(f"--only-marker {r['marker_id']}" for r in touched))
+        LOG.error("exiting non-zero: this build may be INCOMPLETE. `retrieval_error` "
+                  "rows are retried by a plain re-run; a SUSPECT row is `built`, so "
+                  "the resume path SKIPS it and refreshing it needs --force.")
         return 1
     return 0
 

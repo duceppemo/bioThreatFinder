@@ -2764,3 +2764,53 @@ were built over the mixture.
 
 So this is a full `--force` rebuild of all 163 markers, which is also the first
 one where a throttled run cannot be mistaken for a result (D31).
+
+### The rebuild, measured
+
+All 163 rows now carry `retrieved_utc 2026-10-15`, so the two-population
+manifest is gone. Status totals are unchanged — 143 built, 4 partial, 3 failed,
+4 curation_required, 9 motif_todo — and the three remedies landed:
+
+| marker | before | after |
+|---|---|---|
+| `mpox_C3L` | `partial`, nt=0, built from B5R and haemagglutinin | **`built`**, a real `[gene=C3L]` CDS plus two complement control proteins |
+| `flua_HA_H5` | 7 pan-subtype HA | **3, all H5N1** |
+| `flua_HA_H7` | the same 7 | **3, all H7N9/H7N1** |
+| `nipah_N` | 7, incl. an L polymerase and two phosphoproteins | **4, all Nipah nucleoprotein** |
+
+`hendra_N` went `built` -> `partial` (3 -> 1 protein, HMM lost). That is an
+honest loss, not a regression: it is `required` class, so D30's gate denies it
+clade relaxation, and its previous three included off-organism sequence.
+
+**A `--force` rebuild is not reproducible, and that is now recorded rather than
+discovered twice.** Fifty rows changed sequence counts, in both directions —
+`cocci_Ag2` 1->8, `toxo_GRA6` 1->8, `sars2_N_E` 2->8, but also
+`ypest_ppcp1_pla` 2->1, `bpert_IS481` 3->1, `cchf_L` 8->3. `--force` bypasses
+the Entrez cache, so every rung is re-ranked by NCBI as it stands today, and the
+first productive rung's contents differ from the one cached in September. This
+project pins its taxdump for exactly this reason; the marker database has no
+equivalent pin, so two builds a month apart are not comparable artifacts.
+
+**The 14 lost requests cost nothing, and establishing that took a hand
+correlation that should not have been necessary.** They fell on `bthai_ara` (8),
+`shig_stx1_Sd1` (2), `pjiro_mtLSU`, `crypto_ssu`, `bmand_mito` and `bmand_18S`;
+all six recovered from other rungs and came out `built` with full sets, and none
+of them is among the fifty rows whose counts moved. So the thinning above is
+NCBI variability, not throttle damage — but the only way to know that was to
+`awk` the log against the manifest.
+
+A `built` row is trusted and SKIPPED by the resume path, so a row built while
+the service was refusing requests cannot be told from a clean one. A new
+`retrieval_errors` manifest column records the per-marker count, the run end
+names every affected row — `NOT ESTABLISHED` for a `retrieval_error`, `SUSPECT`
+for one that recovered — and prints the `--only-marker` arguments to refresh
+them. Without it, "re-run the ones that were affected" is not an executable
+instruction, which is the recovery plan `retrieval_error` assumes. The column is
+additive: a manifest predating it reads as blank rather than as zero errors, and
+`csv.DictWriter` carries old rows forward unchanged.
+
+The exit code stays deliberately blunt — any failed request fails the run, even
+when every marker recovered, as happened here. The alternative considered was to
+fire only when a marker ended non-`built`, and the data rejects it: a marker can
+end `built` and short, which is the case that most needs flagging and the one
+that refinement would have hidden.
