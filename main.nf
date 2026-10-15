@@ -272,7 +272,7 @@ workflow {
     def SKIP = [:]
     ['skip_krakenuniq', 'skip_metabuli', 'skip_kraken2', 'skip_sylph',
      'skip_host_depletion', 'skip_markers', 'skip_marker_hmm',
-     'skip_pavian_export'].each { k ->
+     'skip_pavian_export', 'pavian_html'].each { k ->
         try { SKIP[k] = BtfBool.of(k, params[k]) }
         catch (IllegalArgumentException e) { exit 1, "ERROR: ${e.message}" }
     }
@@ -449,10 +449,24 @@ workflow {
 
         // Pavian's static HTML, once per run. Opt-in because the pipeline
         // cannot install Pavian - see the process header.
-        if (BtfBool.of('pavian_html', params.pavian_html)) {
-            PAVIAN_REPORT(PAVIAN_EXPORT.out.reports.collect(),
-                          file(params.outdir).name)
+        if (SKIP.pavian_html) {
+            // ifEmpty, because collect() on an empty channel emits NOTHING and
+            // the process would simply never run: --pavian_html would produce no
+            // HTML and no error, which is exactly the silent skip the process
+            // header promises not to do.
+            PAVIAN_REPORT(
+                PAVIAN_EXPORT.out.reports.collect().ifEmpty {
+                    error "--pavian_html was requested but no classifier report " +
+                          "was convertible for any sample, so there is nothing " +
+                          "to render. Check the pavian/ directory and the " +
+                          "PAVIAN_EXPORT logs."
+                },
+                file(params.outdir).name)
         }
+    } else if (SKIP.pavian_html) {
+        // Otherwise --pavian_html is accepted and quietly does nothing.
+        exit 1, "ERROR: --pavian_html needs the Pavian exports, but " +
+                "--skip_pavian_export is set. Drop one of the two."
     }
 
     // -- Stage 2: targeted confirmation -----------------------------------

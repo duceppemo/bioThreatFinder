@@ -653,7 +653,7 @@ It is not merely a convenience, because two arms are not loadable as published:
 | kraken2 | **loads** | 8 columns from `--report-minimizer-data`; Pavian's `read_report()` handles it (`ntabs == 7`), though `read_report2()` does not |
 | bracken | **loads** | already 6-column |
 | krakenuniq | **loads** | recognised by its own header |
-| metabuli | **rejected** | a trailing tab on unclassified rows ([metabuli#194](https://github.com/steineggerlab/Metabuli/issues/194)) puts 6 tabs on line 1, matching neither accepted layout, so Pavian discards the *entire* file |
+| metabuli | **rejected** | its report opens with a `#`-prefixed header row, which Pavian reads as a header whose column names it cannot map, so it discards the *entire* file |
 | sylph | **unreadable** | not a Kraken report at all: ANI and containment, no tree, no read counts |
 
 The converter drops the k-mer columns, because 6 fields is the only layout both

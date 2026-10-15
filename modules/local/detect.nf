@@ -712,8 +712,8 @@ process MARKER_EVIDENCE {
  * This is a presentation step with no bearing on any finding: it reads the
  * stage-1 reports and writes copies, so it cannot change a call. It exists
  * because the stage-1 output is not all loadable as published --
- * Metabuli's trailing tab on unclassified rows makes Pavian reject the whole
- * file, and sylph is not a Kraken report at all -- and because one directory
+ * Metabuli's '#'-prefixed header row makes Pavian reject the whole file, and
+ * sylph is not a Kraken report at all -- and because one directory
  * per run, under one naming scheme, is what lets Pavian line the arms up in
  * its sample-comparison view. See bin/to_pavian.py for the format rules,
  * which were read off Pavian's own parser rather than assumed.

@@ -45,10 +45,16 @@ They are re-emitted anyway so that one directory holds every arm under one
 naming scheme, which is what makes Pavian's sample-comparison view line up.
 The two that genuinely do not work without this script are:
 
-  metabuli  Metabuli emits a TRAILING TAB on unclassified rows (upstream issue
-            #194, open). Unclassified is usually line 1, so the first line
-            carries 6 tabs, matches neither 5 nor 7, and Pavian rejects the
-            ENTIRE file. Stripping the trailing empty field fixes it.
+  metabuli  Its report opens with a '#'-prefixed header row
+            (#clade_proportion, clade_count, taxon_count, rank, taxID, name).
+            Per the rule above that '#' makes Pavian treat line 1 as a HEADER,
+            and since those column names are not in its harmonisation table it
+            finds no cladeReads/name and rejects the file. Dropping the header
+            row fixes it. (This was first attributed here to the trailing tab
+            of upstream issue #194; the two installed reports carry 0 trailing
+            tabs and 6 fields on every line, so #194 is not what bites. The
+            trailing-field strip below is kept anyway - it is correct, it costs
+            nothing, and #194 is still open.)
 
   sylph     Not a Kraken report at all - no tree, no read counts. Synthesised
             from the NCBI taxdump; see synth_from_sylph() for what is real and
@@ -57,6 +63,7 @@ The two that genuinely do not work without this script are:
 
 import argparse
 import csv
+import re
 import sys
 from pathlib import Path
 
@@ -69,6 +76,8 @@ RANK_CODE = {
     "subgenus": "G1", "species group": "G1", "species subgroup": "G2",
     "subfamily": "F1", "tribe": "F2", "suborder": "O1", "subclass": "C1",
     "subphylum": "P1", "clade": "-", "no rank": "-",
+    # Metabuli's spellings for the nodes above the domains.
+    "root": "R", "cellular root": "R1", "acellular root": "R1",
 }
 
 # KrakenUniq header spellings -> canonical field. Same map as parse_screen.py.
@@ -76,6 +85,26 @@ KU_COLUMNS = {
     "%": "percentage", "reads": "clade_reads", "taxreads": "taxon_reads",
     "taxid": "taxid", "rank": "rank", "taxname": "name",
 }
+
+
+def normalise_rank(rank: str, taxid: str) -> str:
+    """Give every arm the single-letter rank codes Pavian actually filters on.
+
+    Kraken2 and Bracken already emit codes (U, R, R1, D, ... S, S1) and are
+    passed through untouched. Metabuli and KrakenUniq emit FULL WORDS ("domain",
+    "cellular root", "no rank"), and Pavian maps only a fixed set of those,
+    rendering everything else as "-" - so Bacteria would sit at "-" for those
+    arms while Kraken2 put it at "D", and the arms would not line up in the
+    rank filters or the comparison view.
+    """
+    if taxid == "0":
+        return "U"
+    if taxid == "1":
+        return "R"
+    r = rank.strip()
+    if re.fullmatch(r"[A-Z][0-9]*", r):
+        return r
+    return RANK_CODE.get(r.lower(), "-")
 
 
 def as_int(v, default=0) -> int:
@@ -118,8 +147,9 @@ def rows_from_kraken_style(path: Path) -> tuple[list[tuple], int]:
             if not line.strip() or line.startswith(("#", "%")):
                 continue
             f = line.rstrip("\n").split("\t")
-            # Metabuli emits a trailing tab on unclassified rows (upstream #194),
-            # which would shift every right-indexed field by one.
+            # Belt and braces for upstream #194 (a trailing tab on unclassified
+            # rows), which would shift every right-indexed field by one. The
+            # installed Metabuli does not do this, but the issue is still open.
             while f and f[-1].strip() == "":
                 f.pop()
             if len(f) < 6:
@@ -129,7 +159,8 @@ def rows_from_kraken_style(path: Path) -> tuple[list[tuple], int]:
             if not taxid.isdigit():
                 bad += 1
                 continue
-            rows.append((f[0].strip(), as_int(f[1]), as_int(f[2]), rank, taxid, name))
+            rows.append((f[0].strip(), as_int(f[1]), as_int(f[2]),
+                         normalise_rank(rank, taxid), taxid, name))
     return rows, bad
 
 
@@ -163,7 +194,7 @@ def rows_from_krakenuniq(path: Path) -> tuple[list[tuple], int]:
                 fields[idx["percentage"]].strip() if "percentage" in idx else "0.00",
                 as_int(fields[idx["clade_reads"]]) if "clade_reads" in idx else 0,
                 as_int(fields[idx["taxon_reads"]]) if "taxon_reads" in idx else 0,
-                fields[idx["rank"]].strip() if "rank" in idx else "-",
+                normalise_rank(fields[idx["rank"]] if "rank" in idx else "-", taxid),
                 taxid,
                 fields[idx["name"]] if "name" in idx else "",
             ))
@@ -173,8 +204,17 @@ def rows_from_krakenuniq(path: Path) -> tuple[list[tuple], int]:
 # --------------------------------------------------------------------------
 # Sylph synthesis
 # --------------------------------------------------------------------------
-def load_taxdump(taxdump: Path, wanted: set[str]) -> tuple[dict, dict, dict]:
-    """parent / rank for every taxid, scientific names for the needed closure."""
+def load_taxdump(taxdump: Path, wanted: set[str]) -> tuple[dict, dict, dict, dict]:
+    """parent / rank for every taxid, scientific names for the needed closure,
+    and the old->new remap for any wanted taxid that has since been merged.
+
+    merged.dmp matters because pack references are NAMED with the taxid that was
+    current when the pack was built. If NCBI later merges that taxid, the name on
+    disk still carries the old one, nodes.dmp no longer has it, and without this
+    the organism silently vanishes from the sylph view. resolve_watchlist.py
+    already consults merged.dmp for the same reason; omitting it here was an
+    inconsistency, not a decision.
+    """
     parent: dict[str, str] = {}
     rank: dict[str, str] = {}
     with (taxdump / "nodes.dmp").open() as fh:
@@ -182,6 +222,17 @@ def load_taxdump(taxdump: Path, wanted: set[str]) -> tuple[dict, dict, dict]:
             f = [x.strip() for x in line.split("|")]
             if len(f) >= 3:
                 parent[f[0]], rank[f[0]] = f[1], f[2]
+
+    remap: dict[str, str] = {}
+    missing = {t for t in wanted if t not in parent}
+    merged = taxdump / "merged.dmp"
+    if missing and merged.exists():
+        with merged.open() as fh:
+            for line in fh:
+                f = [x.strip() for x in line.split("|")]
+                if len(f) >= 2 and f[0] in missing and f[1] in parent:
+                    remap[f[0]] = f[1]
+    wanted = {remap.get(t, t) for t in wanted}
 
     needed: set[str] = set()
     for t in wanted:
@@ -200,7 +251,7 @@ def load_taxdump(taxdump: Path, wanted: set[str]) -> tuple[dict, dict, dict]:
             f = [x.strip() for x in line.split("|")]
             if len(f) >= 4 and f[3] == "scientific name" and f[0] in needed:
                 names[f[0]] = f[1]
-    return parent, rank, names
+    return parent, rank, names, remap
 
 
 def taxid_from_genome_file(genome_file: str) -> str | None:
@@ -233,28 +284,44 @@ def synth_from_sylph(path: Path, taxdump: Path, total_reads: int) -> tuple[list[
         return [], ["sylph profile has no rows (no genome passed its ANI threshold)"]
 
     leaf: dict[str, float] = {}
+    unnamed = 0
     for r in rows:
         gf = r.get("Genome_file") or ""
         taxid = taxid_from_genome_file(gf)
         if not taxid:
-            notes.append(f"could not read a taxid from genome file name: {gf}")
+            # COUNT, do not list. A sylph database built with --no-check-names
+            # (e.g. a prebuilt GTDB sketch) fails every row, and listing them put
+            # thousands of entries in a single manifest cell.
+            unnamed += 1
             continue
         ab = as_float(r.get("Sequence_abundance"), -1.0)
         if ab < 0:
             ab = as_float(r.get("Taxonomic_abundance"), 0.0)
         leaf[taxid] = leaf.get(taxid, 0.0) + ab
 
+    if unnamed:
+        notes.append(f"{unnamed} sylph row(s) carried no taxid in the genome "
+                     f"file name and were skipped (expected '<taxid>_<Name>'; a "
+                     f"--no-check-names sylph database fails every row)")
     if not leaf:
         return [], notes or ["no usable sylph rows"]
 
-    parent, rank, names = load_taxdump(taxdump, set(leaf))
+    parent, rank, names, remap = load_taxdump(taxdump, set(leaf))
+    if remap:
+        merged_leaf: dict[str, float] = {}
+        for taxid, ab in leaf.items():
+            key = remap.get(taxid, taxid)
+            merged_leaf[key] = merged_leaf.get(key, 0.0) + ab
+        leaf = merged_leaf
+        notes.append("resolved via merged.dmp: "
+                     + ", ".join(f"{o}->{n}" for o, n in sorted(remap.items())))
 
     # Accumulate clade counts up every lineage.
     clade: dict[str, int] = {}
     direct: dict[str, int] = {}
     children: dict[str, set[str]] = {}
     for taxid, ab in leaf.items():
-        reads = int(round(ab / 100.0 * total_reads))
+        reads = round(ab / 100.0 * total_reads)
         if taxid not in parent:
             notes.append(f"taxid {taxid} is not in the taxdump - skipped")
             continue
@@ -273,6 +340,15 @@ def synth_from_sylph(path: Path, taxdump: Path, total_reads: int) -> tuple[list[
 
     if not clade:
         return [], notes
+    # walk() indexes clade[] unguarded, so root MUST be present. It is absent only
+    # if every lineage broke before taxid 1 (a parent missing from nodes.dmp, a
+    # self-parent below root, or the guard tripping). Returning nothing beats a
+    # KeyError: this step is presentational, and nextflow.config sets no
+    # errorStrategy, so an exception here would kill the run before stage 2.
+    if "1" not in clade:
+        notes.append("no lineage reached root (taxid 1) - nothing emitted; the "
+                     "taxdump may be incomplete or inconsistent with the pack")
+        return [], notes
 
     total_clade = clade.get("1", 0)
     out: list[tuple] = []
@@ -283,7 +359,9 @@ def synth_from_sylph(path: Path, taxdump: Path, total_reads: int) -> tuple[list[
                     "U", "0", "unclassified"))
 
     def walk(taxid: str, depth: int) -> None:
-        pct = clade[taxid] / total_reads * 100 if total_reads else 0.0
+        # Per-leaf round() can push the sum a few reads past total_reads, so
+        # clamp rather than print 100.01%.
+        pct = min(clade[taxid] / total_reads * 100, 100.0) if total_reads else 0.0
         code = "R" if taxid == "1" else RANK_CODE.get(rank.get(taxid, "no rank"), "-")
         name = names.get(taxid, f"taxid {taxid}")
         out.append((f"{pct:.2f}", clade[taxid], direct.get(taxid, 0),
@@ -372,18 +450,19 @@ def main() -> int:
 
     passthrough = [
         ("kraken2", args.kraken2_report, rows_from_kraken_style,
-         "measured read counts; the two minimizer columns were dropped so that both "
-         "of Pavian's readers accept the file (the untouched 8-column report under "
-         "kraken2/ also loads in the app)"),
+         ("measured read counts; the two minimizer columns were dropped so that "
+          "both of Pavian's readers accept the file (the untouched 8-column "
+          "report under kraken2/ also loads in the app)")),
         ("bracken", args.bracken_report, rows_from_kraken_style,
-         "measured; Bracken-reestimated abundances, already 6-column, re-emitted "
-         "unchanged for consistent naming"),
+         ("measured; Bracken-reestimated abundances, already 6-column, "
+          "re-emitted unchanged for consistent naming")),
         ("metabuli", args.metabuli_report, rows_from_kraken_style,
-         "measured; trailing empty field stripped from unclassified rows (upstream "
-         "issue #194) - without this Pavian rejects the entire file"),
+         ("measured; its '#'-prefixed header row is dropped - Pavian would read "
+          "that line as a header, fail to map the column names and reject the "
+          "whole file")),
         ("krakenuniq", args.krakenuniq_report, rows_from_krakenuniq,
-         "measured; read header-aware because KrakenUniq's column order is not "
-         "Kraken's; its kmers/dup/cov columns were dropped"),
+         ("measured; read header-aware because KrakenUniq's column order is not "
+          "Kraken's; its kmers/dup/cov columns were dropped")),
     ]
 
     for label, path, reader, how in passthrough:
@@ -410,7 +489,17 @@ def main() -> int:
                              "--taxdump; cannot build a tree, skipped\n")
         else:
             basis = derived_total or 1_000_000
-            rows, notes = synth_from_sylph(args.sylph_profile, args.taxdump, basis)
+            # DEGRADE, DO NOT DIE. This whole script is presentational and the
+            # pipeline sets no errorStrategy on it, so an unhandled exception in
+            # the sylph synthesis - a malformed profile, a surprising taxdump -
+            # would terminate the run before stage 2 for the sake of a view.
+            # The kraken-style exports above are already written by this point.
+            try:
+                rows, notes = synth_from_sylph(args.sylph_profile, args.taxdump, basis)
+            except Exception as exc:                       # noqa: BLE001
+                sys.stderr.write(f"[pavian] WARNING: sylph synthesis failed for "
+                                 f"{args.sample}: {exc!r}; continuing without it\n")
+                rows, notes = [], [f"synthesis FAILED: {exc!r}"]
             dest = args.outdir / f"{args.sample}.sylph.pavian.txt"
             # An EMPTY file is worse than no file: Pavian's readLines(n=1) returns
             # nothing, it logs "Could not read" and skips it, so all an empty
