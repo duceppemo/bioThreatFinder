@@ -2245,3 +2245,60 @@ empty means no. Pinned in both directions.
 
 Eleven new `tiergap` checks. `curation_required.tsv` does not list any of the 13,
 which is a separate gap in `build_marker_db.py` and is not addressed here.
+
+---
+
+## D27 — The curation to-do list omitted 18 of the 31 markers that needed curating, including every retrieval failure
+
+2026-10-14. Follow-on from D26. The gaps that fix made visible per-run should
+never have needed finding by hand; `curation_required.tsv` exists to be that
+list, and it was filtering out most of its own subject.
+
+**The filter was `status in (curation_required, motif_todo)`**, which dropped two
+categories.
+
+**`failed` — never listed at all, 5 markers.** A retrieval failure evaluates
+UNKNOWN downstream exactly like a `curate_required` row, which is the stated
+reason the file exists; it was simply not in the tuple. Three of the five are
+load-bearing in `marker_rules.yaml`:
+
+| marker | role in the rules |
+|---|---|
+| `bthai_ara` | `veto_if` for **both** B. pseudomallei and B. mallei |
+| `henipa_cedar` | `veto_if` for **both** Nipah and Hendra |
+| `bruc_S19_eri` | half of the Brucella `vaccine_if` |
+
+A veto that can never fire is the quiet kind of gap. UNKNOWN makes the rule
+indeterminate, which holds a finding at `supported` rather than confirming it —
+the safe direction, so nothing crashes and no call looks wrong. It costs
+specificity silently: a B. thailandensis or Cedar-virus cross-match cannot be
+vetoed down, because the marker that would do it was never retrieved.
+
+**`partial` — excluded deliberately, 13 markers.** The reasoning was that these
+rows do evaluate, on the tiers they have. They do, and on fewer tiers than
+`markers.tsv` declares, with the missing tier recorded nowhere but a manifest
+`note`. Eleven are missing the HMM tier — `cbut_bont`, `ebola_NP`, `ebolaS_NP`,
+`marburg_NP`, `marburg_GP`, `junin_GPC`, `rvfv_L`, `rvfv_Gn`, `nipah_L`,
+`nipah_G`, `eeev_nsP` — the tier the catalogue says exists to catch a divergent
+allele. `orthopox_ATI` (Variola) and `mpox_C3L` (Monkeypox) are missing the
+nucleotide tier instead.
+
+**The fix.** `missing_tiers()` derives the gap from `evidence_type` against
+`n_nt_seqs` / `n_aa_seqs` / `has_hmm`, mirroring D26's rule in
+`marker_evidence.py` exactly — if the two drift, the build's to-do list and the
+run's reported gaps disagree about which markers are instruments. A row is listed
+if it is untestable **or** has a gap; a new `missing_tiers` column says which; a
+`DEGRADED` line per marker goes to the build log, which is what an operator
+actually reads.
+
+**The header comment was also wrong and is rewritten.** It said *"Every marker
+listed here evaluates as UNKNOWN downstream"*, which is false for a `partial`
+row. The two kinds are now distinguished in the file itself.
+
+13 → 31 rows on the shipped pack. Five self-test checks, including that an
+undeclared tier which happens to exist is **not** a gap — `has_hmm: yes` on a
+`dna+protein` marker is spare capacity, not a missing instrument.
+
+The 18 underlying gaps are **not fixed** here; they are now tracked. `cbut_bont`
+names its own obstacle — *"only 2 protein sequences"*, below the builder's
+alignment floor — so the HMM set needs more sequence, not a re-run.

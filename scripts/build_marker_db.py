@@ -662,6 +662,34 @@ def parse_tiers(evidence_type: str) -> List[str]:
     return tiers
 
 
+def missing_tiers(manifest_row: dict) -> List[str]:
+    """Tiers the catalogue declares that this manifest row does not actually have.
+
+    MIRRORS bin/marker_evidence.py's rule exactly, and must keep doing so. That
+    module decides what `tier_used` may claim from the same three columns; if the
+    two drift, the build's to-do list and the run's reported gaps disagree about
+    which markers are instruments and which are claims.
+
+    A `partial` status says SOME tier is missing. These three columns say which,
+    and that is the part a curator needs.
+    """
+    have = set()
+    try:
+        if int(float(manifest_row.get("n_nt_seqs") or 0)) > 0:
+            have.add("dna")
+    except ValueError:
+        pass
+    try:
+        if int(float(manifest_row.get("n_aa_seqs") or 0)) > 0:
+            have.add("protein")
+    except ValueError:
+        pass
+    if (manifest_row.get("has_hmm") or "").strip().lower() in ("yes", "true", "1"):
+        have.add("hmm")
+    return [t for t in parse_tiers(manifest_row.get("evidence_type", ""))
+            if t not in have]
+
+
 def parse_aliases(raw: str) -> List[str]:
     """The aliases column is ';'-separated, with '-' meaning none."""
     out = []
@@ -1388,15 +1416,44 @@ def write_curation_todo(path: Path, rows: Sequence[dict]) -> None:
     curate_required and motif rows are not failures to retry - they are work
     items for a human. Writing them out means the gap is reviewable and
     diffable, instead of scrolling past in a build log.
+
+    THE FILTER WAS `status in (curation_required, motif_todo)`, WHICH MISSED TWO
+    WHOLE CATEGORIES. On the shipped human pack it listed 13 markers out of 31.
+
+    `failed` was never listed at all - 5 markers whose retrieval failed, which
+    evaluate UNKNOWN downstream exactly like a curate_required row, which is the
+    stated reason the file exists. Three of them are load-bearing in
+    marker_rules.yaml: `bthai_ara` is the veto for both B. pseudomallei and
+    B. mallei, `henipa_cedar` is the veto for both Nipah and Hendra, and
+    `bruc_S19_eri` is half of the Brucella vaccine rule. A veto that can never
+    fire is the quiet kind of gap - it costs specificity, not sensitivity, so
+    nothing crashes and no call is obviously wrong.
+
+    `partial` was excluded on the reasoning that those rows DO evaluate, on the
+    tiers they have. They do - and on fewer tiers than markers.tsv declares, with
+    the missing one recorded nowhere but a `note` string. That hid 13 markers,
+    11 missing the HMM tier, which the catalogue says exists to catch a divergent
+    allele: cbut_bont, ebola_NP, ebolaS_NP, marburg_NP, marburg_GP, junin_GPC,
+    rvfv_L, rvfv_Gn, nipah_L, nipah_G, eeev_nsP. orthopox_ATI (Variola) and
+    mpox_C3L (Monkeypox) are missing the nucleotide tier instead.
+
+    A partially built marker is a weaker instrument than the catalogue claims,
+    which is a curation task whether or not it also produces an UNKNOWN.
     """
     tmp = path.with_name(path.name + ".part")
     cols = ["marker_id", "taxon", "gene", "marker_class", "evidence_type",
-            "query_strategy", "status", "what_is_needed", "catalogue_notes"]
+            "query_strategy", "status", "missing_tiers", "what_is_needed",
+            "catalogue_notes"]
     with tmp.open("w", encoding="utf-8", newline="") as fh:
         fh.write("# bioThreatFinder unmet marker-curation tasks\n")
         fh.write(f"# written {utc_now()} by build_marker_db.py\n")
-        fh.write("# Every marker listed here evaluates as UNKNOWN downstream: it is\n")
-        fh.write("# neither present nor absent, because it was never testable.\n")
+        fh.write("# Two kinds of row, told apart by `status`:\n")
+        fh.write("#   curation_required / motif_todo / failed - NOT testable at all.\n")
+        fh.write("#     Evaluates UNKNOWN downstream: neither present nor absent.\n")
+        fh.write("#   partial - testable, but on fewer tiers than markers.tsv declares.\n")
+        fh.write("#     Evaluates PRESENT/ABSENT on the tiers in the database, and an\n")
+        fh.write("#     ABSENT is correspondingly weaker. `missing_tiers` says which\n")
+        fh.write("#     were never searched.\n")
         w = csv.DictWriter(fh, fieldnames=cols, delimiter="\t",
                            extrasaction="ignore", lineterminator="\n")
         w.writeheader()
@@ -2044,6 +2101,35 @@ def self_test() -> int:
             ("m|a|A1|x", "ACGT" * 100), ("m|a|A2|x", "TTGCAA" * 40)])
         check("different genes of one operon are kept", len(kept) == 2, str(len(kept)))
 
+        print("-- missing tiers --")
+        # The curation to-do list used to carry only the rows that cannot be
+        # evaluated at all, so a marker declaring an HMM it does not have was a
+        # silent degradation - 13 of them on the shipped human pack, 11 missing
+        # exactly the tier the catalogue says catches a divergent allele.
+        check("a declared tier with no sequences is reported missing",
+              missing_tiers({"evidence_type": "dna+protein+hmm", "n_nt_seqs": "4",
+                             "n_aa_seqs": "2", "has_hmm": "no"}) == ["hmm"],
+              str(missing_tiers({"evidence_type": "dna+protein+hmm",
+                                 "n_nt_seqs": "4", "n_aa_seqs": "2",
+                                 "has_hmm": "no"})))
+        check("the nucleotide gap is caught too (the orthopox_ATI case)",
+              missing_tiers({"evidence_type": "dna+protein", "n_nt_seqs": "0",
+                             "n_aa_seqs": "1", "has_hmm": "no"}) == ["dna"],
+              str(missing_tiers({"evidence_type": "dna+protein", "n_nt_seqs": "0",
+                                 "n_aa_seqs": "1", "has_hmm": "no"})))
+        check("a fully built marker reports no gap",
+              missing_tiers({"evidence_type": "dna+protein+hmm", "n_nt_seqs": "3",
+                             "n_aa_seqs": "3", "has_hmm": "yes"}) == [])
+        # An UNDECLARED tier that happens to exist is not a gap. has_hmm=yes on a
+        # dna+protein marker is spare capacity, not a missing instrument.
+        check("a tier that exists but is not declared is not a gap",
+              missing_tiers({"evidence_type": "dna+protein", "n_nt_seqs": "3",
+                             "n_aa_seqs": "3", "has_hmm": "yes"}) == [])
+        check("order follows the catalogue declaration",
+              missing_tiers({"evidence_type": "dna+protein+hmm", "n_nt_seqs": "0",
+                             "n_aa_seqs": "0", "has_hmm": "no"})
+              == ["dna", "protein", "hmm"])
+
         print("-- manifest contract --")
         row = {"marker_id": "fnov_specific", "taxon": "Francisella novicida",
                "gene": "-", "marker_class": "absence_expected",
@@ -2554,11 +2640,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     # ---- curation TODO file ---------------------------------------------
     todo_rows = []
+    n_untestable = n_degraded = 0
     for r in manifest_rows:
-        if r["status"] not in (STATUS_CURATION, STATUS_MOTIF):
+        gaps = missing_tiers(r)
+        untestable = r["status"] in (STATUS_CURATION, STATUS_MOTIF, STATUS_FAILED)
+        # A `built` row with a gap would mean the status and the counts disagree;
+        # list it anyway rather than trusting the status over the evidence.
+        if not untestable and not gaps:
             continue
         src = next((x for x in selected if x["marker_id"] == r["marker_id"]), {})
-        todo_rows.append({**r, "what_is_needed": r.get("note", ""),
+        if untestable:
+            n_untestable += 1
+            need = r.get("note", "")
+        else:
+            n_degraded += 1
+            need = (f"tier(s) not built: {', '.join(gaps)} - declared in markers.tsv "
+                    f"but absent from the database, so never searched. "
+                    f"{r.get('note', '')}").strip()
+        todo_rows.append({**r, "missing_tiers": ",".join(gaps),
+                          "what_is_needed": need,
                           "catalogue_notes": src.get("notes", "")})
     write_curation_todo(todo_path, todo_rows)
 
@@ -2608,7 +2708,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "held at 'supported' and is NOT promoted to 'confirmed_in_silico'. "
                 "Fix or curate them before operational use, and rerun: completed "
                 "markers are skipped.")
-    LOG.info("curation tasks:    %s (%d row(s))", todo_path, len(todo_rows))
+    LOG.info("curation tasks:    %s (%d row(s): %d not testable, %d built on fewer "
+             "tiers than declared)", todo_path, len(todo_rows), n_untestable, n_degraded)
+    if n_degraded:
+        # Named here because this is the line a build operator actually reads, and
+        # the whole reason these rows were invisible is that the detail lived only
+        # in a manifest `note`.
+        for r in todo_rows:
+            if r.get("missing_tiers") and r["status"] not in (
+                    STATUS_CURATION, STATUS_MOTIF, STATUS_FAILED):
+                LOG.warning("  DEGRADED %s (%s): missing %s",
+                            r["marker_id"], r["taxon"], r["missing_tiers"])
     try:
         LOG.info("disk used here:    %s",
                  human(sum(f.stat().st_size for f in out_dir.rglob("*") if f.is_file())))
