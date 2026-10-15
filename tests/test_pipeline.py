@@ -1855,6 +1855,122 @@ def test_protein_tier_honours_catalogue(tmp: Path) -> None:
            f"aa_length={got.get('ebola_NP', {}).get('aa_length')!r}")
 
 
+def test_marker_expectation_cli(tmp: Path) -> None:
+    """The second expectation axis, end to end through the command line.
+
+    The evaluator's own self-test covers the grading rules against hand-built
+    dicts. This covers the seam those cannot reach: --marker-states on the
+    command line, load_marker_states reading a real marker_evidence.py file, and
+    the exit code that gates CI.
+
+    The axis exists because a findings row is only ever written for a watchlist
+    taxon. divergent_clostridium_bont spikes C. butyricum, which is deliberately
+    a near_neighbour and not on the watchlist, so its only expectation could be
+    `max_tier: marker_veto` on C. botulinum - an upper bound, which "no finding"
+    satisfies. The scenario was green on every run while the toxin it exists to
+    test went unreported.
+    """
+    sc = tmp / "mk_scenarios.yaml"
+    sc.write_text(
+        "schema_version: 1\n"
+        "scenarios:\n"
+        "    - id: tox\n"
+        "      description: a toxin in an untargeted neighbour\n"
+        "      kind: specificity\n"
+        "      spikes:\n"
+        "          - taxon: Clostridium butyricum\n"
+        "            source: neighbour\n"
+        "            levels_rpm: [300]\n"
+        "      truth:\n"
+        "          present: [Clostridium butyricum]\n"
+        "          absent: [Clostridium botulinum]\n"
+        "      expect:\n"
+        "          - taxon: Clostridium botulinum\n"
+        "            max_tier: marker_veto\n"
+        "          - marker: cbut_bont\n"
+        "            state: PRESENT\n"
+        "            taxon: Clostridium butyricum\n")
+
+    man = tmp / "mk_manifest.tsv"
+    cols = ("sample\tscenario_id\tkind\treplicate\tplatform\tlevel_rpm\trole\t"
+            "truth_present\ttruth_absent\ttruth_vaccine\n")
+    man.write_text(cols + "".join(
+        f"t{i}\ttox\tspecificity\t{i}\tillumina\t300\tsample\t"
+        f"Clostridium butyricum\tClostridium botulinum\t\n" for i in (1, 2, 3)))
+
+    # No findings row for C. butyricum is CORRECT - it is not on the watchlist.
+    # That is precisely why the old expectation could not fail.
+    fnd = tmp / "mk_findings.tsv"
+    fnd.write_text("sample\trole\tplatform\ttier\ttaxid\ttaxon\n")
+
+    def states(path, value):
+        path.write_text(
+            "sample\tmarker_id\ttaxon\tgene\tmarker_class\tstate\ttier_used\t"
+            "tiers_not_built\treason\n"
+            + "".join(f"t{i}\tcbut_bont\tClostridium butyricum\tbont\t"
+                      f"discriminating\t{value}\tdna,protein\thmm\tx\n"
+                      for i in (1, 2, 3)))
+        return path
+
+    def run_eval(extra, tag):
+        out = tmp / f"mk_eval_{tag}"
+        proc = run([sys.executable, BIN / "evaluate_benchmark.py",
+                    "--scenarios", sc, "--manifest", man, "--findings", fnd,
+                    "--out-dir", out] + list(extra))
+        rows = []
+        f = out / "expectations.tsv"
+        if f.is_file():
+            with f.open() as fh:
+                rows = list(csv.DictReader(fh, delimiter="\t"))
+        return proc, {r["check"]: r for r in rows}
+
+    # The toxin is absent from the sample: the scenario must now go red.
+    absent = states(tmp / "mk_absent.tsv", "ABSENT")
+    proc, got = run_eval(["--marker-states", absent], "absent")
+    record("markerexp:a marker expectation can FAIL a scenario findings cannot",
+           got.get("marker_state[cbut_bont]", {}).get("result") == "FAIL",
+           f"got {got.get('marker_state[cbut_bont]', {}).get('result')!r}")
+    record("markerexp:the old taxon expectation still passes on no finding",
+           got.get("max_tier", {}).get("result") == "PASS",
+           f"got {got.get('max_tier', {}).get('result')!r} - if this flipped, the "
+           f"new axis changed the old one")
+    record("markerexp:a failing marker expectation gates CI",
+           proc.returncode != 0, f"exit {proc.returncode}")
+    record("markerexp:every replicate is named in the detail",
+           all(f"t{i}" in (got.get("marker_state[cbut_bont]", {}).get("detail") or "")
+               for i in (1, 2, 3)),
+           f"detail={got.get('marker_state[cbut_bont]', {}).get('detail')!r}")
+
+    # The same scenario against a sample that does carry the toxin.
+    present = states(tmp / "mk_present.tsv", "PRESENT")
+    proc_ok, got_ok = run_eval(["--marker-states", present], "present")
+    record("markerexp:the toxin reported on every replicate PASSes",
+           got_ok.get("marker_state[cbut_bont]", {}).get("result") == "PASS",
+           f"got {got_ok.get('marker_state[cbut_bont]', {}).get('result')!r}")
+    record("markerexp:and the run then exits clean",
+           proc_ok.returncode == 0, f"exit {proc_ok.returncode}")
+
+    # An unbuilt marker is a database gap. It must not read as a detection
+    # failure, for the same reason marker_evidence.py refuses to call it ABSENT.
+    unk = states(tmp / "mk_unknown.tsv", "UNKNOWN")
+    proc_u, got_u = run_eval(["--marker-states", unk], "unknown")
+    record("markerexp:an UNKNOWN marker SKIPs rather than failing the scenario",
+           got_u.get("marker_state[cbut_bont]", {}).get("result") == "SKIP",
+           f"got {got_u.get('marker_state[cbut_bont]', {}).get('result')!r}")
+    record("markerexp:the unbuilt tier is named, so the SKIP is explicable",
+           "hmm" in (got_u.get("marker_state[cbut_bont]", {}).get("detail") or ""),
+           f"detail={got_u.get('marker_state[cbut_bont]', {}).get('detail')!r}")
+
+    # Omitting the flag entirely must not turn every marker expectation red:
+    # that would make --marker-states mandatory for every caller.
+    proc_n, got_n = run_eval([], "none")
+    record("markerexp:without --marker-states the expectation SKIPs, not FAILs",
+           got_n.get("marker_state[cbut_bont]", {}).get("result") == "SKIP",
+           f"got {got_n.get('marker_state[cbut_bont]', {}).get('result')!r}")
+    record("markerexp:and a run with no marker states still exits clean",
+           proc_n.returncode == 0, f"exit {proc_n.returncode}")
+
+
 def test_marker_tier_gap(tmp: Path) -> None:
     """A tier that was never built must not be reported as having been searched.
 
@@ -2295,6 +2411,7 @@ CASES = {
     "ctrlaudit": test_control_subtraction_audit,
     "crossbleed": test_cross_scenario_control_bleed,
     "protfloor": test_protein_tier_honours_catalogue,
+    "markerexp": test_marker_expectation_cli,
     "tiergap": test_marker_tier_gap,
     "markerjoin": test_marker_catalogue_watchlist_join,
     "hopguard": test_index_hop_batch_guard,

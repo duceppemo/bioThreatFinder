@@ -50,6 +50,28 @@ A specificity failure is weighted more heavily than a sensitivity failure in the
 summary, because a false confirmation on a high-consequence organism triggers a
 real-world response.
 
+EXPECTATIONS - two axes, because findings cannot express everything
+
+  - taxon: <name>        a claim about the findings row for a WATCHLIST taxon
+    min_tier / max_tier / min_tier_at_rpm
+
+  - marker: <marker_id>  a claim about the marker state, needs --marker-states
+    state: PRESENT | ABSENT | UNKNOWN
+
+The second axis exists because a findings row is only ever written for a taxon
+on the watchlist. A scenario whose whole point is a toxin carried by a
+near-neighbour - BoNT/E in C. butyricum, Stx in a non-O157 E. coli - has the
+organism deliberately OFF the watchlist, so no findings row can ever name it and
+the only assertable fact is the marker. `divergent_clostridium_bont` could
+therefore say nothing but "C. botulinum must not be confirmed", which is a
+max_tier, which passes on no finding at all - and did, on every run, while the
+toxin went unreported. A scenario that cannot fail is not a test.
+
+Graded over every sample in the scenario, all of which must agree. UNKNOWN is a
+database gap rather than a result and is excluded from grading exactly as
+`no_reference` is for tiers, so an unbuilt marker SKIPs instead of failing;
+`state: UNKNOWN` grades normally, because then the gap is the assertion.
+
 Exits non-zero if any scenario expectation fails, so it can gate CI.
 """
 
@@ -256,6 +278,32 @@ def load_findings(paths: list[Path]) -> dict[tuple[str, str], dict]:
             prev = out.get(key)
             if prev is None or tier_rank(row.get("tier")) > tier_rank(prev.get("tier")):
                 out[key] = row
+    return out
+
+
+MARKER_STATES = ("PRESENT", "ABSENT", "UNKNOWN")
+
+
+def load_marker_states(paths) -> dict[tuple[str, str], dict]:
+    """(sample, marker_id) -> the row marker_evidence.py wrote.
+
+    A SECOND, INDEPENDENT AXIS OF TRUTH, and the reason this exists.
+
+    Every other expectation in this file is a claim about a findings row, which
+    exists only for a WATCHLIST taxon. A scenario whose point is a toxin in a
+    near-neighbour - BoNT/E in C. butyricum, Stx in a non-O157 E. coli - has
+    nothing to assert: the organism is deliberately not on the watchlist, so no
+    findings row will ever carry it, and the only claim the scenario can make is
+    about the marker. Without this, `divergent_clostridium_bont` could only say
+    "C. botulinum must not be confirmed", which passes on total silence and did.
+    """
+    out: dict[tuple[str, str], dict] = {}
+    for pth in paths or []:
+        for row in read_tsv(pth):
+            sample = (row.get("sample") or "").strip()
+            mid = (row.get("marker_id") or "").strip()
+            if sample and mid:
+                out[(sample, mid)] = row
     return out
 
 
@@ -549,20 +597,32 @@ def vaccine_table(obs):
     return rows
 
 
-def check_expectations(scenarios, obs):
+def check_expectations(scenarios, obs, manifest=None, marker_states=None):
     """Machine-checkable assertions from the scenario file."""
     by_sc = defaultdict(list)
     for o in obs:
         by_sc[(o["scenario_id"], o["taxon"])].append(o)
 
+    # Samples per scenario come from the MANIFEST, not from `obs`. An observation
+    # exists only for a taxon of interest, so a scenario whose spike is an
+    # untargeted near-neighbour can have no observations at all while still having
+    # samples, marker states and something worth asserting.
+    samples_by_sc = defaultdict(list)
+    for m in manifest or []:
+        samples_by_sc[m.get("scenario_id", "")].append(m)
+
     results = []
     for sid, sc in scenarios.items():
         for exp in sc.get("expect") or []:
+            if "marker" in exp:
+                results.extend(_check_marker_expectation(
+                    sid, exp, samples_by_sc.get(sid, []), marker_states))
+                continue
             taxon = exp.get("taxon")
             if not taxon:
                 results.append({"scenario_id": sid, "taxon": "", "check": "malformed",
                                 "expected": "", "observed": "", "result": "ERROR",
-                                "detail": "expectation has no 'taxon'"})
+                                "detail": "expectation has no 'taxon' and no 'marker'"})
                 continue
             role = exp.get("sample_role")
             items = [o for o in by_sc.get((sid, taxon), [])
@@ -661,6 +721,106 @@ def check_expectations(scenarios, obs):
                     "detail": _detail(bad),
                 })
     return results
+
+
+def _check_marker_expectation(sid, exp, samples, marker_states):
+    """One `- marker: <id>` / `state: <PRESENT|ABSENT|UNKNOWN>` expectation.
+
+    GRADED OVER EVERY SAMPLE IN THE SCENARIO, all of which must agree, which is
+    the same rule `min_tier` uses over observations. A marker that fires on two
+    replicates of three is not a working marker.
+
+    UNKNOWN IS A DATABASE GAP, NOT A RESULT, and is handled the way
+    `no_reference` already is for tiers: excluded from grading, and if that
+    leaves nothing, the expectation SKIPs rather than FAILs. An untested marker
+    must not read as a detection failure any more than it may read as a clean
+    negative - that symmetry is the whole contract marker_evidence.py is built
+    on. Expecting UNKNOWN explicitly is the one case where it grades, because
+    then the gap is the thing being asserted.
+    """
+    mid = str(exp.get("marker") or "").strip()
+    want = str(exp.get("state") or "").strip().upper()
+    taxon = str(exp.get("taxon") or "").strip()
+    check = f"marker_state[{mid}]"
+
+    if not mid or not want:
+        return [{"scenario_id": sid, "taxon": taxon, "check": "malformed",
+                 "expected": "", "observed": "", "result": "ERROR",
+                 "detail": "a marker expectation needs both 'marker' and 'state'"}]
+    if want not in MARKER_STATES:
+        return [{"scenario_id": sid, "taxon": taxon, "check": check,
+                 "expected": want, "observed": "", "result": "ERROR",
+                 "detail": (f"unknown marker state {want!r}; expected one of "
+                            f"{', '.join(MARKER_STATES)}")}]
+
+    # No state files at all is a RUN that did not collect them, not a failing
+    # pipeline. Exit 1 here would make --marker-states effectively mandatory for
+    # every caller of this script.
+    if marker_states is None:
+        return [{"scenario_id": sid, "taxon": taxon, "check": check,
+                 "expected": want, "observed": "not collected", "result": "SKIP",
+                 "detail": "no --marker-states supplied to this evaluation"}]
+
+    role = exp.get("sample_role")
+    rows: list[tuple[str, dict]] = []
+    missing: list[str] = []
+    for m in samples:
+        if role is not None and m.get("role") != role:
+            continue
+        smp = m.get("sample", "")
+        r = marker_states.get((smp, mid))
+        if r:
+            rows.append((smp, r))
+        else:
+            missing.append(smp)
+
+    if not rows and not missing:
+        return [{"scenario_id": sid, "taxon": taxon, "check": check,
+                 "expected": want, "observed": "none", "result": "SKIP",
+                 "detail": "scenario produced no samples - was it simulated and run?"}]
+    if not rows:
+        # The marker is not in the state files for ANY sample of this scenario.
+        # That is a scenario authoring error - a marker_id that does not exist in
+        # markers.tsv - not a pipeline result, so it is ERROR rather than FAIL.
+        return [{"scenario_id": sid, "taxon": taxon, "check": check,
+                 "expected": want, "observed": "no such marker", "result": "ERROR",
+                 "detail": (f"no marker state row for {mid!r} in any of "
+                            f"{len(missing)} sample(s); is it in markers.tsv?")}]
+
+    got = {smp: (r.get("state") or "").strip().upper() for smp, r in rows}
+    gradeable = ({s: v for s, v in got.items() if v != "UNKNOWN"}
+                 if want != "UNKNOWN" else dict(got))
+    n_unknown = len(got) - len(gradeable)
+
+    # D26's column, surfaced here because it is the usual reason a marker is a
+    # weaker instrument than the scenario assumes: an ABSENT that never searched
+    # the tier built to catch a divergent allele is not the ABSENT the author
+    # had in mind.
+    gaps = sorted({(r.get("tiers_not_built") or "").strip()
+                   for _, r in rows if (r.get("tiers_not_built") or "").strip()})
+    gap_note = f" [tiers not built: {';'.join(gaps)}]" if gaps else ""
+
+    if not gradeable:
+        return [{"scenario_id": sid, "taxon": taxon, "check": check,
+                 "expected": want, "observed": "UNKNOWN", "result": "SKIP",
+                 "detail": (f"{n_unknown} sample(s) UNKNOWN - the marker was never "
+                            f"searched (database gap), which is not a detection "
+                            f"failure{gap_note}")}]
+
+    bad = sorted(s for s, v in gradeable.items() if v != want)
+    observed = ",".join(sorted(set(gradeable.values()))) or "none"
+    detail = "; ".join(f"{s}={gradeable[s]}" for s in bad[:5])
+    if missing:
+        detail += f" [{len(missing)} sample(s) had no row for this marker]"
+    if n_unknown:
+        detail += f" [{n_unknown} not assessable]"
+    return [{"scenario_id": sid, "taxon": taxon, "check": check,
+             "expected": want, "observed": observed,
+             # A sample that produced no row at all is a real miss once some other
+             # sample of the same scenario did produce one: the catalogue clearly
+             # has the marker, so silence here is a pipeline result.
+             "result": "FAIL" if (bad or missing) else "PASS",
+             "detail": detail + gap_note}]
 
 
 def _worst(items):
@@ -1067,6 +1227,11 @@ def main() -> int:
                     help="packs/<pack>/watchlist.resolved.tsv - spiked organisms not on "
                          "the watchlist are excluded from sensitivity/LOD, since the "
                          "pipeline is not looking for them")
+    ap.add_argument("--marker-states", nargs="*", type=Path, default=[],
+                    metavar="TSV",
+                    help="per-sample marker_states.tsv from marker_evidence.py. "
+                         "Required for any `- marker:` expectation; without them "
+                         "those expectations SKIP rather than fail.")
     ap.add_argument("--descendants", type=Path,
                     help="descendants TSV from resolve_watchlist.py "
                          "--descendants-out. Required to score a group-rank "
@@ -1144,7 +1309,13 @@ def main() -> int:
         "lead": lead_table(obs),
     }
     tables["lod"] = lod_table(tables["sensitivity"])
-    exp_results = check_expectations(scenarios, obs)
+    marker_states = None
+    if args.marker_states:
+        marker_states = load_marker_states(args.marker_states)
+        sys.stderr.write(
+            f"[bench] {len(marker_states)} marker state(s) from "
+            f"{len(args.marker_states)} file(s)\n")
+    exp_results = check_expectations(scenarios, obs, manifest, marker_states)
 
     variants = {}
     traces = {}
@@ -1378,6 +1549,95 @@ def self_test() -> int:
           "one replicate below the floor must FAIL min_tier_at_rpm")
     check(by[("vac_z", "max_tier")]["result"] == "PASS",
           "correct vaccine tiering must PASS")
+
+    # ---- marker-state expectations -------------------------------------
+    # The axis that exists because a findings row is only ever written for a
+    # watchlist taxon, and the scenario this was built for spikes one that is
+    # deliberately not on it.
+    mk_sc = {"tox": {"id": "tox", "kind": "specificity", "expect": [
+        {"marker": "cbut_bont", "state": "PRESENT", "taxon": "Clostridium butyricum"},
+        {"marker": "cbot_ntnh", "state": "ABSENT"},
+        {"marker": "never_built", "state": "PRESENT"},
+        {"marker": "typo_state", "state": "MAYBE"},
+        {"marker": "", "state": "PRESENT"},
+    ]}}
+    mk_man = [{"sample": f"t{i}", "scenario_id": "tox", "platform": "illumina",
+               "replicate": str(i), "level_rpm": "300", "role": "sample",
+               "truth_present": "Clostridium butyricum", "truth_absent": "",
+               "truth_vaccine": ""} for i in (1, 2, 3)]
+
+    def mk(states):
+        return {(smp, mid): {"sample": smp, "marker_id": mid, **rest}
+                for (smp, mid), rest in states.items()}
+
+    # Two of three replicates fire. A marker that works two times in three is
+    # not a working marker, so this must FAIL rather than average out.
+    partial = mk({("t1", "cbut_bont"): {"state": "PRESENT"},
+                  ("t2", "cbut_bont"): {"state": "PRESENT"},
+                  ("t3", "cbut_bont"): {"state": "ABSENT"},
+                  ("t1", "cbot_ntnh"): {"state": "ABSENT"},
+                  ("t2", "cbot_ntnh"): {"state": "ABSENT"},
+                  ("t3", "cbot_ntnh"): {"state": "ABSENT"},
+                  ("t1", "never_built"): {"state": "UNKNOWN"},
+                  ("t2", "never_built"): {"state": "UNKNOWN"},
+                  ("t3", "never_built"): {"state": "UNKNOWN",
+                                          "tiers_not_built": "hmm"},
+                  ("t1", "typo_state"): {"state": "PRESENT"}})
+    mr = {(r["scenario_id"], r["check"]): r
+          for r in check_expectations(mk_sc, [], mk_man, partial)}
+    check(mr[("tox", "marker_state[cbut_bont]")]["result"] == "FAIL",
+          "two replicates of three must FAIL a marker expectation")
+    check("t3" in mr[("tox", "marker_state[cbut_bont]")]["detail"],
+          "the failing replicate is named")
+    check(mr[("tox", "marker_state[cbot_ntnh]")]["result"] == "PASS",
+          "a marker ABSENT on every replicate PASSes an ABSENT expectation")
+
+    # An unbuilt marker is a database gap, graded exactly like no_reference.
+    gap = mr[("tox", "marker_state[never_built]")]
+    check(gap["result"] == "SKIP",
+          f"an UNKNOWN marker must SKIP, not FAIL (got {gap['result']})")
+    check("hmm" in gap["detail"],
+          "the unbuilt tier from D26 is surfaced in the detail")
+
+    check(mr[("tox", "marker_state[typo_state]")]["result"] == "ERROR",
+          "an unknown state name is an ERROR, not a silently-passing expectation")
+    check(any(r["check"] == "malformed" for r in
+              check_expectations(mk_sc, [], mk_man, partial)),
+          "a marker expectation with no marker id is malformed")
+
+    # A marker nobody can find is a scenario authoring error, not a result.
+    none_at_all = mk({("t1", "cbot_ntnh"): {"state": "ABSENT"},
+                      ("t2", "cbot_ntnh"): {"state": "ABSENT"},
+                      ("t3", "cbot_ntnh"): {"state": "ABSENT"}})
+    mr2 = {(r["scenario_id"], r["check"]): r
+           for r in check_expectations(mk_sc, [], mk_man, none_at_all)}
+    check(mr2[("tox", "marker_state[cbut_bont]")]["result"] == "ERROR",
+          "a marker id in no state file at all is an ERROR")
+
+    # Expecting the gap itself grades normally - otherwise D26's 13 markers
+    # could never be pinned.
+    want_unknown = {"g": {"id": "g", "kind": "specificity",
+                          "expect": [{"marker": "never_built", "state": "UNKNOWN"}]}}
+    g_man = [dict(m, scenario_id="g") for m in mk_man]
+    mr3 = {r["check"]: r for r in check_expectations(
+        want_unknown, [], g_man,
+        mk({("t1", "never_built"): {"state": "UNKNOWN"},
+            ("t2", "never_built"): {"state": "UNKNOWN"},
+            ("t3", "never_built"): {"state": "UNKNOWN"}}))}
+    check(mr3["marker_state[never_built]"]["result"] == "PASS",
+          "state: UNKNOWN grades normally - the gap is the assertion")
+
+    # No --marker-states at all must not turn every marker expectation red.
+    mr4 = {r["check"]: r for r in check_expectations(mk_sc, [], mk_man, None)}
+    check(mr4["marker_state[cbut_bont]"]["result"] == "SKIP",
+          "without --marker-states a marker expectation SKIPs, it does not FAIL")
+
+    # A sample that produced no row while its siblings did is a real miss.
+    one_missing = mk({("t1", "cbut_bont"): {"state": "PRESENT"},
+                      ("t2", "cbut_bont"): {"state": "PRESENT"}})
+    mr5 = {r["check"]: r for r in check_expectations(mk_sc, [], mk_man, one_missing)}
+    check(mr5["marker_state[cbut_bont]"]["result"] == "FAIL",
+          "a sample missing a row its siblings have is a FAIL, not a silent pass")
 
     # Ablation arithmetic
     obs_wo = evaluate(scenarios, manifest, {

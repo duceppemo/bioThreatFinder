@@ -292,12 +292,26 @@ else
   log "no watchlist.descendants.tsv published; group-rank leads will not be scored"
 fi
 
+# Marker states come from the SAME arm the reference findings came from, so a
+# `- marker:` expectation is graded against the run it is reported beside. They
+# are per-sample files, so this is a glob rather than one path. Absent (markers
+# skipped, or an older run) those expectations SKIP; they do not fail.
+MARKER_DIR="$(dirname "$(dirname "$REF")")/markers"
+MARKER_ARGS=()
+if compgen -G "${MARKER_DIR}/*.marker_states.tsv" >/dev/null; then
+  MARKER_ARGS=(--marker-states "${MARKER_DIR}"/*.marker_states.tsv)
+  log "marker states: ${MARKER_DIR} ($(ls -1 "${MARKER_DIR}"/*.marker_states.tsv | wc -l) file(s))"
+else
+  log "no marker_states published; marker-state expectations will SKIP"
+fi
+
 log "evaluating ..."
 python3 "${REPO_DIR}/bin/evaluate_benchmark.py" \
   --scenarios "$SCENARIOS" \
   --manifest "$MANIFEST" \
   --watchlist "$WATCHLIST" \
   "${DESC_ARGS[@]}" \
+  "${MARKER_ARGS[@]}" \
   --findings "$REF" \
   "${EVAL_ARGS[@]}" \
   --out-dir "${OUTDIR}/evaluation" || log "evaluator reported failing expectations (exit non-zero)"

@@ -2302,3 +2302,79 @@ undeclared tier which happens to exist is **not** a gap — `has_hmm: yes` on a
 The 18 underlying gaps are **not fixed** here; they are now tracked. `cbut_bont`
 names its own obstacle — *"only 2 protein sequences"*, below the builder's
 alignment floor — so the HMM set needs more sequence, not a re-run.
+
+---
+
+## D28 — A second expectation axis, because a findings row only ever exists for a watchlist taxon
+
+2026-10-14. The gap D15's BoNT half was actually sitting on, found while
+diagnosing it: the scenario could not state its own claim.
+
+**What the benchmark could assert, and what it could not.** Every expectation
+in `human_core.yaml` is `taxon:` plus `min_tier` / `max_tier` /
+`min_tier_at_rpm` — a claim about a row in `findings.tsv`. That table only ever
+carries watchlist taxa. `divergent_clostridium_bont` spikes *C. butyricum*,
+which is a `near_neighbour` and deliberately **not** on the watchlist, so no
+findings row can ever name it. Its only expressible expectation was
+
+    - taxon: Clostridium botulinum
+      max_tier: marker_veto
+
+an upper bound. `tier_rank(None) == -1`, so "no finding" satisfies any cap: the
+scenario **PASSed on total silence**, on every run, while the toxin it exists to
+test went unreported. Its own description says *"Correct behaviour is to report
+the toxin and name the right organism"*, and nothing checked that.
+
+The same hole covers every toxin-in-a-neighbour scenario — Stx in a non-O157
+*E. coli* is the other obvious one.
+
+**The fix is a second axis, not a wider first one.**
+
+    - marker: cbut_bont
+      state: PRESENT        # PRESENT | ABSENT | UNKNOWN
+
+fed by `--marker-states`, the per-sample files `marker_evidence.py` already
+writes. Samples come from the **manifest**, not from `obs`: a scenario whose
+spike is untargeted has no observations at all, so grading off `obs` would have
+reproduced the same blindness one level down.
+
+**Graded over every sample, all of which must agree** — the rule `min_tier`
+already uses. A marker that fires on two replicates of three is not a working
+marker.
+
+**UNKNOWN is a database gap, not a result**, and is excluded from grading
+exactly as `no_reference` is for tiers: an unbuilt marker SKIPs rather than
+FAILs. That symmetry is the contract `marker_evidence.py` is built on — an
+untested marker may not read as a clean negative, and it may not read as a
+detection failure either. `state: UNKNOWN` grades normally, because then the gap
+*is* the assertion, which is what makes D26's 13 markers pinnable. D26's
+`tiers_not_built` is surfaced in the detail, so a SKIP explains itself.
+
+Three failure modes are ERROR rather than FAIL, because they are authoring
+mistakes that would otherwise be expectations which cannot fail — the
+`check_tier_name` lesson applied to the new axis: an unknown state name, a
+missing `marker`/`state` pair, and a marker id that appears in no state file at
+all. A sample missing a row its siblings have is a genuine FAIL.
+
+**Measured against the real run.** With the expectation added to a scratch copy
+of the scenario file and the committed `divergent_v1` marker states:
+
+    divergent_clostridium_bont  Clostridium botulinum  max_tier                 <= marker_veto  no finding  PASS
+    divergent_clostridium_bont  Clostridium butyricum  marker_state[cbut_bont]  PRESENT         ABSENT      FAIL
+    divergent_clostridium_bont                         marker_state[cbot_bont]  ABSENT          ABSENT      PASS
+
+The scenario goes red, correctly, naming all three replicates — and the old
+taxon expectation is untouched, which is asserted rather than assumed.
+
+**The scenario file is NOT edited here.** The machinery exists; adding the
+expectation is a change to benchmark ground truth and is the user's call, as is
+the fixture strain. Both are recorded in the BoNT diagnosis: the spike is
+*C. butyricum* DSM 10702, the non-toxigenic type strain, which carries no BoNT
+gene (zero minimap2 hits, zero tblastn hits at 1e-3, against a validated
+positive control). Adding the expectation without fixing the fixture makes the
+scenario correctly red; fixing the fixture without the expectation leaves it
+unable to fail.
+
+Ten self-test checks, mutation-verified, plus ten CLI-level `markerexp` checks
+covering the flag, the file reader and the exit code. `run_bakeoff.sh` passes
+marker states from the same arm the reference findings came from.
