@@ -644,6 +644,33 @@ def test_pack_integrity(tmp: Path) -> None:
                 named |= set((s.get("truth") or {}).get(k) or [])
         record("pack:every scenario taxon has a genome source", not (named - known),
                f"orphans: {sorted(named - known)}")
+
+        # THE SAME ORPHAN CHECK FOR THE SECOND EXPECTATION AXIS.
+        #
+        # A `- marker:` expectation naming an id that is not in markers.tsv is an
+        # expectation that can never pass - and the lesson this file already
+        # records for check_tier_name is that a misspelled assertion silently
+        # removes the gate it was written to be. The evaluator reports it as
+        # ERROR at run time; catching it statically means a typo fails the suite
+        # instead of a benchmark run hours later.
+        with (PACK / "markers.tsv").open() as fh:
+            marker_ids = {r["marker_id"] for r in csv.DictReader(
+                [l for l in fh if not l.startswith("#")], delimiter="\t")
+                if r.get("marker_id")}
+        want_markers, bad_states = set(), []
+        for sn in sc:
+            for e in sn.get("expect") or []:
+                if "marker" not in e:
+                    continue
+                want_markers.add(e["marker"])
+                if str(e.get("state", "")).strip().upper() not in (
+                        "PRESENT", "ABSENT", "UNKNOWN"):
+                    bad_states.append(f"{sn.get('id')}/{e['marker']}={e.get('state')!r}")
+        record("pack:every scenario marker expectation names a real marker",
+               not (want_markers - marker_ids),
+               f"orphans: {sorted(want_markers - marker_ids)}")
+        record("pack:every scenario marker expectation names a real state",
+               not bad_states, f"bad: {bad_states}")
         pk = btf_yaml.load(PACK / "pack.yaml")
         th = pk.get("thresholds") or {}
         record("pack:identity floor is the near-neighbour discriminator (>=0.98)",

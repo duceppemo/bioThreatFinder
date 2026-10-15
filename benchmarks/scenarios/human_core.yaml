@@ -726,6 +726,22 @@ scenarios:
       expect:
           - taxon: Clostridium botulinum
             max_tier: marker_veto
+          # THE CLAIM THIS SCENARIO EXISTS TO MAKE, and which it could not state
+          # until marker expectations existed. C. butyricum is a near_neighbour,
+          # deliberately NOT on the watchlist, so no findings row can ever name
+          # it and the cap above is satisfied by total silence - which is what
+          # this scenario returned on every run while the toxin went unreported.
+          #
+          # Only cbut_bont is asserted. cbot_bont is NOT expected ABSENT: BoNT/E
+          # is shared between the species, the cbot_bont family lists botE among
+          # its aliases, and marker_rules.yaml is built around that overlap -
+          # `veto_if: cbut_bont` exists precisely so a cbot_bont hit can be
+          # attributed to the right organism rather than suppressed. Asserting
+          # it absent would contradict the rule it is meant to exercise. Same
+          # for cbot_ntnh, which is co-located in the cluster in both species.
+          - marker: cbut_bont
+            state: PRESENT
+            taxon: Clostridium butyricum
 
     # -----------------------------------------------------------------------
     # CONTAMINATION AND CONTROLS

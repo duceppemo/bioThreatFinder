@@ -2378,3 +2378,52 @@ unable to fail.
 Ten self-test checks, mutation-verified, plus ten CLI-level `markerexp` checks
 covering the flag, the file reader and the exit code. `run_bakeoff.sh` passes
 marker states from the same arm the reference findings came from.
+
+---
+
+## D29 — The BoNT scenario now states its claim, and is correctly red
+
+2026-10-14. D28 built the axis; this is the expectation, added on the user's
+explicit direction since it changes benchmark ground truth.
+
+```yaml
+- marker: cbut_bont
+  state: PRESENT
+  taxon: Clostridium butyricum
+```
+
+**Only `cbut_bont` is asserted, and the omissions are the substance of this
+entry.** A first draft also expected `cbot_bont: ABSENT`, which would have been
+wrong as ground truth. BoNT/E is shared between the two species, `cbot_bont`
+lists `botE` among its aliases, and `marker_rules.yaml` is built around exactly
+that overlap: `veto_if: cbut_bont` exists so a `cbot_bont` hit can be
+*attributed* to the right organism rather than suppressed. Asserting it absent
+would contradict the rule the scenario exists to exercise. `cbot_ntnh` is the
+same case — NTNH is co-located in the toxin cluster in both species.
+
+**`min_tier: marker_veto` on *C. botulinum* is NOT added.** The description says
+the veto should name the right organism, but a veto only produces a row if the
+classifier nominates *C. botulinum* at all, and there is no evidence from any
+run that it does. That expectation would be a guess about classifier behaviour
+dressed as ground truth.
+
+**Measured against the committed file and the real `divergent_v1` run:**
+
+    divergent_clostridium_bont  Clostridium botulinum  max_tier                 <= marker_veto  no finding  PASS
+    divergent_clostridium_bont  Clostridium butyricum  marker_state[cbut_bont]  PRESENT         ABSENT      FAIL
+
+2 pass, 2 fail, 26 skip. **The red is correct and is not a regression.** The
+spike is *C. butyricum* DSM 10702, the non-toxigenic type strain, which carries
+no BoNT gene at all — zero minimap2 hits for 14 marker nucleotide sequences,
+zero tblastn hits for 12 marker proteins at e < 1e-3, against a positive control
+(`ecoli_stx1` vs the background *E. coli*) that returned hits at e < 1e-110. The
+benchmark is now reporting a real fixture gap instead of a green light. Swapping
+the spike to a toxigenic strain is a separate change; the simulator already
+accepts `genome: <accession|path>` on a spike.
+
+**Two static guards added**, the same orphan check the scenario taxa already
+get: every `- marker:` must name an id in `markers.tsv`, and every `state:` must
+be a real state. The evaluator reports both as ERROR at run time, but the lesson
+`check_tier_name` records is that a misspelled assertion silently removes the
+gate it was written to be — catching it in the suite means a typo fails in
+seconds rather than hours into a benchmark run.
