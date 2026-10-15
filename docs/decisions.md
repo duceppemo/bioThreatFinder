@@ -2680,3 +2680,87 @@ haemagglutinin; `nipah_N` and `rvfv_N` carry L polymerase and phosphoprotein;
 `curation_required` branch for unsearchable rows is dead code, because the same
 commit added the alias that stops `henipa_cedar` reaching it — the commit
 message and D30 both claim otherwise and are **wrong**.
+
+---
+
+## D32 — The organism was right and the subtype was the claim, and a poxvirus ORF name has the shape of an amino-acid substitution
+
+2026-10-15. The remaining wrong-sequence findings from the Fable pass, and the
+rebuild that applies them. Both are the same kind of error as D30's clade
+relaxation — a reference set that cannot support the claim the marker makes —
+reached by two routes the organism gate does not see.
+
+### A third kind of scope
+
+`clade_relaxation_allowed()` asks one question: does this rung stay inside the
+declared organism. For `flua_HA_H5` the organism is right and the **subtype** is
+the claim, so that question waves through a reference set exactly as wrong as
+the clade rungs it blocks.
+
+Measured on the shipped pack: `flua_HA_H5` and `flua_HA_H7` held the **same
+seven HA proteins** — H5N1, H1N1, H3N2, H1N1, H2N2, H9N2, H7N9. One of seven is
+H5; one is H7. Both rows were `built` with `has_hmm=yes`, so a profile was built
+over the mixture. They are the two markers for highly pathogenic avian
+influenza, and `marker_rules.yaml` lists them under `report_always`, so any
+seasonal influenza A sample put "H5 marker present" and "H7 marker present" in
+front of an analyst.
+
+The winning rung for both was `HA[Gene Name] AND "Influenza A virus"[Organism]
+AND srcdb_refseq[Properties]`. The `H5`/`H7` aliases contributed nothing,
+because the gene symbol's rungs come first and already satisfied `want`.
+
+**The fix is a declared scope, not an inferred one.** A new
+`query_strategy=subtype_in_organism` says the aliases are tokens a retrieved
+record must carry. NCBI encodes the subtype in the organism string — *"Influenza
+A virus (A/goose/Guangdong/1/1996(H5N1))"* — so it is checkable **on the record**
+rather than guessable from the query, which is the distinction the standing
+principle's first lesson draws. The filter runs inside the pooling loop, so a
+rung that returns nine wrong subtypes and one right one contributes the one and
+the search keeps going.
+
+`H5` matches `H5` and `H5N8`; it does not match `H15N1` or `H51`. The strategy
+also removes these rows from the `gene_family` branch, so they no longer get
+clade relaxation either — being `pathotype`, they were entitled to it.
+
+### A poxvirus ORF name is shaped like a substitution
+
+`SUBSTITUTION_RE` (`^(TR\d{1,4}|[A-Z]\d{1,4}[A-Z*]|\d{1,4}[A-Z])$`) exists for
+alias lists like `cyp51A`'s `TR34;L98H;TR46;Y121F;T289A` — resistance
+substitutions that are not searchable gene symbols. **Every value it was written
+for is an alias.** Applied to the `gene` column it ate real symbols:
+
+| row | gene | why it matched |
+|---|---|---|
+| `mpox_C3L` | `C3L` | poxvirus ORFs are `<fragment><n><L\|R>`, i.e. `[A-Z]\d{1,4}[A-Z]` |
+| `pfal_18S`, `ehist_ssu`, `crypto_ssu`, `nfow_18S`, `bmand_18S` | `18S` | matches `\d{1,4}[A-Z]` |
+
+`mpox_C3L` is the one that was harmed: its declared symbol was dropped before
+any query existed, the ladder fell through to the `[All Fields]` last resort,
+and the marker was built from **B5R, an EEV membrane glycoprotein and
+haemagglutinin** — not the complement control protein, and useless for the clade
+I/II call it exists to make. Status `partial`, i.e. testable.
+
+The five `18S` rows are all `required`, and all survived on their `SSU rRNA`
+alias and the rRNA title fallback — degraded rather than broken, searched
+without their most precise term. The reviewer found `C3L`; the `18S` rows came
+out of checking the regex against the whole catalogue rather than the one row.
+
+**A curator who writes a symbol in the `gene` column means it is the gene**, so
+the filter now applies to aliases only. The length floor still applies to both:
+a one-character name is unsearchable whatever column it came from.
+
+### The rebuild
+
+The 2026-10-15 manifest carried two populations — 31 rows rebuilt under D30's
+gate and **132 still produced by the pre-D30 code**, because the resume
+drift-check compares `taxon`, `marker_class`, `evidence_type` and
+`query_strategy` and none of those changed. It compares neither `gene` nor
+`aliases`, which are exactly the fields D30's and this entry's remedies alter,
+so `--force` is the only way to refresh them. Those stale rows still held what
+the gate exists to stop: `nipah_N`, a **`required`** marker for Nipah, carried
+an RNA-directed RNA polymerase L and two phosphoproteins among its seven
+sequences, and `rvfv_N` carried the L polymerase inside the N marker. Both HMMs
+were built over the mixture.
+
+So this is a full `--force` rebuild of all 163 markers, which is also the first
+one where a throttled run cannot be mistaken for a result (D31).

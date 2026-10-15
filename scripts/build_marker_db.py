@@ -218,7 +218,7 @@ ALL_STATUSES = [STATUS_BUILT, STATUS_PARTIAL, STATUS_CURATION,
                 STATUS_FAILED, STATUS_MOTIF, STATUS_RETRIEVAL_ERROR]
 
 KNOWN_STRATEGIES = {"gene_in_organism", "gene_family", "named_region", "motif",
-                    "curate_required"}
+                    "curate_required", "subtype_in_organism"}
 KNOWN_TIERS = {"dna", "protein", "hmm"}
 
 MM2_PRESETS = ["sr", "map-ont"]
@@ -912,10 +912,35 @@ def query_names(row: dict) -> List[str]:
     [All Fields] and flood the candidate list with unrelated records, so short
     tokens are dropped too.
     """
-    gene = row.get("gene", "")
-    raw = ([gene] if gene and gene != "-" else []) + parse_aliases(row.get("aliases", ""))
+    gene = (row.get("gene") or "").strip()
     out: List[str] = []
-    for name in raw:
+
+    # THE SUBSTITUTION FILTER APPLIES TO ALIASES ONLY, NEVER TO THE DECLARED GENE.
+    #
+    # SUBSTITUTION_RE exists for alias lists like cyp51A's `TR34;L98H;TR46;Y121F;
+    # T289A` - resistance substitutions that are not searchable gene symbols. Every
+    # value it was written for is an ALIAS. Applied to the gene column it ate real
+    # symbols that happen to share the shape:
+    #
+    #   mpox_C3L   gene `C3L`  - poxvirus ORF names are <fragment><n><L|R>, which is
+    #                            exactly [A-Z]\d{1,4}[A-Z]. The declared symbol was
+    #                            dropped before any query existed, so the marker fell
+    #                            through to the [All Fields] last resort and was built
+    #                            from B5R and haemagglutinin - not the complement
+    #                            control protein, and useless for the clade call it
+    #                            exists to make.
+    #   five rows  gene `18S`  - matches \d{1,4}[A-Z]. pfal_18S, ehist_ssu,
+    #                            crypto_ssu, nfow_18S, bmand_18S, all `required`.
+    #                            They survived on their `SSU rRNA` alias and the rRNA
+    #                            title fallback, so they are degraded rather than
+    #                            broken - searched without their most precise term.
+    #
+    # A curator who writes a symbol in the `gene` column means it is the gene. The
+    # length filter still applies to both: a one-character name is unsearchable
+    # whatever column it came from (see MIN_QUERY_NAME_LEN).
+    if gene and gene != "-" and len(gene) >= MIN_QUERY_NAME_LEN:
+        out.append(gene)
+    for name in parse_aliases(row.get("aliases", "")):
         if len(name) < MIN_QUERY_NAME_LEN:
             continue
         if SUBSTITUTION_RE.match(name):
@@ -1072,6 +1097,55 @@ RRNA_TERMS = ("18s", "16s", "23s", "28s", "5.8s", "ssu", "lsu", "rrna", "its",
 def looks_like_rrna_or_organelle(row: dict) -> bool:
     blob = f"{row.get('gene','')} {row.get('aliases','')} {row.get('locus','')}".lower()
     return any(t in blob for t in RRNA_TERMS)
+
+
+SUBTYPE_STRATEGY = "subtype_in_organism"
+
+
+def subtype_tokens(row: dict) -> List[str]:
+    """Tokens a retrieved record MUST carry, for a subtype-scoped marker.
+
+    WHY A THIRD KIND OF SCOPE EXISTS.
+
+    clade_relaxation_allowed() asks "does this rung stay inside the declared
+    organism". For flua_HA_H5 the organism is right and the SUBTYPE is the
+    claim, so that question passes a reference set that is exactly as wrong as
+    the clade rungs it blocks. Measured on the shipped pack: `flua_HA_H5` and
+    `flua_HA_H7` held the SAME seven HA proteins - H5N1, H1N1, H3N2, H1N1,
+    H2N2, H9N2, H7N9 - one of seven being H5 and one being H7, both `built`
+    with an HMM over the mixture. They are the two markers for highly
+    pathogenic avian influenza, and they are `report_always`, so any seasonal
+    influenza A sample put "H5 present" and "H7 present" in front of an analyst.
+
+    The winning rung for both was `HA[Gene Name] AND "Influenza A virus"
+    [Organism] AND srcdb_refseq[Properties]`; the H5/H7 aliases contributed
+    nothing because the gene symbol's rungs come first and already satisfied
+    `want`.
+
+    NCBI encodes the subtype in the organism string - "Influenza A virus
+    (A/goose/Guangdong/1/1996(H5N1))" - so it is checkable on the record rather
+    than guessable from the query. A row declares the requirement by setting
+    query_strategy=subtype_in_organism; the aliases are the tokens.
+    """
+    if (row.get("query_strategy") or "").strip() != SUBTYPE_STRATEGY:
+        return []
+    return parse_aliases(row.get("aliases", ""))
+
+
+def _subtype_re(token: str) -> "re.Pattern[str]":
+    """H5 matches H5 and H5N1, but not H15N1, H51 or AH5."""
+    return re.compile(r"(?<![A-Za-z0-9])" + re.escape(token) + r"(?:N\d{1,2})?(?![0-9])")
+
+
+def record_has_subtype(rec: SeqRecord, tokens: Sequence[str]) -> bool:
+    """True when the record's own text carries one of the required subtypes.
+
+    No tokens means no requirement, so every non-subtype marker is unaffected.
+    """
+    if not tokens:
+        return True
+    text = f"{rec.description} {rec.accession}"
+    return any(_subtype_re(t).search(text) for t in tokens)
 
 
 def clade_relaxation_allowed(row: dict) -> bool:
@@ -1250,15 +1324,22 @@ def fetch_protein(ez: Entrez, row: dict, want: int) -> Tuple[List[SeqRecord], st
     accumulation fixes it.
     """
     plan = aa_query_plan(row)
+    subtypes = subtype_tokens(row)
     pool: List[SeqRecord] = []
     used: List[str] = []
+    n_wrong_subtype = 0
 
     def take(query: str) -> int:
+        nonlocal n_wrong_subtype
         uids = ez.esearch("protein", query)
         if not uids:
             return 0
         text = ez.efetch("protein", uids[:max(want * 4, want)], "fasta")
         records = [r for r in parse_fasta(text) if AA_MIN_LEN <= len(r) <= AA_MAX_LEN]
+        if subtypes:
+            kept = [r for r in records if record_has_subtype(r, subtypes)]
+            n_wrong_subtype += len(records) - len(kept)
+            records = kept
         if not records:
             return 0
         before = len(pool)
@@ -1291,7 +1372,14 @@ def fetch_protein(ez: Entrez, row: dict, want: int) -> Tuple[List[SeqRecord], st
                 break
 
     if not pool:
+        if subtypes and n_wrong_subtype:
+            LOG.warning("  %s: %d protein record(s) matched the gene and organism "
+                        "but carried none of the required subtype(s) %s - not used",
+                        row.get("marker_id"), n_wrong_subtype, "/".join(subtypes))
         return [], (plan[0][0] if plan else "")
+    if subtypes and n_wrong_subtype:
+        LOG.info("  %s: dropped %d off-subtype protein record(s), kept %d for %s",
+                 row.get("marker_id"), n_wrong_subtype, len(pool), "/".join(subtypes))
     # Prefer RefSeq accessions (NP_/YP_/WP_/XP_) - curated, and stable across
     # rebuilds, which matters because the accession goes in the manifest.
     pool.sort(key=lambda r: (0 if re.match(r"^[NYWX]P_", r.accession) else 1,
@@ -1320,6 +1408,8 @@ def fetch_nucleotide(ez: Entrez, row: dict,
     # one-character alias would prefix-match a large fraction of every genome.
     wanted_names = query_names(row)
     strategy = row["query_strategy"]
+    subtypes = subtype_tokens(row)
+    n_wrong_subtype = 0
     # WHY THESE COUNTERS EXIST: "the search found nothing" and "the search found
     # forty complete genomes and every one was discarded" produced the SAME note.
     # orthopox_ATI and mpox_C3L are the second case - C3L[All Fields] returns 40
@@ -1343,6 +1433,9 @@ def fetch_nucleotide(ez: Entrez, row: dict,
                 n_cds_seen += 1
                 if not gene_name_matches(rec.gene, wanted_names):
                     continue
+                if not record_has_subtype(rec, subtypes):
+                    n_wrong_subtype += 1
+                    continue
                 if NT_MIN_LEN <= len(rec) <= NT_MAX_DIRECT_LEN:
                     records.append(rec)
 
@@ -1350,6 +1443,9 @@ def fetch_nucleotide(ez: Entrez, row: dict,
         if not records:
             text = ez.efetch("nuccore", probe, "fasta")
             for rec in parse_fasta(text):
+                if not record_has_subtype(rec, subtypes):
+                    n_wrong_subtype += 1
+                    continue
                 if NT_MIN_LEN <= len(rec) <= NT_MAX_DIRECT_LEN:
                     records.append(rec)
                 else:
@@ -2487,6 +2583,16 @@ def self_test() -> int:
     check("one-character aliases are not searched (would match everything)",
           "t" not in query_names({"gene": "lpnA", "aliases": "tul4;t"}),
           str(query_names({"gene": "lpnA", "aliases": "tul4;t"})))
+    check("a DECLARED GENE is never dropped as a substitution",
+          query_names({"gene": "C3L", "aliases": "complement control protein"})
+          == ["C3L", "complement control protein"],
+          str(query_names({"gene": "C3L", "aliases": "complement control protein"})))
+    check("the 18S gene symbol survives too (five required parasite markers)",
+          query_names({"gene": "18S", "aliases": "SSU rRNA"}) == ["18S", "SSU rRNA"],
+          str(query_names({"gene": "18S", "aliases": "SSU rRNA"})))
+    check("poxvirus ORF names have the substitution SHAPE, which is why "
+          "the filter may not see the gene column",
+          SUBSTITUTION_RE.match("C3L") and SUBSTITUTION_RE.match("18S"))
     check("substitution designations are not searched",
           query_names({"gene": "cyp51A", "aliases": "TR34;L98H;TR46;Y121F;T289A"})
           == ["cyp51A"],
@@ -2609,6 +2715,37 @@ def self_test() -> int:
           _tried_phrase(aa_queries(famrow), used6))
     check("a row that builds no query says so, not 'none built' as a query",
           "no query could be built" in _tried_phrase([], ""))
+
+    print("-- subtype scope: the organism is right and the subtype is the claim --")
+    h5 = {"marker_id": "flua_HA_H5", "taxon": "Influenza A virus", "gene": "HA",
+          "aliases": "H5", "marker_class": "pathotype",
+          "query_strategy": "subtype_in_organism"}
+    check("a subtype-scoped row declares its tokens", subtype_tokens(h5) == ["H5"],
+          str(subtype_tokens(h5)))
+    check("a row that is not subtype-scoped requires nothing",
+          subtype_tokens(dict(h5, query_strategy="gene_family")) == [])
+    check("no requirement means every record passes",
+          record_has_subtype(SeqRecord("A", "anything at all", "M" * 50), []))
+    def _rec(desc):
+        return SeqRecord("X", desc, "M" * 50)
+    check("the declared subtype is kept",
+          record_has_subtype(_rec("HA [Influenza A virus (A/goose/1/96(H5N1))]"), ["H5"]))
+    check("a different N is still the same H",
+          record_has_subtype(_rec("HA [Influenza A virus (A/x/20(H5N8))]"), ["H5"]))
+    check("another subtype is dropped - this is the seven-protein bug",
+          not record_has_subtype(_rec("HA [Influenza A virus (A/x/09(H1N1))]"), ["H5"])
+          and not record_has_subtype(_rec("HA [Influenza A virus (A/x/13(H7N9))]"), ["H5"]))
+    check("H15 is not H5",
+          not record_has_subtype(_rec("HA [Influenza A virus (A/y/20(H15N1))]"), ["H5"]))
+    check("H5 is not matched inside a longer number",
+          not record_has_subtype(_rec("HA [Influenza A virus (A/z/20(H51))]"), ["H5"]))
+    check("a subtype-scoped row does NOT leave its organism",
+          all('"Influenza A virus"[Organism]' in q for q in nt_queries(h5))
+          and all('"Influenza A virus"[Organism]' in q for q in aa_queries(h5)),
+          str([q for q in nt_queries(h5)
+               if '"Influenza A virus"[Organism]' not in q]))
+    check("subtype_in_organism is a known strategy",
+          SUBTYPE_STRATEGY in KNOWN_STRATEGIES)
 
     print("-- CDS-flavoured FASTA parsing --")
     cds = (">lcl|NC_000962.3_cds_NP_214515.1_1 [gene=dnaA] [protein=chromosomal "
