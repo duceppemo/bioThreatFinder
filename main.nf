@@ -21,6 +21,7 @@ include { RESOLVE_WATCHLIST                 } from './modules/local/detect'
 include { KRAKEN2; BRACKEN; SYLPH_PROFILE   } from './modules/local/detect'
 include { KRAKENUNIQ; METABULI              } from './modules/local/detect'
 include { PARSE_SCREEN                      } from './modules/local/detect'
+include { PAVIAN_EXPORT; PAVIAN_REPORT      } from './modules/local/detect'
 include { MINIMAP2_COMPETITIVE              } from './modules/local/detect'
 include { COVERAGE_STATS                    } from './modules/local/detect'
 include { MARKER_ALIGN_NT; MARKER_SEARCH_AA } from './modules/local/detect'
@@ -270,7 +271,8 @@ workflow {
     // SKIP, never params.skip_*.
     def SKIP = [:]
     ['skip_krakenuniq', 'skip_metabuli', 'skip_kraken2', 'skip_sylph',
-     'skip_host_depletion', 'skip_markers', 'skip_marker_hmm'].each { k ->
+     'skip_host_depletion', 'skip_markers', 'skip_marker_hmm',
+     'skip_pavian_export'].each { k ->
         try { SKIP[k] = BtfBool.of(k, params[k]) }
         catch (IllegalArgumentException e) { exit 1, "ERROR: ${e.message}" }
     }
@@ -436,6 +438,22 @@ workflow {
     ch_screen = ch_ku.join(ch_k2).join(ch_bracken).join(ch_mb).join(ch_sylph)
 
     PARSE_SCREEN(ch_screen, ch_watchlist.first(), ch_descendants.first())
+
+    // Browsable copies of the stage-1 reports, for Pavian. Takes the same
+    // joined channel PARSE_SCREEN reads, so what the user browses is exactly
+    // what the screen was scored from, and reads nothing else. Purely
+    // presentational: it has no output edge into scoring and cannot move a
+    // call. Off with --skip_pavian_export.
+    if (!SKIP.skip_pavian_export) {
+        PAVIAN_EXPORT(ch_screen, file(params.taxdump, checkIfExists: true))
+
+        // Pavian's static HTML, once per run. Opt-in because the pipeline
+        // cannot install Pavian - see the process header.
+        if (BtfBool.of('pavian_html', params.pavian_html)) {
+            PAVIAN_REPORT(PAVIAN_EXPORT.out.reports.collect(),
+                          file(params.outdir).name)
+        }
+    }
 
     // -- Stage 2: targeted confirmation -----------------------------------
     // Fan out one alignment job per (sample, candidate taxon). Candidates are

@@ -591,8 +591,80 @@ results/
   confirm/          per-(sample,taxon) coverage metrics
   score_evidence/   findings.tsv  <- the machine-readable result
   report/           biothreatfinder_report.html  <- the human-readable one
+  pavian/           stage-1 reports, converted for Pavian, + optional HTML
   pipeline_info/    timeline, trace, DAG
 ```
+
+### Browsing the screen in Pavian
+
+`pavian/` holds every stage-1 arm as a plain 6-column Kraken report, named
+`<sample>.<classifier>.pavian.txt`, so [Pavian](https://github.com/fbreitwieser/pavian)
+can load a whole run from one directory and line the arms up in its
+sample-comparison view:
+
+```r
+remotes::install_github("fbreitwieser/pavian")
+pavian::runApp(port = 5000)   # Data Selection -> browse to <outdir>/pavian
+```
+
+These are copies. The export has no output edge into scoring and cannot move a
+call; `--skip_pavian_export` turns it off.
+
+#### A static HTML report
+
+Pavian also ships a standalone report template, and `scripts/pavian_report.R`
+renders it from any run's `pavian/` directory into one self-contained HTML file
+that opens in a browser with no server and no R:
+
+```bash
+# once: Pavian is GitHub-only, so install it where you want it
+Rscript -e 'mylib <- "~/R/pavian"; dir.create(mylib, recursive=TRUE)
+            .libPaths(c(mylib, .libPaths()))
+            remotes::install_github("fbreitwieser/pavian", lib=mylib, upgrade="never")'
+
+scripts/pavian_report.R --indir <outdir>/pavian --lib ~/R/pavian
+```
+
+The view is Pavian's own `inst/pavian-report.Rmd`, the same template the app's
+"Generate report" button uses -- nothing here reimplements it. The script also
+writes `sample_data.csv` so samples read as `case_1-1 (kraken2)` rather than as
+filenames, in the HTML and in the app.
+
+The pipeline can render it too, with `--pavian_html` (and `--pavian_r_lib` for a
+private library):
+
+```bash
+nextflow run . --pavian_html --pavian_r_lib ~/R/pavian ...
+```
+
+**It is off by default, and it has to be.** Pavian cannot be installed from
+conda: it comes from GitHub, and so do two of its dependencies (`sankeyD3`,
+`shinyFileTree`). No `conda` directive can declare it, and installing at run
+time would need network access and stop being reproducible. `PAVIAN_REPORT`
+therefore runs in the **host** environment and expects R and pavian to be
+present; it fails loudly rather than skipping silently if they are not.
+`PAVIAN_EXPORT` stays unconditional and needs no R, so the reports are always
+there whether or not the HTML is.
+
+It is not merely a convenience, because two arms are not loadable as published:
+
+| arm | as published | why |
+|---|---|---|
+| kraken2 | **loads** | 8 columns from `--report-minimizer-data`; Pavian's `read_report()` handles it (`ntabs == 7`), though `read_report2()` does not |
+| bracken | **loads** | already 6-column |
+| krakenuniq | **loads** | recognised by its own header |
+| metabuli | **rejected** | a trailing tab on unclassified rows ([metabuli#194](https://github.com/steineggerlab/Metabuli/issues/194)) puts 6 tabs on line 1, matching neither accepted layout, so Pavian discards the *entire* file |
+| sylph | **unreadable** | not a Kraken report at all: ANI and containment, no tree, no read counts |
+
+The converter drops the k-mer columns, because 6 fields is the only layout both
+of Pavian's readers accept. When you want the minimizer evidence, load
+`kraken2/<sample>.kraken2.report.txt` directly.
+
+**The sylph export is synthesised, not converted.** Its lineages come from the
+NCBI taxdump and its counts are `Sequence_abundance x total_reads`, back-derived
+so that Pavian has something to draw. They are *not* read assignments and must
+not be quoted as read counts. `<sample>.pavian_manifest.tsv` records, per file,
+whether counts are measured or estimated and on what basis.
 
 ## Database layout
 

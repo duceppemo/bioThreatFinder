@@ -706,3 +706,100 @@ process MARKER_EVIDENCE {
     cat ${meta.id}.marker.log >&2
     """
 }
+
+/* Classifier reports, converted into something Pavian will actually open.
+ *
+ * This is a presentation step with no bearing on any finding: it reads the
+ * stage-1 reports and writes copies, so it cannot change a call. It exists
+ * because the stage-1 output is not all loadable as published --
+ * Metabuli's trailing tab on unclassified rows makes Pavian reject the whole
+ * file, and sylph is not a Kraken report at all -- and because one directory
+ * per run, under one naming scheme, is what lets Pavian line the arms up in
+ * its sample-comparison view. See bin/to_pavian.py for the format rules,
+ * which were read off Pavian's own parser rather than assumed.
+ *
+ * Every arm is optional. An arm that was skipped arrives as [] (see
+ * fillMissing() in main.nf) and is simply not passed through.
+ */
+process PAVIAN_EXPORT {
+    tag   "${meta.id}"
+    label 'process_low'
+    conda "conda-forge::python=3.11"
+    publishDir "${params.outdir}/pavian", mode: params.publish_dir_mode
+
+    input:
+    tuple val(meta), path(ku), path(k2), path(bracken), path(mb), path(sylph)
+    path taxdump
+
+    output:
+    // Written FLAT into the task directory, not into a pavian/ subdirectory:
+    // publishDir preserves an output's relative path, so a subdirectory here
+    // would publish to <outdir>/pavian/pavian/.
+    path "*.pavian.txt"           , emit: reports, optional: true
+    path "*.pavian_manifest.tsv"  , emit: manifest
+    path "README.txt"             , emit: readme
+
+    script:
+    def a_ku = ku      ? "--krakenuniq-report ${ku}"   : ''
+    def a_k2 = k2      ? "--kraken2-report ${k2}"      : ''
+    def a_br = bracken ? "--bracken-report ${bracken}" : ''
+    def a_mb = mb      ? "--metabuli-report ${mb}"     : ''
+    def a_sy = sylph   ? "--sylph-profile ${sylph}"    : ''
+    """
+    to_pavian.py \\
+        --sample ${meta.id} \\
+        --outdir . \\
+        --taxdump ${taxdump} \\
+        ${a_ku} ${a_k2} ${a_br} ${a_mb} ${a_sy}
+    """
+}
+
+/* Pavian's own static HTML report, rendered once per run.
+ *
+ * OPT-IN (--pavian_html), AND IT HAS TO BE, BECAUSE THE PIPELINE CANNOT
+ * PROVISION ITS DEPENDENCY. Pavian is not on conda: it installs from GitHub,
+ * and two of its own dependencies (sankeyD3, shinyFileTree) are GitHub-only
+ * too. So there is no `conda` directive that could declare it, and a process
+ * that installed it at run time would need network access and would stop being
+ * reproducible. This process therefore runs in the HOST environment and
+ * expects R plus pavian to already be there; point --pavian_r_lib at a private
+ * library if that is where you installed it.
+ *
+ * It renders inst/pavian-report.Rmd from the installed package - the same
+ * template the Shiny app's "Generate report" button uses - so the view is
+ * Pavian's, not a reimplementation. PAVIAN_EXPORT remains unconditional and
+ * needs no R; only this HTML step is gated.
+ *
+ * Deliberately NOT errorStrategy 'ignore': if you asked for the HTML and the
+ * dependency is missing, a silent skip is worse than a loud failure carrying
+ * the script's install instructions.
+ */
+process PAVIAN_REPORT {
+    label 'process_low'
+    publishDir "${params.outdir}/pavian", mode: params.publish_dir_mode
+
+    input:
+    path reports
+    val  run_name
+
+    output:
+    path "pavian_report.html", emit: html
+    path "sample_data.csv"   , emit: sample_data, optional: true
+
+    script:
+    def lib = params.pavian_r_lib ? "--lib ${params.pavian_r_lib}" : ''
+    """
+    # The reports are staged flat beside the task script; the renderer wants a
+    # directory of its own so that sample_data.csv does not land in the work dir.
+    mkdir -p pavian_in
+    cp *.pavian.txt pavian_in/
+
+    ${projectDir}/scripts/pavian_report.R \\
+        --indir pavian_in \\
+        --out \$PWD/pavian_report.html \\
+        --title "bioThreatFinder - stage-1 classification - ${run_name}" \\
+        ${lib}
+
+    cp pavian_in/sample_data.csv . || true
+    """
+}
