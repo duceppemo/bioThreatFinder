@@ -18,6 +18,15 @@ whole point: a gap in the marker database must not read as a clean negative, or
 the pipeline will cheerfully report "RD1 absent, therefore BCG" for a sample it
 never tested, and "no pXO2, therefore not anthrax" for a marker it never had.
 
+The manifest is authoritative PER TIER as well, via `n_nt_seqs`, `n_aa_seqs` and
+`has_hmm`. `status: partial` says some tier is missing; those three say which.
+Without them a marker that declares `dna+protein+hmm` and has no HMM still
+reported `tier_used = dna,hmm,protein`, claiming a search that never ran. A
+declared-but-unbuilt tier is now excluded from `tier_used`, named in
+`tiers_not_built` and in the reason, and - where it is the marker's ONLY tier -
+forces UNKNOWN rather than ABSENT. An older manifest lacking the three columns
+keeps the previous behaviour rather than reading as all-gaps.
+
 THREE EVIDENCE TIERS, most to least specific
 
   dna      read alignment to the marker nucleotide sequence. Precise, but blind
@@ -435,6 +444,22 @@ def main() -> int:
     # Manifest status decides what CAN be evaluated at all.
     status: dict[str, str] = {}
     manifest_note: dict[str, str] = {}
+    # PER-MARKER TIER AVAILABILITY, which is a different question from the
+    # run-level `tiers_supplied` below.
+    #
+    # `tiers_supplied` answers "did this run receive an input file for the tier".
+    # It cannot answer "does this marker have anything in that file", and that gap
+    # was being papered over: `tried` was appended unconditionally inside each
+    # tier's branch, so a marker whose HMM was never built still reported
+    # `tier_used = dna,hmm,protein` and a reason reading "searched via
+    # dna,hmm,protein; no tier met thresholds". The row asserted that a tier looked
+    # and found nothing when the model did not exist. On the shipped pack that is
+    # 12 of 37 hmm-declaring markers - cbut_bont, ebola_NP, marburg_GP, nipah_L and
+    # the rest - every one of them a divergence-catching marker on a
+    # high-consequence agent, which is exactly the set where markers.tsv argues the
+    # HMM tier is the one that matters.
+    built_tiers: dict[str, set[str]] = {}
+    manifest_has_tier_cols = False
     if args.manifest:
         rows = read_tsv(args.manifest)
         if not rows:
@@ -444,9 +469,28 @@ def main() -> int:
             )
         for row in rows:
             mid = row.get("marker_id")
-            if mid:
-                status[mid] = (row.get("status") or "").strip().lower()
-                manifest_note[mid] = row.get("note", "")
+            if not mid:
+                continue
+            status[mid] = (row.get("status") or "").strip().lower()
+            manifest_note[mid] = row.get("note", "")
+            # An older manifest predating these columns must not silently turn
+            # every marker into a gap, so a column that is absent from the HEADER
+            # means "not recorded, assume built" - the behaviour from before this
+            # was checked at all. A column that is present but empty means no.
+            have = set()
+            for tier, col in (("dna", "n_nt_seqs"), ("protein", "n_aa_seqs")):
+                if col in row:
+                    manifest_has_tier_cols = True
+                    try:
+                        if int(float((row.get(col) or "0").strip() or 0)) > 0:
+                            have.add(tier)
+                    except ValueError:
+                        pass
+            if "has_hmm" in row:
+                manifest_has_tier_cols = True
+                if (row.get("has_hmm") or "").strip().lower() in ("yes", "true", "1"):
+                    have.add("hmm")
+            built_tiers[mid] = have
     else:
         sys.stderr.write(
             "[marker] WARNING: no --manifest supplied. Cannot distinguish 'not in "
@@ -517,6 +561,11 @@ def main() -> int:
             "marker_class": row.get("marker_class", ""),
             "copy_expectation": row.get("copy_expectation", ""),
             "state": UNKNOWN, "tier_used": "", "reason": "",
+            # Declared in markers.tsv but absent from the marker database for this
+            # marker. Initialised here so the column exists even on rows that
+            # return at gate 1, since the writer takes its fieldnames from the
+            # first record.
+            "tiers_not_built": "",
             "nt_reads": "", "nt_breadth": "", "nt_identity": "",
             "aa_hits": "", "aa_coverage": "", "aa_identity": "", "aa_bits": "",
             "hmm_domains": "", "hmm_coverage": "", "hmm_bits": "", "hmm_qlen": "",
@@ -544,11 +593,32 @@ def main() -> int:
             continue
 
         # Gate 2: were inputs for any requested tier supplied to this run?
-        evaluable = {t for t in requested if tiers_supplied.get(t)}
+        supplied = {t for t in requested if tiers_supplied.get(t)}
+
+        # Gate 2b: and does THIS marker actually have that tier built? A tier the
+        # marker does not have was never searched, so it must not be reported as
+        # having been searched, and its silence is not evidence of absence.
+        unbuilt: set[str] = set()
+        if args.manifest and manifest_has_tier_cols:
+            unbuilt = {t for t in requested if t not in built_tiers.get(mid, set())}
+        rec["tiers_not_built"] = ",".join(sorted(unbuilt))
+
+        evaluable = supplied - unbuilt
         if not evaluable:
-            rec["reason"] = (
-                f"no input supplied for requested tier(s) {'+'.join(sorted(requested)) or 'none'}"
-            )
+            if supplied and unbuilt >= supplied:
+                # Distinct from "no input supplied": the inputs arrived, this marker
+                # just has nothing in them. UNKNOWN either way - nothing was
+                # searched, so absence cannot be asserted - but the reason has to
+                # say which, or a database gap reads as a run configuration error.
+                rec["reason"] = (
+                    f"requested tier(s) {'+'.join(sorted(requested))} but none is "
+                    f"built for this marker (not built: {','.join(sorted(unbuilt))}); "
+                    f"nothing was searched"
+                )
+            else:
+                rec["reason"] = (
+                    f"no input supplied for requested tier(s) {'+'.join(sorted(requested)) or 'none'}"
+                )
             results.append(rec)
             counts[UNKNOWN] += 1
             continue
@@ -671,6 +741,11 @@ def main() -> int:
             rec["state"] = PRESENT
             rec["tier_used"] = ",".join(p.split("(")[0] for p in passed)
             rec["reason"] = "; ".join(passed)
+            if unbuilt:
+                rec["reason"] += (
+                    f"; NOT SEARCHED - declared but not built for this marker: "
+                    f"{','.join(sorted(unbuilt))}"
+                )
         elif not args.manifest:
             # THE WARNING ABOVE PROMISED THIS AND THE CODE DID THE OPPOSITE.
             #
@@ -698,6 +773,14 @@ def main() -> int:
                 f"searched via {rec['tier_used'] or 'none'}; no tier met thresholds "
                 f"(min_coverage={min_cov:g}, min_identity={min_id:g})"
             )
+            if unbuilt:
+                # Named, not merely omitted. "searched via dna,protein" is true but
+                # incomplete; a reader weighing an ABSENT on a divergent agent needs
+                # to know the tier built to catch divergence never ran.
+                rec["reason"] += (
+                    f"; NOT SEARCHED - declared but not built for this marker: "
+                    f"{','.join(sorted(unbuilt))}"
+                )
             if mstat == "partial":
                 rec["reason"] += " [marker only partially built - absence is weaker evidence]"
 
@@ -725,6 +808,23 @@ def main() -> int:
             "return indeterminate and will HOLD findings at 'supported' rather than "
             "confirming them.\n"
         )
+
+    # A DATABASE GAP IS NOT A RUN EVENT, so it is reported once per run rather than
+    # per marker. These rows are still ABSENT or PRESENT on the tiers that exist -
+    # the point is that one declared tier never ran, and on the shipped pack the
+    # tier that is missing is almost always the HMM one, i.e. the tier carried
+    # specifically to catch the divergent allele.
+    gapped = [r for r in results if r.get("tiers_not_built")]
+    if gapped:
+        sys.stderr.write(
+            f"[marker] {len(gapped)} marker(s) declare a tier that is not built in "
+            f"this database; it was NOT searched and its silence is not evidence:\n"
+        )
+        for r in gapped:
+            sys.stderr.write(
+                f"[marker]   GAP {r['marker_id']} ({r['taxon']}): "
+                f"missing {r['tiers_not_built']}, state {r['state']}\n"
+            )
     return 0
 
 

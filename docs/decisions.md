@@ -2188,3 +2188,60 @@ Three sharper lessons, each paid for:
 
 Several fixes were themselves vacuous on the first attempt and were caught only by
 re-reading the written artifact.
+
+---
+
+## D26 — A tier that was never built was being reported as searched, on 13 markers, almost all of them the divergence-catching tier
+
+2026-10-14. Found while diagnosing the BoNT half of D15. It is not what made
+BoNT fail, but it is the reason that failure was hard to read.
+
+**The defect.** `tiers_supplied` answers "did this run receive an input file for
+the tier". It was being used as if it answered "does this marker have anything in
+that file", and `tried` was appended unconditionally inside each tier's branch —
+including the `else` arm where the lookup missed. A marker declaring
+`dna+protein+hmm` with no HMM model therefore emitted
+
+    tier_used = dna,hmm,protein
+    reason    = "searched via dna,hmm,protein; no tier met thresholds"
+
+The row asserted that the most sensitive tier looked and found nothing, when the
+model did not exist.
+
+**Scope on the shipped pack: 13 markers.** Eleven are missing the HMM tier —
+`cbut_bont`, `ebola_NP`, `ebolaS_NP`, `marburg_NP`, `marburg_GP`, `junin_GPC`,
+`rvfv_L`, `rvfv_Gn`, `nipah_L`, `nipah_G`, `eeev_nsP`. Every one is a
+divergence-catching marker on a high-consequence agent, which is exactly the set
+`markers.tsv` argues the HMM tier exists for: *"HMM tier is essential — novel/mosaic
+subtypes are regularly described and would be missed by exact matching."* Two —
+`orthopox_ATI` (Variola) and `mpox_C3L` (Monkeypox) — are missing the **nucleotide**
+tier instead, which is the worse direction: a Variola marker whose reason claimed a
+nucleotide search that never happened.
+
+**The fix.** The manifest is authoritative per tier as well as per marker, via
+`n_nt_seqs`, `n_aa_seqs` and `has_hmm`. An unbuilt tier is dropped from
+`evaluable`, excluded from `tier_used`, named in a new `tiers_not_built` column
+and appended to the reason as `NOT SEARCHED - declared but not built for this
+marker`, on PRESENT rows as well as ABSENT ones. A per-run stderr block lists
+every gapped marker once.
+
+**One verdict moves, deliberately.** A marker whose *only* declared tier is
+unbuilt was ABSENT — nothing was searched, and that silence was being reported as
+evidence against the organism. It is now UNKNOWN, which can neither promote nor
+veto. This is the same class of error the module was written to prevent and
+already records for `mtb_RD1`: an untested marker reading as a clean negative and
+turning a real TB detection into a BCG stand-down.
+
+**Everything else is unchanged, and that is asserted rather than assumed.** Re-run
+against the committed `divergent_clostridium_bont_illumina_r1` state file: 163 rows
+before and after, **zero state changes**, exactly the 13 `tier_used` strings
+corrected. An unbuilt tier has no hits either way, so a fix that moved a verdict
+would have been changing something else as well.
+
+**Backward compatibility is load-bearing.** A manifest predating the three columns
+must not read as all-gaps and silently turn the whole catalogue UNKNOWN. Column
+absence from the *header* means "not recorded, assume built"; a column present and
+empty means no. Pinned in both directions.
+
+Eleven new `tiergap` checks. `curation_required.tsv` does not list any of the 13,
+which is a separate gap in `build_marker_db.py` and is not addressed here.

@@ -1855,6 +1855,140 @@ def test_protein_tier_honours_catalogue(tmp: Path) -> None:
            f"aa_length={got.get('ebola_NP', {}).get('aa_length')!r}")
 
 
+def test_marker_tier_gap(tmp: Path) -> None:
+    """A tier that was never built must not be reported as having been searched.
+
+    `tiers_supplied` answers "did the run get an input file for this tier". It was
+    being used as if it answered "does this marker have anything in that file",
+    and `tried` was appended unconditionally inside each tier's branch. A marker
+    whose HMM was never built therefore emitted `tier_used = dna,hmm,protein` and
+    a reason reading "searched via dna,hmm,protein; no tier met thresholds".
+
+    On the shipped pack that was 13 markers, and the missing tier is almost always
+    the HMM one - cbut_bont, ebola_NP, marburg_GP, nipah_L, rvfv_L - every one a
+    divergence-catching marker on a high-consequence agent, which is exactly the
+    set markers.tsv argues the HMM tier exists for. orthopox_ATI and mpox_C3L are
+    missing the NUCLEOTIDE tier instead, which is worse: a Variola marker whose
+    reason claimed a nucleotide search that never happened.
+
+    The verdict must NOT move. This is a reporting defect; an unbuilt tier has no
+    hits either way, so a fix that changed a state would be changing something
+    else as well.
+    """
+    cat = tmp / "gap_markers.tsv"
+    cat.write_text(
+        "marker_id\ttaxon\tgene\taliases\tmarker_class\tevidence_type\tlocus\t"
+        "min_coverage\tmin_identity\tcopy_expectation\tquery_strategy\tsource_db\tnotes\n"
+        # Declares an HMM tier it does not have, and is not in the sample.
+        "gap_absent\tTestus absentus\tg1\t\trequired\tprotein+hmm\tchr\t"
+        "0.60\t0.80\tsingle\texact\ttest\tdeclares hmm, has none\n"
+        # Same declaration, same gap, but the protein tier finds it.
+        "gap_present\tTestus praesens\tg2\t\trequired\tprotein+hmm\tchr\t"
+        "0.60\t0.80\tsingle\texact\ttest\tdeclares hmm, has none, is present\n"
+        # Fully built: the negative control that keeps the fix from being a
+        # blanket "never report hmm".
+        "full_absent\tTestus completus\tg3\t\trequired\tprotein+hmm\tchr\t"
+        "0.60\t0.80\tsingle\texact\ttest\teverything built\n"
+        # Every declared tier is missing, so nothing was searched at all.
+        "none_built\tTestus nihil\tg4\t\trequired\thmm\tchr\t"
+        "0.60\t0.80\tsingle\texact\ttest\tonly tier is unbuilt\n")
+
+    hits = tmp / "gap.m8"
+    hits.write_text(
+        "r1\tmarker|gap_present|Y|g2\t0.95\t100\t0\t0\t1\t100\t1\t100\t1e-40\t200.0\n")
+    faa = tmp / "gap.faa"
+    faa.write_text(">marker|gap_absent|X|g1\n" + "M" * 100 + "\n"
+                   ">marker|gap_present|Y|g2\n" + "M" * 100 + "\n"
+                   ">marker|full_absent|Z|g3\n" + "M" * 100 + "\n")
+    # Supplied but empty: the HMM tier's INPUT exists for this run, which is what
+    # made the old code believe every marker had been searched by it.
+    domtbl = tmp / "gap.domtbl"
+    domtbl.write_text("# hmmsearch domtbl, no hits\n")
+
+    man = tmp / "gap.manifest.tsv"
+    man.write_text(
+        "marker_id\ttaxon\tgene\tmarker_class\tevidence_type\tquery_strategy\t"
+        "status\tn_nt_seqs\tn_aa_seqs\thas_hmm\n"
+        "gap_absent\tTestus absentus\tg1\trequired\tprotein+hmm\texact\tpartial\t0\t2\tno\n"
+        "gap_present\tTestus praesens\tg2\trequired\tprotein+hmm\texact\tpartial\t0\t2\tno\n"
+        "full_absent\tTestus completus\tg3\trequired\tprotein+hmm\texact\tbuilt\t0\t2\tyes\n"
+        "none_built\tTestus nihil\tg4\trequired\thmm\texact\tpartial\t0\t0\tno\n")
+
+    # The same manifest WITHOUT the per-tier columns. A pack built before they
+    # existed must keep its old behaviour rather than reading as all-gaps.
+    old_man = tmp / "gap.oldmanifest.tsv"
+    old_man.write_text(
+        "marker_id\ttaxon\tgene\tmarker_class\tevidence_type\tquery_strategy\tstatus\n"
+        "gap_absent\tTestus absentus\tg1\trequired\tprotein+hmm\texact\tpartial\n"
+        "gap_present\tTestus praesens\tg2\trequired\tprotein+hmm\texact\tpartial\n"
+        "full_absent\tTestus completus\tg3\trequired\tprotein+hmm\texact\tbuilt\n"
+        "none_built\tTestus nihil\tg4\trequired\thmm\texact\tpartial\n")
+
+    def states(manifest, tag):
+        out = tmp / f"gapstates_{tag}.tsv"
+        run([sys.executable, BIN / "marker_evidence.py", "--markers", cat,
+             "--manifest", manifest, "--aa-hits", hits, "--aa-fasta", faa,
+             "--hmm-hits", domtbl, "--sample", "S1", "--out", out])
+        with out.open() as fh:
+            return {r["marker_id"]: r for r in csv.DictReader(fh, delimiter="\t")}
+
+    got = states(man, "new")
+
+    record("tiergap:an unbuilt tier is not listed in tier_used",
+           got.get("gap_absent", {}).get("tier_used") == "protein",
+           f"got {got.get('gap_absent', {}).get('tier_used')!r}, want 'protein'")
+    record("tiergap:the unbuilt tier is named in its own column",
+           got.get("gap_absent", {}).get("tiers_not_built") == "hmm",
+           f"got {got.get('gap_absent', {}).get('tiers_not_built')!r}")
+    record("tiergap:the ABSENT reason says the tier was not searched",
+           "NOT SEARCHED" in (got.get("gap_absent", {}).get("reason") or "")
+           and "hmm" in (got.get("gap_absent", {}).get("reason") or ""),
+           f"reason={got.get('gap_absent', {}).get('reason')!r}")
+    record("tiergap:the verdict does not move - reporting fix only",
+           got.get("gap_absent", {}).get("state") == "ABSENT",
+           f"got {got.get('gap_absent', {}).get('state')}")
+
+    record("tiergap:a PRESENT row still carries the caveat",
+           got.get("gap_present", {}).get("state") == "PRESENT"
+           and "NOT SEARCHED" in (got.get("gap_present", {}).get("reason") or ""),
+           f"state={got.get('gap_present', {}).get('state')}, "
+           f"reason={got.get('gap_present', {}).get('reason')!r}")
+
+    record("tiergap:a fully built marker still reports every tier",
+           got.get("full_absent", {}).get("tier_used") == "hmm,protein"
+           and not got.get("full_absent", {}).get("tiers_not_built"),
+           f"tier_used={got.get('full_absent', {}).get('tier_used')!r}, "
+           f"not_built={got.get('full_absent', {}).get('tiers_not_built')!r}")
+
+    # Nothing was searched, so absence cannot be asserted. ABSENT here would be a
+    # database gap masquerading as evidence against the organism - the same class
+    # of error as the mtb_RD1 vaccine misfire this module already records.
+    record("tiergap:a marker with no built tier is UNKNOWN, not ABSENT",
+           got.get("none_built", {}).get("state") == "UNKNOWN",
+           f"got {got.get('none_built', {}).get('state')}")
+    record("tiergap:and says the tier is missing rather than the input",
+           "not built" in (got.get("none_built", {}).get("reason") or ""),
+           f"reason={got.get('none_built', {}).get('reason')!r}")
+
+    old = states(old_man, "old")
+    record("tiergap:a manifest without the columns keeps the old behaviour",
+           old.get("gap_absent", {}).get("tier_used") == "hmm,protein"
+           and not old.get("gap_absent", {}).get("tiers_not_built"),
+           f"tier_used={old.get('gap_absent', {}).get('tier_used')!r}, "
+           f"not_built={old.get('gap_absent', {}).get('tiers_not_built')!r}")
+    # The one place the fix DOES move a verdict, pinned in both directions so the
+    # change is deliberate rather than incidental. Without the columns the old code
+    # searched a tier that does not exist, found nothing, and called that ABSENT -
+    # a database gap reported as evidence against the organism. With them it is
+    # UNKNOWN, which cannot promote or veto.
+    record("tiergap:the old manifest asserts an absence it never searched for",
+           old.get("none_built", {}).get("state") == "ABSENT",
+           f"got {old.get('none_built', {}).get('state')}")
+    record("tiergap:the per-tier columns turn that false absence into UNKNOWN",
+           got.get("none_built", {}).get("state") == "UNKNOWN",
+           f"got {got.get('none_built', {}).get('state')}")
+
+
 def test_marker_catalogue_watchlist_join(tmp: Path) -> None:
     """Three hand-maintained files agree on literal strings; something must check.
 
@@ -2161,6 +2295,7 @@ CASES = {
     "ctrlaudit": test_control_subtraction_audit,
     "crossbleed": test_cross_scenario_control_bleed,
     "protfloor": test_protein_tier_honours_catalogue,
+    "tiergap": test_marker_tier_gap,
     "markerjoin": test_marker_catalogue_watchlist_join,
     "hopguard": test_index_hop_batch_guard,
     "defaults": test_scorer_defaults_match_shipped_config,
