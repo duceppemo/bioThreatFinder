@@ -2427,3 +2427,144 @@ be a real state. The evaluator reports both as ERROR at run time, but the lesson
 `check_tier_name` records is that a misspelled assertion silently removes the
 gate it was written to be — catching it in the suite means a typo fails in
 seconds rather than hours into a benchmark run.
+
+---
+
+## D30 — The family relaxation that was written for these exact markers had been unreachable for its whole life, and making it reachable was the wrong fix
+
+2026-10-15. Follow-on from D27, which tracked 18 marker gaps and fixed none of
+them. Eleven were the HMM tier missing on divergence-catching markers for
+high-consequence agents. This entry closes nine of them, and the interesting
+part is the two it deliberately leaves open and the regression it nearly
+shipped.
+
+**The dead remedy.** `load_rankedlineage()`'s docstring names its own purpose:
+
+> A profile needs at least three sequences to mean anything, and the first full
+> build produced only 1-2 for ebola_NP, ebolaS_NP, marburg_NP and cbut_bont,
+> because queries relaxed no further than the GENUS. Relaxing to the FAMILY
+> (Filoviridae) is what makes a profile buildable.
+
+That machinery was written, committed, and never executed. `fetch_protein()`
+walked `aa_queries()` and `return`ed at the first rung yielding **any** record:
+
+```python
+for query in aa_queries(row):
+    uids = ez.esearch("protein", query)
+    if not uids: continue
+    ...
+    return records[:want], query     # <- first non-empty, not first sufficient
+```
+
+Rung 1 is `NP[Gene Name] AND "Zaire ebolavirus"[Organism] AND
+srcdb_refseq[Properties]`. RefSeq carries exactly one protein per locus per
+virus species, so rung 1 returned 1 record, always, and the family rungs at the
+bottom of the ladder were never issued. The fix for the starvation was sitting
+below the line that made the starvation inevitable. `--dry-run` printed only
+`aq[0]`, so no plan ever showed the rungs that did not run.
+
+**The obvious fix is a false-positive generator, and it was measured, not
+reasoned about.** Accumulating across the whole ladder until `want` records are
+in hand does make every HMM buildable — and it populates markers with the wrong
+organism, because the ladder's tail leaves the organism on purpose:
+
+| marker | class | what pooling the whole ladder produced |
+|---|---|---|
+| `henipa_cedar` | `absence_expected` | **8 of 8 Measles virus** nucleoproteins, 0 Cedar |
+| `nipah_L` | `required` | **7 of 8 non-Nipah**: Langya, Achimota pararubulavirus 3, *Respirovirus rupicaprae*, 2x Parajeilongvirus, a bat morbillivirus |
+| `rvfv_Gn` | `required` | 8, of which 1 is RVFV; the rest came from the clade rungs |
+| `cbut_bont` | `discriminating` | 2 real BoNT/E plus a thiazole biosynthesis protein, an MFS transporter and a 3-hydroxybutyryl-CoA dehydrogenase |
+
+The last one is not a clade problem. `bont[All Fields] AND "Clostridium
+butyricum"[Organism]` matches the *strain designation* of "C. butyricum E4 str.
+BoNT E BL5262", so every protein that strain deposits is a hit.
+
+This matters because `marker_evidence.py` states the scoring rule plainly: *"A
+marker is PRESENT if ANY applicable tier passes."* These are not diluted
+profiles. A measles-positive sample would have made `henipa_cedar` PRESENT, and
+`henipa_cedar` is the `veto_if` for **both Nipah and Hendra** — the finding
+would have been stood down by a childhood vaccine-preventable virus. `nipah_L`
+is `required` for Nipah; a bat paramyxovirus would have satisfied it.
+
+**So the ladder is split by what a rung can be trusted for.** `aa_query_plan()`
+returns `(query, poolable)`, and a rung is poolable only if it stays inside the
+declared organism **and** matches on a name field. Pooling runs over those; the
+loose and clade-relaxed rungs survive only as a single-rung last resort, which
+is exactly the pre-pooling behaviour, so a marker that only they can serve is
+unchanged.
+
+**And clade relaxation is now keyed on `marker_class`, not on
+`query_strategy`.** It is allowed only for `pathotype`, where the gene is the
+finding and the host species is not — BoNT in *C. butyricum*, Stx in *Shigella*
+— which is the case `marker_rules.yaml` is built around and that D29 depends on
+(`veto_if: cbut_bont` exists to ATTRIBUTE a cross-species hit, not suppress it).
+For every other class the organism is the claim.
+
+**This gate costs nothing that was working, and that is measured rather than
+assumed.** Every `gene_family` row that was already `built` filled from
+in-organism rungs alone, `cbot_bont` included (8 of 8 *C. botulinum*). An audit
+of all 126 protein tiers found no pre-existing off-organism record that was not
+a nomenclature synonym (*Orthomarburgvirus marburgense* for Marburg,
+*Mammarenavirus choriomeningitidis* for LCMV, Poliovirus 1/3 under Enterovirus
+C) or a legitimate multispecies RefSeq entry (Stx1 under Enterobacteriaceae).
+
+**Result on the shipped pack.**
+
+| | before | after |
+|---|---|---|
+| `built` | 132 | **143** |
+| `partial` | 13 | **4** |
+| `failed` | 5 | **3** |
+| `curation_required` | 4 | 4 |
+| `motif_todo` | 9 | 9 |
+| HMM profiles in `markers.hmm` | 25 | **34** |
+| rows in `curation_required.tsv` | 31 | **20** |
+
+Nine HMM tiers now build from 8 in-organism sequences each: `ebola_NP`,
+`ebolaS_NP`, `marburg_NP`, `marburg_GP`, `junin_GPC`, `rvfv_L`, `nipah_L`,
+`nipah_G`, `eeev_nsP`. Two do not, and **the gate is why that is the right
+answer**: `cbut_bont` has 2 genuine BoNT/E proteins and `rvfv_Gn` has 1, which
+is precisely what D27 recorded ("only 2 protein sequences") before pooling
+briefly papered over it with junk.
+
+**Three retrieval failures were catalogue defects, not absent sequence.**
+
+* `henipa_cedar` built **no query at all** and was recorded `failed`. Its gene
+  symbol is `N`, one character, below `MIN_QUERY_NAME_LEN`, with aliases `-`, so
+  `query_names()` returned `[]` and not one request was ever issued. `failed` is
+  documented as "retrieval was attempted and returned nothing usable" — evidence
+  that NCBI has nothing. This was silence from an instrument never switched on,
+  filed as a negative result: the same conflation D26 removed from tier
+  reporting. An unsearchable row is now `curation_required` with a loud
+  per-marker error, and `tests/test_pipeline.py` has a static check that every
+  retrievable row builds at least one query (mutation-verified: reverting the
+  alias turns it red). Eighteen sibling rows carry a one-letter gene symbol
+  rescued by an alias; this is what stops a nineteenth arriving without one.
+* `bthai_ara` searched `araBAD[Gene Name]`, an **operon** name NCBI does not
+  index: 0 hits, while `araA`/`araB`/`araD` return 2/2/15. Now `built`. It is
+  the `veto_if` for **both** *B. pseudomallei* and *B. mallei*.
+* `vchol_wbeO1` searched the **cluster** name: `wbeO1` and `rfbO1` both 0, while
+  `wbeT`/`rfbV`/`wbeW` return 40 each. Now `built`.
+
+**"Found nothing" and "found forty genomes and discarded every one" used to
+produce the same note.** `fetch_nucleotide` now returns a third element
+explaining an empty result, and says which filter did it. `mpox_C3L` reads
+*"3 queries tried; they MATCHED 40 record(s), but none was usable as a locus"* —
+195 kb MPXV genomes whose CDSs are named `MPXV-UK_P2-0NN`, not `C3L`. That is a
+naming mismatch needing an ORF designation, and it had been pointing curators at
+the query.
+
+**Four gaps remain, each now carrying its measured diagnosis in the catalogue
+note so it is not re-derived:**
+
+| marker | why it is still open |
+|---|---|
+| `henipa_cedar` | Cedar's N is deposited as bare `N` under *Henipavirus cedarense* (3 nuccore hits); nothing is annotated "nucleoprotein" under either name. Needs an accession, not a query. |
+| `bruc_S19_eri` | **Must not be "fixed" by retrieval.** It is a DELETION. `eryC` (19) and `eryD` (3) retrieve easily, but their presence is the wild-type state, and feeding them here would make `vaccine_if` fire on wild-type *B. abortus* and stand down a real select-agent detection. Needs absence-region logic, which does not exist. |
+| `orthopox_ATI`, `mpox_C3L` | ORF/OPG designations needed as aliases. Guessing one would put the wrong gene into Variola's `confirm_requires`. |
+| `lmono_LIPI4` | LIPI-4 is CC4-specific and absent from EGD-e, so the `lmo*` tags are the wrong reference. Needs a curated CC4 accession. |
+
+Eleven new self-test checks on the ladder split and the relaxation gate, plus
+one static suite check. `--dry-run` now prints every rung and names the
+3-sequence minimum, because a plan that showed only rung 1 is how a dead
+relaxation stayed invisible for its whole life.

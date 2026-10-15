@@ -686,7 +686,7 @@ See `docs/verification.md`, which also lists what is **not** verified.
 | Competitive bundles | 89 + 178 minimap2 indexes, all verified free of duplicated sequence |
 | Reference masking | complete — 20.0 Mbp masked across 359 genomes |
 | Host genome | T2T-CHM13v2.0 + both presets, 17 GB |
-| Marker DB | 132 built / 13 partial / 9 motif_todo / 5 failed / 4 curation_required |
+| Marker DB | 143 built / 4 partial / 9 motif_todo / 3 failed / 4 curation_required — 34 profile HMMs (D30) |
 | Kraken2 PlusPF | **built** 2026-10-02 - `hash.k2d` 123.5 GB, Bracken 100/150/250, `--clean` run (614 -> 233 GB) |
 | Metabuli | **built** 2026-10-04 - prebuilt `refseq_standard`, 110 GB, NCBI taxonomy verified, 62.5 GB peak RSS / 1 m 22 s per sample |
 | KrakenUniq | not built - opt-in by design (D2) |
@@ -715,10 +715,16 @@ literature default or a reasoned guess, and nothing has run on REAL sequencing d
 - Four near-neighbour genomes do not exist anywhere (*Giardia ardeae*, *Entamoeba coli*,
   Sandfly fever Naples phlebovirus, rat hepatitis E virus). Recorded in the manifest with
   empty paths so the weakened discrimination is visible, not silent.
-- Marker tier is partially live: 5 markers failed retrieval, 13 are missing a tier
-  (mostly `hmm`, where fewer than 3 sequences were available for a profile), 9 are motifs
-  needing manual specification, 4 are flagged `curation_required`. Any rule depending on
-  those evaluates UNKNOWN and holds findings at `supported` by design.
+- Marker tier is mostly live: 3 markers failed retrieval, 4 are missing a tier, 9 are
+  motifs needing manual specification, 4 are flagged `curation_required`. Any rule
+  depending on those evaluates UNKNOWN and holds findings at `supported` by design.
+  D30 closed 11 of the 18 gaps D27 tracked — nine HMM tiers now build — and established
+  that marker sequences may only be retrieved from the marker's own declared organism
+  unless its class is `pathotype`. Of the `veto_if` rules, 4 of 10 still reference an
+  unevaluable marker (down from 6: `bthai_ara` now backs the *B. pseudomallei* and
+  *B. mallei* vetoes); 9 of 10 `vaccine_if` rules remain inoperative, nearly all waiting
+  on the 9 `motif_todo` markers. `confirm_requires` and `support_requires` are fully
+  backed.
 - Calling is fixed-threshold; the intended design is an empirical null built from
   a background panel, giving calibrated FDR instead of guessed cutoffs
 - No assembly tier. A contig spanning pPCP1 is far stronger evidence than 50

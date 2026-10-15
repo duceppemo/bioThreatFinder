@@ -26,7 +26,18 @@ See README for the design and validation. Remaining marker work:
   * 31 notifiable taxa still have no rule
   * curate_required markers: B. mallei absent regions, vaccinia-specific loci,
     F. novicida discriminating loci, C. auris clades
-  * absence-region logic as a first-class marker class (B. mallei needs it)
+  * absence-region logic as a first-class marker class. B. mallei needs it, and
+    so does `bruc_S19_eri` - D30 established that the S19 marker CANNOT be fixed
+    by retrieval, because the eri operon's presence is the wild-type state and
+    supplying it would make `vaccine_if` fire on wild-type B. abortus
+  * 4 retrieval gaps left after D30, each with a measured diagnosis in the
+    catalogue note: `henipa_cedar` (gene deposited as bare `N` under
+    *Henipavirus cedarense*; needs an accession), `orthopox_ATI` and `mpox_C3L`
+    (need the ORF/OPG designation as an alias - the records are whole genomes
+    whose CDSs use poxvirus ORF names), `lmono_LIPI4` (CC4-specific island,
+    absent from EGD-e, so the lmo* tags are the wrong reference)
+  * 9 `motif_todo` markers are now the dominant blocker: they alone make 9 of
+    10 `vaccine_if` rules inoperative
 
 ### 1. Benchmark harness (now the highest value - nothing is measured)
 Without ground truth, "accurate" is not assertable and every threshold is a guess.

@@ -671,6 +671,29 @@ def test_pack_integrity(tmp: Path) -> None:
                f"orphans: {sorted(want_markers - marker_ids)}")
         record("pack:every scenario marker expectation names a real state",
                not bad_states, f"bad: {bad_states}")
+
+        # EVERY CATALOGUE ROW MUST BE ABLE TO BUILD A QUERY.
+        #
+        # query_names() drops names under MIN_QUERY_NAME_LEN, so a row whose gene
+        # symbol is one character with no alias produces NO query and is never
+        # searched - henipa_cedar (gene 'N', aliases '-') sat that way, recorded as
+        # `failed`, which reads as "NCBI has nothing" rather than "we never asked".
+        # Its veto for BOTH Nipah and Hendra could therefore never fire. Eighteen
+        # sibling rows carry a one-letter gene symbol rescued by an alias; this is
+        # the check that a nineteenth cannot be added without one.
+        try:
+            sys.path.insert(0, str(SCRIPTS))
+            import build_marker_db as bmd
+            unsearchable = [
+                r["marker_id"] for r in bmd.read_marker_catalogue(PACK / "markers.tsv")
+                if r["query_strategy"] not in ("curate_required", "motif")
+                and not bmd.nt_queries(r) and not bmd.aa_queries(r)
+            ]
+            record("pack:every retrievable marker can build at least one query",
+                   not unsearchable, f"build no query: {unsearchable}")
+        except Exception as exc:  # noqa: BLE001
+            record("pack:every retrievable marker can build at least one query",
+                   False, f"{type(exc).__name__}: {exc}")
         pk = btf_yaml.load(PACK / "pack.yaml")
         th = pk.get("thresholds") or {}
         record("pack:identity floor is the near-neighbour discriminator (>=0.98)",

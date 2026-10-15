@@ -63,14 +63,14 @@ fnov_specific	Francisella novicida	-	-	absence_expected	dna+protein	chromosome	0
 #---- Burkholderia --------------------------------------------------------
 bpseudo_TTS1	Burkholderia pseudomallei	TTS1	orf2;type III secretion cluster 1	required	dna+protein	chromosome	0.80	0.97	single	named_region	NCBI	The standard discriminating target vs B. thailandensis.
 bpseudo_bimA	Burkholderia pseudomallei	bimA	-	lineage	dna+protein	chromosome	0.60	0.95	single	gene_in_organism	NCBI	bimA allele separates pseudomallei from mallei.
-bthai_ara	Burkholderia thailandensis	araBAD	arabinose assimilation	absence_expected	dna+protein	chromosome	0.60	0.95	single	gene_in_organism	NCBI	B. thailandensis assimilates arabinose; pseudomallei cannot. Presence argues thailandensis.
+bthai_ara	Burkholderia thailandensis	araBAD	araA;araB;araD;arabinose assimilation	absence_expected	dna+protein	chromosome	0.60	0.95	single	gene_in_organism	NCBI	B. thailandensis assimilates arabinose; pseudomallei cannot. Presence argues thailandensis.
 bmallei_deletions	Burkholderia mallei	-	-	discriminating	dna	chromosome	0.00	0.00	single	curate_required	NCBI	CURATION NEEDED: B. mallei is a deletion clone of pseudomallei, so it is defined by ABSENCE of regions. Needs curated absent-region coordinates; cannot be done with presence markers.
 #---- Vibrio cholerae: species is not the finding -------------------------
 vchol_ctxA	Vibrio cholerae	ctxA	cholera toxin A	pathotype	dna+protein	CTXphi	0.80	0.95	single	gene_in_organism	NCBI;VFDB	Toxigenicity. Species presence without ctxAB is not notifiable cholera.
 vchol_ctxB	Vibrio cholerae	ctxB	cholera toxin B	pathotype	dna+protein	CTXphi	0.80	0.95	single	gene_in_organism	NCBI;VFDB	Also gives classical vs El Tor genotype.
 vchol_tcpA	Vibrio cholerae	tcpA	toxin co-regulated pilus	pathotype	dna+protein	VPI	0.70	0.95	single	gene_in_organism	NCBI;VFDB	Colonisation factor.
 vchol_ompW	Vibrio cholerae	ompW	-	required	dna+protein	chromosome	0.80	0.95	single	gene_in_organism	NCBI	Species confirmation.
-vchol_wbeO1	Vibrio cholerae	wbeO1	rfbO1	lineage	dna	chromosome	0.60	0.95	single	gene_in_organism	NCBI	O1 serogroup.
+vchol_wbeO1	Vibrio cholerae	wbeO1	rfbO1;wbeT;rfbV;wbeW	lineage	dna	chromosome	0.60	0.95	single	gene_in_organism	NCBI	O1 serogroup.
 vchol_wbfZ	Vibrio cholerae	wbfZ	-	lineage	dna	chromosome	0.60	0.95	single	gene_in_organism	NCBI	O139 serogroup.
 #---- Clostridium botulinum: the cluster is the finding -------------------
 cbot_bont	Clostridium botulinum	bont	botA;botB;botE;botF;BoNT	pathotype	dna+protein+hmm	variable	0.70	0.90	single	gene_family	NCBI;VFDB	Neurotoxin gene family. HMM tier is essential - novel/mosaic subtypes are regularly described and would be missed by exact matching.
@@ -102,7 +102,7 @@ lmono_hly	Listeria monocytogenes	hly	hlyA;listeriolysin O;LLO	required	dna+prote
 lmono_prfA	Listeria monocytogenes	prfA	-	required	dna+protein	LIPI-1	0.80	0.95	single	gene_in_organism	NCBI;VFDB	LIPI-1 master regulator.
 lmono_inlA	Listeria monocytogenes	inlA	internalin A	discriminating	dna+protein	chromosome	0.70	0.95	single	gene_in_organism	NCBI;VFDB	Premature stop codons attenuate - allele matters.
 lmono_llsX	Listeria monocytogenes	llsX	listeriolysin S	lineage	dna+protein	LIPI-3	0.60	0.95	single	gene_in_organism	NCBI	LIPI-3, hypervirulent lineage I.
-lmono_LIPI4	Listeria monocytogenes	LIPI-4	-	lineage	dna	chromosome	0.60	0.95	single	named_region	NCBI	Associated with CNS/placental tropism. VERIFY at build.
+lmono_LIPI4	Listeria monocytogenes	LIPI-4	-	lineage	dna	chromosome	0.60	0.95	single	named_region	NCBI	Associated with CNS/placental tropism. VERIFY at build. CURATION: measured 2026-10-15 - 'LIPI-4' matches nothing in nuccore under L. monocytogenes. LIPI-4 is a CC4-specific cellobiose PTS island, absent from EGD-e, so the lmo* locus tags are the WRONG reference. Needs a curated CC4 accession and coordinates.
 #---- Legionella / Neisseria / Haemophilus / Streptococcus ---------------
 lpneu_mip	Legionella pneumophila	mip	-	required	dna+protein	chromosome	0.80	0.95	single	gene_in_organism	NCBI;VFDB	Species confirmation.
 lpneu_lag1	Legionella pneumophila	lag-1	-	lineage	dna+protein	chromosome	0.60	0.95	single	gene_in_organism	NCBI	Serogroup 1 / mAb3-1 epitope.
@@ -135,18 +135,18 @@ bruc_BCSP31	Brucella melitensis	bcsp31	BCSP31	required	dna+protein	chromosome	0.
 bruc_IS711	Brucella melitensis	IS711	IS6501	discriminating	dna	chromosome	0.60	0.97	multi	gene_in_organism	NCBI	MULTI-COPY; species-specific flanking positions (AMOS) are the discriminator, not the element.
 bruc_omp2	Brucella melitensis	omp2a	omp2b	lineage	dna+protein	chromosome	0.60	0.95	single	gene_family	NCBI	Species-level typing.
 bruc_RB51_wboA	Brucella abortus	wboA	-	vaccine_strain	dna	chromosome	0.70	0.97	single	named_region	NCBI	RB51 vaccine has an IS711 disruption in wboA. Detects vaccine strain.
-bruc_S19_eri	Brucella abortus	eri	-	vaccine_strain	dna	chromosome	0.70	0.97	single	named_region	NCBI	S19 vaccine carries an eri region deletion. VERIFY coordinates at build.
+bruc_S19_eri	Brucella abortus	eri	-	vaccine_strain	dna	chromosome	0.70	0.97	single	named_region	NCBI	S19 vaccine carries an eri region deletion. VERIFY coordinates at build. CURATION: this marker is a DELETION and must not be 'fixed' by retrieving the eri/ery operon. eryC (19 hits) and eryD (3) retrieve readily, but their PRESENCE is the wild-type state; feeding them here would make `vaccine_if` fire on wild-type B. abortus and stand down a real select-agent detection. Needs absence-region logic, which does not exist yet.
 #---- Viruses: essential genes and pathogenicity determinants -----------
 flua_M	Influenza A virus	M	MP;matrix	required	dna+protein	segment 7	0.70	0.90	single	gene_family	NCBI	Universal influenza A target. Segment - see notes on reassortment.
 flua_HA_H5	Influenza A virus	HA	H5	pathotype	dna+protein+hmm	segment 4	0.60	0.85	single	gene_family	NCBI	H5 subtype. Low identity floor is intentional - HA is diverse.
 flua_HA_H7	Influenza A virus	HA	H7	pathotype	dna+protein+hmm	segment 4	0.60	0.85	single	gene_family	NCBI	H7 subtype.
 flua_HA_cleavage	Influenza A virus	HA	polybasic cleavage site	pathotype	protein+hmm	segment 4	0.30	0.80	single	motif	NCBI	HIGH-PATHOGENICITY DETERMINANT: a polybasic insertion at the HA1/HA2 junction distinguishes HPAI from LPAI. Protein-level motif, not whole-gene alignment.
 flua_PB2_627K	Influenza A virus	PB2	627K;701N	lineage	protein	segment 1	0.30	0.85	single	motif	NCBI	Mammalian adaptation markers. Reported, not gating.
-orthopox_ATI	Variola virus	ATI	A-type inclusion	discriminating	dna+protein	genome	0.60	0.92	single	gene_in_organism	NCBI	ATI gene LENGTH separates orthopoxvirus species. VERIFY approach at build.
+orthopox_ATI	Variola virus	ATI	A-type inclusion	discriminating	dna+protein	genome	0.60	0.92	single	gene_in_organism	NCBI	ATI gene LENGTH separates orthopoxvirus species. VERIFY approach at build. CURATION: measured 2026-10-15 - the only nuccore hit is the 185 kb Variola RefSeq genome, and none of its 197 annotated CDSs is named ATI (they use poxvirus ORF names, e.g. A25L/A26L). Needs the ORF designation as an alias, not a different query.
 orthopox_crmB	Variola virus	crmB	TNF receptor homolog	discriminating	dna+protein	genome	0.60	0.92	single	gene_in_organism	NCBI	Orthopoxvirus species discrimination.
 orthopox_HA	Variola virus	HA	haemagglutinin	discriminating	dna+protein	genome	0.60	0.92	single	gene_in_organism	NCBI	Orthopoxvirus HA typing.
 vaccinia_specific	Vaccinia virus	-	-	vaccine_strain	dna+protein	genome	0.60	0.95	single	curate_required	NCBI	CURATION NEEDED: vaccinia is the dominant false positive for variola AND a live vaccine. Needs curated vaccinia-specific loci to suppress escalation.
-mpox_C3L	Monkeypox virus	C3L	complement control protein	lineage	dna+protein	genome	0.60	0.92	single	gene_in_organism	NCBI	Clade I vs II discrimination.
+mpox_C3L	Monkeypox virus	C3L	complement control protein	lineage	dna+protein	genome	0.60	0.92	single	gene_in_organism	NCBI	Clade I vs II discrimination. CURATION: measured 2026-10-15 - 'C3L' matches 40 MPXV records, all ~195 kb whole genomes whose CDSs are named MPXV-UK_P2-0NN, so no locus is extractable. Needs the OPG/locus-tag designation as an alias.
 ebola_NP	Zaire ebolavirus	NP	nucleoprotein	required	dna+protein+hmm	genome	0.60	0.85	single	gene_family	NCBI	Filovirus core gene. HMM tier catches divergent lineages.
 ebola_GP	Zaire ebolavirus	GP	glycoprotein	discriminating	dna+protein+hmm	genome	0.60	0.85	single	gene_family	NCBI	Species resolution within Ebolavirus - essential, since Reston is not pathogenic to humans.
 polio_VP1	Enterovirus C	VP1	-	required	dna+protein	genome	0.70	0.88	single	gene_family	NCBI	Serotype and wild-vs-vaccine determination.
@@ -212,7 +212,7 @@ nipah_L	Nipah henipavirus	L	polymerase	required	dna+protein+hmm	genome	0.50	0.80
 nipah_G	Nipah henipavirus	G	attachment glycoprotein	discriminating	dna+protein+hmm	genome	0.60	0.88	single	gene_family	NCBI	Separates Nipah from Hendra and Cedar. Bangladesh vs Malaysia genotype differs.
 hendra_N	Hendra henipavirus	N	nucleoprotein	required	dna+protein+hmm	genome	0.60	0.85	single	gene_family	NCBI	Henipavirus core gene.
 hendra_G	Hendra henipavirus	G	attachment glycoprotein	discriminating	dna+protein+hmm	genome	0.60	0.88	single	gene_family	NCBI	Separates Hendra from Nipah. Overlaps the animal pack (equine).
-henipa_cedar	Cedar henipavirus	N	-	absence_expected	dna+protein	genome	0.60	0.88	single	gene_family	NCBI	Non-pathogenic henipavirus; presence argues against Nipah/Hendra.
+henipa_cedar	Cedar henipavirus	N	nucleoprotein	absence_expected	dna+protein	genome	0.60	0.88	single	gene_family	NCBI	Non-pathogenic henipavirus; presence argues against Nipah/Hendra. CURATION: measured 2026-10-15 - no protein is annotated 'nucleoprotein' under either 'Cedar henipavirus' or the current 'Henipavirus cedarense'; the gene is deposited as bare 'N' (3 nuccore hits under Henipavirus cedarense), which is one character and so below MIN_QUERY_NAME_LEN. Needs a named accession, not a query. Do NOT relax to the family: that returned 8 Measles nucleoproteins and 0 Cedar.
 mers_ORF1a	Middle East respiratory syndrome-related coronavirus	ORF1a	upE	required	dna+protein	genome	0.60	0.90	single	gene_family	NCBI	upE and ORF1a are the established screening targets.
 mers_N	Middle East respiratory syndrome-related coronavirus	N	nucleocapsid	required	dna+protein	genome	0.60	0.90	single	gene_family	NCBI	Confirmatory target.
 mers_S	Middle East respiratory syndrome-related coronavirus	S	spike	discriminating	dna+protein+hmm	genome	0.50	0.85	single	gene_family	NCBI	Separates MERS-CoV from related bat merbecoviruses. Camelid reservoir - overlaps the animal pack.

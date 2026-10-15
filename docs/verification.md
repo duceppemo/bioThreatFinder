@@ -15,9 +15,10 @@ Needs `samtools` for the coverage cases (skipped with a message if absent) and a
 for the screen cases (`BTF_TAXDUMP=/path/to/taxdump`, skipped otherwise). Everything else
 is fixture-driven.
 
-Current state: **108 checks, all passing** with `samtools` on PATH; **89 passed and 2
-skipped** without it (the two `coverage` checks that need a BAM). Measured 2026-10-04:
-26 s without samtools, 31 s with.
+Current state: **195 passed, 0 failed, 2 skipped** (2026-10-15). The 2 skips are the
+`coverage` checks that need `samtools` on PATH. The per-script `--self-test` suites run
+as single checks from here, so `selftest:build_marker_db` alone covers 60+ assertions,
+including D30's eleven on the protein query ladder.
 
 ## What the tests assert
 
@@ -29,7 +30,7 @@ skipped** without it (the two `coverage` checks that need a BAM). Measured 2026-
 | `wright` | 6 | The Wright et al. composite: genuine call confirms; **96.2% identity held** (genus right, species wrong); 18% mapped fraction held; and a genuinely divergent CCHFV at 89.2% still confirming via the virus-specific floor |
 | `coverage` | 19 | Nine alignment metrics exact against a hand-built BAM with known flags, MAPQs, strands and duplicates — plus masking shrinking the breadth denominator and excluding masked-region reads while still reporting them |
 | `screen` | 4 | Multi-classifier parsing; a piled-up taxon flagged not dropped; HLL cardinality read from the clade rather than summed; unclassified fraction reported and flagged |
-| `pack` | 15 | Rules compile and reference only real markers; scenario file parses; all seven NYSDOH categories present; plumbing positive control exists; every scenario taxon has a genome source; identity floors are group-aware |
+| `pack` | 18 | Rules compile and reference only real markers; scenario file parses; all seven NYSDOH categories present; plumbing positive control exists; every scenario taxon has a genome source; identity floors are group-aware; **every retrievable marker can build at least one query** (D30 — `henipa_cedar` built none, and a row that is never searched must not be filed as a retrieval failure) |
 | `depth` | 13 | Marker absence is only called when depth could have shown it; below that it is UNKNOWN, not ABSENT |
 | `eval` | 9 | The benchmark evaluator's tier→outcome mapping, LoD derivation and expectation checking |
 | `absent` | 6 | `truth_absent` is the full watchlist minus what is genuinely present, so a false positive on an unlisted organism cannot be scored `unlisted` and dropped from specificity (D14) |

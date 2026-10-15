@@ -937,10 +937,14 @@ def nt_queries(row: dict) -> List[str]:
         out.append(f'{name}[Gene Name] AND {org} AND srcdb_refseq[Properties]')
         out.append(f'{name}[Gene Name] AND {org}')
         out.append(f'{name}[All Fields] AND {org}')
-    if strategy == "gene_family" and names:
+    if strategy == "gene_family" and names and clade_relaxation_allowed(row):
         # Divergence is the point of a family marker: a member that is only
         # deposited under a sister species (BoNT/E in C. butyricum, Stx in
         # Shigella) still belongs in the family, so relax the organism to genus.
+        # Restricted to `pathotype` rows - see clade_relaxation_allowed(). The
+        # nucleotide tier needs the gate as much as the protein tier does:
+        # henipa_cedar's nucleotide set came from the Paramyxoviridae rung and
+        # was eight Measles N CDSs.
         genus = genus_of(taxon)
         lin = _LINEAGE.get(taxon.lower())
         clades = [genus] if genus else []
@@ -1051,22 +1055,81 @@ def looks_like_rrna_or_organelle(row: dict) -> bool:
     return any(t in blob for t in RRNA_TERMS)
 
 
-def aa_queries(row: dict) -> List[str]:
+def clade_relaxation_allowed(row: dict) -> bool:
+    """May this marker be searched OUTSIDE its declared organism?
+
+    Only for a `pathotype` marker, where the gene is the finding and the host
+    species is not: BoNT in C. butyricum, Stx in Shigella. `cbot_bont` is built
+    on exactly that - `marker_rules.yaml` pairs it with `veto_if: cbut_bont` so
+    a cross-species hit is ATTRIBUTED rather than suppressed (D29).
+
+    For every other class the organism IS the claim, and a sequence from a
+    sister taxon turns the marker into a detector for the wrong thing. Measured
+    on the shipped pack: relaxing `nipah_L` ("polymerase", class `required`) to
+    Paramyxoviridae returned seven non-Nipah polymerases out of eight, and
+    `henipa_cedar` ("nucleoprotein", class `absence_expected`) returned eight
+    Measles nucleoproteins and no Cedar at all. Since `marker_evidence.py`
+    scores a marker PRESENT if ANY tier passes, those are not diluted profiles -
+    they are false PRESENT calls on a Nipah marker and on the veto that would
+    stand down a Nipah finding.
+
+    No marker in the shipped pack needs the relaxation to build a correct set:
+    every `gene_family` row that is `built` filled from in-organism rungs alone,
+    `cbot_bont` included. So this gate costs nothing that was working, and the
+    two markers it leaves short are reported as gaps - which is the answer the
+    rest of this module is built to give when evidence is absent.
+    """
+    return (row.get("marker_class") or "").strip().lower() == "pathotype"
+
+
+def aa_query_plan(row: dict) -> List[Tuple[str, bool]]:
+    """The protein ladder as (query, safe-to-accumulate) pairs.
+
+    WHY A RUNG NEEDS A SAFETY BIT.
+
+    fetch_protein() walks the ladder until it has enough sequences, and
+    everything it collects is written to the marker's protein FASTA - the
+    reference set reads are aligned against. `marker_evidence.py` states the
+    rule plainly: "A marker is PRESENT if ANY applicable tier passes." So a
+    sequence from the wrong organism in that file is not a diluted profile, it
+    is a false PRESENT on a high-consequence marker.
+
+    Two kinds of rung cannot be accumulated, both MEASURED on the shipped pack:
+
+      * CLADE-RELAXED rungs. The genus/family/order relaxation was written to
+        get a profile past the 3-sequence minimum, and for a generic product
+        name it leaves the organism entirely. Accumulating them gave
+        `henipa_cedar` (gene N, "nucleoprotein") EIGHT Measles virus
+        nucleoproteins and zero Cedar, and gave `nipah_L` ("polymerase") seven
+        non-Nipah paramyxovirus polymerases out of eight - Langya, Achimota,
+        Respirovirus, two Parajeilongvirus, a bat morbillivirus. henipa_cedar
+        is the `veto_if` for BOTH Nipah and Hendra, so that set would have let
+        a measles-positive sample veto a genuine Nipah detection.
+
+      * [All Fields] rungs, even inside the right organism. The term matches
+        strain designations, not just products: `bont[All Fields] AND
+        "Clostridium butyricum"[Organism]` matches every protein of strain
+        "C. butyricum E4 str. BoNT E BL5262", so `cbut_bont` collected a
+        thiazole biosynthesis protein, an MFS transporter and a
+        3-hydroxybutyryl-CoA dehydrogenase alongside the real BoNT/E.
+
+    Both stay in the ladder as a LAST RESORT - a marker that can only be served
+    by a loose rung still gets what it gets today, one rung, no accumulation -
+    but neither may contribute to a growing pool.
+    """
     taxon, gene = row["taxon"], row["gene"]
     strategy = row["query_strategy"]
     names = query_names(row)
     org = organism_clause(taxon)
-    out: List[str] = []
+    out: List[Tuple[str, bool]] = []
     for name in names:
-        out.append(f'{name}[Gene Name] AND {org} AND srcdb_refseq[Properties]')
-        out.append(f'{name}[Protein Name] AND {org} AND srcdb_refseq[Properties]')
-        out.append(f'{name}[Gene Name] AND {org}')
-        out.append(f'{name}[All Fields] AND {org}')
-    if strategy == "gene_family" and names:
-        # Relax outward: genus, then FAMILY, then order. Family is the level at which
-        # remote homology should be modelled for a profile - a novel filovirus is a new
-        # member of Filoviridae, not of Zaire ebolavirus - and it is what gets a profile
-        # past the 3-sequence minimum.
+        # Own organism, matched on a NAME field: precise enough to pool.
+        out.append((f'{name}[Gene Name] AND {org} AND srcdb_refseq[Properties]', True))
+        out.append((f'{name}[Protein Name] AND {org} AND srcdb_refseq[Properties]', True))
+        out.append((f'{name}[Gene Name] AND {org}', True))
+        out.append((f'{name}[Protein Name] AND {org}', True))
+        out.append((f'{name}[All Fields] AND {org}', False))
+    if strategy == "gene_family" and names and clade_relaxation_allowed(row):
         genus = genus_of(taxon)
         lin = _LINEAGE.get(taxon.lower())
         clades = [genus] if genus else []
@@ -1074,12 +1137,22 @@ def aa_queries(row: dict) -> List[str]:
             clades += [c for c in (lin[1], lin[2]) if c]   # family, order
         for clade in dedup_str(clades):
             for name in names:
-                out.append(f'{name}[Protein Name] AND "{clade}"[Organism]')
-                out.append(f'{name}[All Fields] AND "{clade}"[Organism]')
+                out.append((f'{name}[Protein Name] AND "{clade}"[Organism]', False))
+                out.append((f'{name}[All Fields] AND "{clade}"[Organism]', False))
     if strategy == "named_region":
         for name in names or [gene]:
-            out.append(f'{name}[All Fields] AND {org}')
-    return dedup_str(out)
+            out.append((f'{name}[All Fields] AND {org}', False))
+    seen, uniq = set(), []
+    for q, safe in out:
+        if q and q not in seen:
+            seen.add(q)
+            uniq.append((q, safe))
+    return uniq
+
+
+def aa_queries(row: dict) -> List[str]:
+    """The protein ladder as plain strings (dry-run, diagnostics, self-tests)."""
+    return [q for q, _ in aa_query_plan(row)]
 
 
 def dedup_str(items: Iterable[str]) -> List[str]:
@@ -1114,28 +1187,106 @@ def gene_name_matches(cds_gene: str, wanted: Sequence[str]) -> bool:
 # Retrieval
 # ---------------------------------------------------------------------------
 
+def _tried_phrase(ladder: Sequence[str], reported: str) -> str:
+    """Describe a retrieval that came back empty.
+
+    The note used to read "last query: <q>" while the fetchers returned
+    ladder[0] - the FIRST rung. That wording is why these rows read as "one
+    query was tried and it was a bad one" when in fact the whole ladder had
+    been walked and returned nothing. Both facts now appear.
+    """
+    if not ladder:
+        return "no query could be built from the catalogue row"
+    return (f"{len(ladder)} quer{'y' if len(ladder) == 1 else 'ies'} tried, "
+            f"all empty; first: {reported or ladder[0]}")
+
+
 def fetch_protein(ez: Entrez, row: dict, want: int) -> Tuple[List[SeqRecord], str]:
-    """Protein records for a marker. Returns (records, query-used)."""
-    for query in aa_queries(row):
+    """Protein records for a marker. Returns (records, queries-used).
+
+    THE LADDER IS WALKED UNTIL IT HAS ENOUGH, NOT UNTIL IT HAS ANY.
+
+    aa_queries() is ordered strictest-first and, for a `gene_family` row, ends
+    with genus/family/order-level rungs whose stated purpose is to "get a
+    profile past the 3-sequence minimum". Returning at the first query that
+    yielded ANY record made that tail unreachable: a virus species has exactly
+    one RefSeq protein per locus, so rung 1 always returned 1 record and the
+    search stopped there. Every `gene_family` virus marker in the shipped pack
+    was therefore starved at 1-2 sequences and its HMM tier - the tier the
+    catalogue says exists to catch a divergent allele - could never be built.
+    The relaxation was written, committed and unreachable.
+
+    So accumulate across rungs and stop when `want` distinct records are in
+    hand - but ONLY across the rungs aa_query_plan() marks poolable, which are
+    the ones that stay inside the declared organism and match on a name field.
+    Pooling the clade-relaxed and [All Fields] rungs was tried, measured, and
+    rejected: see aa_query_plan() for the three markers it corrupted. Those
+    rungs remain as a single-rung last resort, so a marker that only they can
+    serve behaves exactly as it did before pooling existed.
+
+    `fetch_nucleotide` is deliberately NOT given the same treatment: the
+    nucleotide tier has no minimum-count threshold to be starved against, and
+    the two markers missing it (orthopox_ATI, mpox_C3L) get nothing from any
+    rung - that is an empty ladder, not a short-circuited one, and no amount of
+    accumulation fixes it.
+    """
+    plan = aa_query_plan(row)
+    pool: List[SeqRecord] = []
+    used: List[str] = []
+
+    def take(query: str) -> int:
         uids = ez.esearch("protein", query)
         if not uids:
-            continue
+            return 0
         text = ez.efetch("protein", uids[:max(want * 4, want)], "fasta")
         records = [r for r in parse_fasta(text) if AA_MIN_LEN <= len(r) <= AA_MAX_LEN]
         if not records:
-            continue
-        records = dedup_records(records)
-        # Prefer RefSeq accessions (NP_/YP_/WP_/XP_) - curated, and stable across
-        # rebuilds, which matters because the accession goes in the manifest.
-        records.sort(key=lambda r: (0 if re.match(r"^[NYWX]P_", r.accession) else 1,
-                                    -len(r)))
-        LOG.debug("  protein: %d record(s) via %s", len(records), query)
-        return records[:want], query
-    return [], (aa_queries(row)[0] if aa_queries(row) else "")
+            return 0
+        before = len(pool)
+        # Dedup against everything already collected, not just within this rung:
+        # the later rungs re-find the earlier rungs' records by construction.
+        pool[:] = dedup_records(pool + records)
+        gained = len(pool) - before
+        if gained:
+            used.append(query)
+            LOG.debug("  protein: +%d record(s) (%d total) via %s",
+                      gained, len(pool), query)
+        return gained
+
+    # Pass 1: pool across the rungs that stay inside the declared organism and
+    # match on a name field. This is the pass that fills an HMM profile.
+    for query, poolable in plan:
+        if len(pool) >= want:
+            break
+        if poolable:
+            take(query)
+
+    # Pass 2: LAST RESORT. Nothing precise existed, so fall back to the loose and
+    # clade-relaxed rungs - and take only the FIRST that yields anything, which is
+    # exactly what this function did for every marker before pooling existed. A
+    # marker served only by a loose rung is therefore unchanged, and a loose rung
+    # can never top up an otherwise-good set with off-target sequence.
+    if not pool:
+        for query, poolable in plan:
+            if not poolable and take(query):
+                break
+
+    if not pool:
+        return [], (plan[0][0] if plan else "")
+    # Prefer RefSeq accessions (NP_/YP_/WP_/XP_) - curated, and stable across
+    # rebuilds, which matters because the accession goes in the manifest.
+    pool.sort(key=lambda r: (0 if re.match(r"^[NYWX]P_", r.accession) else 1,
+                             -len(r)))
+    return pool[:want], " + ".join(used)
 
 
-def fetch_nucleotide(ez: Entrez, row: dict, want: int) -> Tuple[List[SeqRecord], str]:
-    """Nucleotide records for a marker. Returns (records, query-used).
+def fetch_nucleotide(ez: Entrez, row: dict,
+                     want: int) -> Tuple[List[SeqRecord], str, str]:
+    """Nucleotide records for a marker.
+
+    Returns (records, query-used, why-empty). The third element is non-empty
+    only when the ladder MATCHED records and every one was filtered out; see
+    the counters below for why that distinction is load-bearing.
 
     Two routes, because "the gene" is not a record in GenBank:
       1. CDS extraction (rettype=fasta_cds_na) from whichever records the search
@@ -1150,10 +1301,18 @@ def fetch_nucleotide(ez: Entrez, row: dict, want: int) -> Tuple[List[SeqRecord],
     # one-character alias would prefix-match a large fraction of every genome.
     wanted_names = query_names(row)
     strategy = row["query_strategy"]
+    # WHY THESE COUNTERS EXIST: "the search found nothing" and "the search found
+    # forty complete genomes and every one was discarded" produced the SAME note.
+    # orthopox_ATI and mpox_C3L are the second case - C3L[All Fields] returns 40
+    # MPXV genomes of ~195 kb, all above NT_MAX_DIRECT_LEN, whose CDSs are named
+    # MPXV-UK_P2-0NN rather than C3L - and they read as the first, which points a
+    # curator at the query when the actual need is the ORF designation.
+    n_uids = n_oversize = n_cds_seen = 0
     for query in nt_queries(row):
         uids = ez.esearch("nuccore", query)
         if not uids:
             continue
+        n_uids += len(uids)
         probe = uids[:max(want * 3, want)]
         records: List[SeqRecord] = []
 
@@ -1162,6 +1321,7 @@ def fetch_nucleotide(ez: Entrez, row: dict, want: int) -> Tuple[List[SeqRecord],
         if strategy != "named_region" and wanted_names:
             cds_text = ez.efetch("nuccore", probe, "fasta_cds_na")
             for rec in parse_fasta(cds_text):
+                n_cds_seen += 1
                 if not gene_name_matches(rec.gene, wanted_names):
                     continue
                 if NT_MIN_LEN <= len(rec) <= NT_MAX_DIRECT_LEN:
@@ -1174,6 +1334,7 @@ def fetch_nucleotide(ez: Entrez, row: dict, want: int) -> Tuple[List[SeqRecord],
                 if NT_MIN_LEN <= len(rec) <= NT_MAX_DIRECT_LEN:
                     records.append(rec)
                 else:
+                    n_oversize += 1
                     LOG.debug("  nt: rejecting %s (%d bp; not locus-sized)",
                               rec.accession, len(rec))
 
@@ -1183,8 +1344,20 @@ def fetch_nucleotide(ez: Entrez, row: dict, want: int) -> Tuple[List[SeqRecord],
         records.sort(key=lambda r: (0 if re.match(r"^(N[CGMRTWZ]|X[MR])_", r.accession) else 1,
                                     -len(r)))
         LOG.debug("  nt: %d record(s) via %s", len(records), query)
-        return records[:want], query
-    return [], (nt_queries(row)[0] if nt_queries(row) else "")
+        return records[:want], query, ""
+    ladder = nt_queries(row)
+    if n_uids and (n_oversize or n_cds_seen):
+        # Found records, discarded all of them. Say which filter did it.
+        why = (f"{len(ladder)} quer{'y' if len(ladder) == 1 else 'ies'} tried; "
+               f"they MATCHED {n_uids} record(s), but none was usable as a locus: "
+               f"{n_oversize} record(s) exceeded {NT_MAX_DIRECT_LEN} bp (whole "
+               f"genomes, not genes) and none of {n_cds_seen} annotated CDS "
+               f"matched {wanted_names or 'any name'}. THIS IS NOT A MISSING "
+               "SEQUENCE - it is a naming mismatch: supply the ORF/locus "
+               "designation this organism's deposits actually use as an alias. "
+               f"First query: {ladder[0] if ladder else ''}")
+        return [], (ladder[0] if ladder else ""), why
+    return [], (ladder[0] if ladder else ""), ""
 
 
 # ---------------------------------------------------------------------------
@@ -1603,19 +1776,20 @@ def process_marker(row: dict, ctx: Context, prior: Dict[str, dict]) -> dict:
 
     nt_records: List[SeqRecord] = []
     aa_records: List[SeqRecord] = []
-    nt_query = aa_query = ""
+    nt_query = aa_query = nt_why = ""
     accessions: List[str] = []
 
     if want_dna:
         try:
-            nt_records, nt_query = fetch_nucleotide(ctx.ez, row, want)
+            nt_records, nt_query, nt_why = fetch_nucleotide(ctx.ez, row, want)
         except EntrezError as exc:
             notes.append(f"nucleotide retrieval error: {exc}")
         if nt_records:
             write_marker_fasta(nt_path, marker_id, nt_records)
             LOG.info("  %s: nt %d seq(s) -> %s", marker_id, len(nt_records), nt_path.name)
         else:
-            notes.append(f"no usable nucleotide sequence; last query: {nt_query or 'none built'}")
+            notes.append("no usable nucleotide sequence; " +
+                         (nt_why or _tried_phrase(nt_queries(row), nt_query)))
 
     # The protein tier is what catches a divergent or engineered allele that
     # nucleotide alignment would miss, so it is attempted even when the
@@ -1630,7 +1804,8 @@ def process_marker(row: dict, ctx: Context, prior: Dict[str, dict]) -> dict:
             write_marker_fasta(aa_path, marker_id, aa_records)
             LOG.info("  %s: aa %d seq(s) -> %s", marker_id, len(aa_records), aa_path.name)
         elif want_aa:
-            notes.append(f"no usable protein sequence; last query: {aa_query or 'none built'}")
+            notes.append("no usable protein sequence; "
+                         f"{_tried_phrase(aa_queries(row), aa_query)}")
 
     accessions = dedup_str([r.accession for r in nt_records] +
                            [r.accession for r in aa_records])
@@ -1675,7 +1850,32 @@ def process_marker(row: dict, ctx: Context, prior: Dict[str, dict]) -> dict:
         obtained.append("hmm")
 
     if not obtained:
-        status = STATUS_FAILED
+        # A ROW THAT BUILT NO QUERY WAS NEVER SEARCHED, AND MUST NOT SAY `failed`.
+        #
+        # `failed` is documented as "retrieval was attempted and returned nothing
+        # usable" - evidence that NCBI has nothing. A row whose gene symbol is one
+        # character with no alias (henipa_cedar: gene 'N', aliases '-') is filtered
+        # out by query_names(), so nt_queries()/aa_queries() return [] and not a
+        # single request is issued. Recording that as `failed` is the same
+        # conflation D26 removed from the tier reporting: silence from an
+        # instrument that was never switched on, filed as a negative result.
+        #
+        # It is a catalogue authoring defect - the fix is an alias, not a retry -
+        # so it is `curation_required`, which is where a human task belongs.
+        unsearchable = (strategy not in ("curate_required", "motif")
+                        and not nt_queries(row) and not aa_queries(row))
+        if unsearchable:
+            status = STATUS_CURATION
+            notes.insert(0, "NOT SEARCHED - no query could be built from this "
+                            f"catalogue row: gene {row.get('gene')!r} with aliases "
+                            f"{row.get('aliases')!r} yields no searchable name "
+                            f"(names under {MIN_QUERY_NAME_LEN} characters are "
+                            "dropped). Add an alias, as every other single-letter "
+                            "virus gene in the catalogue does.")
+            LOG.error("  %s: NOT SEARCHED - catalogue row builds no query; add an "
+                      "alias for gene %r", marker_id, row.get("gene"))
+        else:
+            status = STATUS_FAILED
         if skipped_tiers:
             notes.append("tier(s) skipped by flag: " + "; ".join(skipped_tiers))
     elif set(requested) <= set(obtained):
@@ -1703,8 +1903,8 @@ def process_marker(row: dict, ctx: Context, prior: Dict[str, dict]) -> dict:
             LOG.debug("  %s: removing stale %s", marker_id, p.name)
             p.unlink(missing_ok=True)
 
-    if status == STATUS_FAILED:
-        return blank_manifest_row(row, STATUS_FAILED, " | ".join(notes) or
+    if status in (STATUS_FAILED, STATUS_CURATION):
+        return blank_manifest_row(row, status, " | ".join(notes) or
                                   "retrieval attempted, nothing usable returned")
 
     if nt_query:
@@ -2184,9 +2384,24 @@ def self_test() -> int:
           "srcdb_refseq[Properties]" in q[0], q[0])
     check("aliases are tried too", any("pag[" in x for x in q))
     fam = {"marker_id": "cbot_bont", "taxon": "Clostridium botulinum", "gene": "bont",
-           "aliases": "botA;botE", "query_strategy": "gene_family"}
-    check("gene_family relaxes to the genus",
+           "aliases": "botA;botE", "query_strategy": "gene_family",
+           "marker_class": "pathotype"}
+    check("a pathotype gene_family row relaxes to the genus",
           any('"Clostridium"[Organism]' in x for x in nt_queries(fam)))
+    # The gate. BoNT legitimately sits in a sister species; a nucleoprotein does
+    # not, and relaxing one gave henipa_cedar eight Measles sequences.
+    notfam = dict(fam, marker_id="nipah_L", taxon="Nipah henipavirus", gene="L",
+                  aliases="polymerase", marker_class="required")
+    check("a non-pathotype gene_family row does NOT leave its organism",
+          all('"Nipah henipavirus"[Organism]' in x for x in nt_queries(notfam)),
+          str([x for x in nt_queries(notfam)
+               if '"Nipah henipavirus"[Organism]' not in x]))
+    check("the same gate applies to the protein ladder",
+          all('"Nipah henipavirus"[Organism]' in x for x in aa_queries(notfam)),
+          str([x for x in aa_queries(notfam)
+               if '"Nipah henipavirus"[Organism]' not in x]))
+    check("clade relaxation is keyed on marker_class, not strategy",
+          clade_relaxation_allowed(fam) and not clade_relaxation_allowed(notfam))
     reg = {"marker_id": "mtb_RD9", "taxon": "Mycobacterium tuberculosis", "gene": "RD9",
            "aliases": "region of difference 9", "query_strategy": "named_region"}
     check("named_region does not use [Gene Name]",
@@ -2205,6 +2420,117 @@ def self_test() -> int:
     check("gene name matching is case- and prefix-tolerant",
           gene_name_matches("capBCADE", ["capB"]) and gene_name_matches("STX2A", ["stx2"])
           and not gene_name_matches("recA", ["capB"]))
+
+    print("-- the protein ladder pools precise rungs only --")
+
+    class _LadderEz:
+        """Entrez stub: each query maps to a list of (accession, sequence)."""
+
+        def __init__(self, responses):
+            self.responses = responses
+            self.searched = []
+
+        def esearch(self, db, term):
+            self.searched.append(term)
+            return ["u%d" % i for i in range(len(self.responses.get(term, [])))]
+
+        def efetch(self, db, uids, rettype):
+            term = self.searched[-1]
+            return "".join(">%s x\n%s\n" % (acc, seq)
+                           for acc, seq in self.responses.get(term, []))
+
+    famrow = {"marker_id": "ebola_NP", "taxon": "Zaire ebolavirus", "gene": "NP",
+              "aliases": "nucleoprotein", "query_strategy": "gene_family"}
+    plan = aa_query_plan(famrow)
+    poolable = [q for q, ok in plan if ok]
+    loose = [q for q, ok in plan if not ok]
+    aa = "M" + "A" * 80
+
+    check("the plan marks some rungs poolable and some not", poolable and loose,
+          "%d poolable, %d loose" % (len(poolable), len(loose)))
+    check("no poolable rung leaves the declared organism",
+          all('"Zaire ebolavirus"[Organism]' in q for q in poolable),
+          str([q for q in poolable if '"Zaire ebolavirus"[Organism]' not in q]))
+    check("no poolable rung is an [All Fields] match",
+          all("[All Fields]" not in q for q in poolable),
+          str([q for q in poolable if "[All Fields]" in q]))
+    check("aa_queries() still returns every rung as a plain string",
+          aa_queries(famrow) == [q for q, _ in plan])
+
+    # THE FIX: one RefSeq record on rung 1 must not end the search, because the
+    # other precise in-organism rungs are where a virus's allele diversity is.
+    ez = _LadderEz({poolable[0]: [("NP_000001.1", aa)],
+                    poolable[2]: [("NP_000001.1", aa),        # re-found, deduped
+                                  ("AAA00002.1", aa + "C"),
+                                  ("AAA00003.1", aa + "DE")]})
+    recs, used = fetch_protein(ez, famrow, MIN_SEQS_FOR_HMM)
+    check("a 1-record first rung no longer ends the search",
+          len(recs) >= MIN_SEQS_FOR_HMM, "%d record(s)" % len(recs))
+    check("records re-found by a later rung are not duplicated",
+          len({r.accession for r in recs}) == len(recs),
+          str([r.accession for r in recs]))
+    check("RefSeq still sorts first across the whole pool",
+          recs[0].accession == "NP_000001.1", recs[0].accession)
+    check("every contributing rung is named in the query note",
+          poolable[0] in used and poolable[2] in used, used)
+
+    # THE GUARD: henipa_cedar / nipah_L. A clade-relaxed rung is rich - it is
+    # where measles and the bat paramyxoviruses live - and it must NOT be allowed
+    # to top up a short in-organism set. Short is the correct answer; the marker
+    # is then reported as a gap instead of being built from the wrong organism.
+    ez2 = _LadderEz({poolable[0]: [("NP_000001.1", aa)],
+                     loose[-1]: [("XXX1.1", aa + "C"), ("XXX2.1", aa + "DE"),
+                                 ("XXX3.1", aa + "FG"), ("XXX4.1", aa + "HI")]})
+    recs2, _ = fetch_protein(ez2, famrow, MIN_SEQS_FOR_HMM)
+    check("a clade-relaxed rung may not top up a short in-organism set",
+          len(recs2) == 1, "%d record(s): %s" % (len(recs2), [r.accession for r in recs2]))
+    check("no off-organism record reaches a set that had an in-organism hit",
+          all(r.accession == "NP_000001.1" for r in recs2),
+          str([r.accession for r in recs2]))
+
+    # The cbut_bont shape: [All Fields] inside the right organism still matches
+    # the strain designation, so it may not top up either.
+    allfields = [q for q in loose if '"Zaire ebolavirus"[Organism]' in q]
+    check("an in-organism [All Fields] rung exists and is marked loose", allfields,
+          str(loose[:2]))
+    if allfields:
+        ez3 = _LadderEz({poolable[0]: [("NP_000001.1", aa)],
+                         allfields[0]: [("JUNK1.1", "MQQ" + "W" * 60),
+                                        ("JUNK2.1", "MQQ" + "Y" * 60)]})
+        recs3, _ = fetch_protein(ez3, famrow, MIN_SEQS_FOR_HMM)
+        check("an [All Fields] rung may not top up a short set either",
+              len(recs3) == 1, "%d record(s)" % len(recs3))
+
+    # LAST RESORT unchanged: when nothing precise exists at all, the first loose
+    # rung that yields anything is used, exactly as before pooling existed.
+    ez4 = _LadderEz({loose[0]: [("L1.1", aa), ("L2.1", aa + "C")],
+                     loose[-1]: [("L3.1", aa + "DE")]})
+    recs4, used4 = fetch_protein(ez4, famrow, MIN_SEQS_FOR_HMM)
+    check("with nothing precise, one loose rung is still used",
+          len(recs4) == 2, "%d record(s)" % len(recs4))
+    check("the last-resort pass stops at the first productive loose rung",
+          loose[-1] not in used4, used4)
+
+    ez5 = _LadderEz({poolable[0]: [("NP_1.1", aa), ("NP_2.1", aa + "C"),
+                                   ("NP_3.1", aa + "DE")]})
+    recs5, used5 = fetch_protein(ez5, famrow, MIN_SEQS_FOR_HMM)
+    check("a satisfied first rung stops the ladder", ez5.searched == [poolable[0]],
+          str(ez5.searched))
+    check("a satisfied first rung is truncated to want", len(recs5) == MIN_SEQS_FOR_HMM)
+    check("a single contributing rung yields a plain query note", used5 == poolable[0],
+          used5)
+
+    ez6 = _LadderEz({})
+    recs6, used6 = fetch_protein(ez6, famrow, MIN_SEQS_FOR_HMM)
+    check("an empty ladder returns nothing", recs6 == [])
+    check("an empty ladder walks every rung", len(ez6.searched) == len(plan),
+          "%d of %d" % (len(ez6.searched), len(plan)))
+    check("the empty-retrieval note counts the rungs rather than claiming one",
+          "quer" in _tried_phrase(aa_queries(famrow), used6)
+          and str(len(plan)) in _tried_phrase(aa_queries(famrow), used6),
+          _tried_phrase(aa_queries(famrow), used6))
+    check("a row that builds no query says so, not 'none built' as a query",
+          "no query could be built" in _tried_phrase([], ""))
 
     print("-- CDS-flavoured FASTA parsing --")
     cds = (">lcl|NC_000962.3_cds_NP_214515.1_1 [gene=dnaA] [protein=chromosomal "
@@ -2520,13 +2846,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             nq, aq = nt_queries(r), aa_queries(r)
             if "dna" in tiers and nq:
                 LOG.info("[dry-run]     nuccore: %s", nq[0])
-            if ("protein" in tiers or "hmm" in tiers) and aq:
-                LOG.info("[dry-run]     protein: %s", aq[0])
-            if args.verbose:
                 for q in nq[1:]:
-                    LOG.debug("[dry-run]     nuccore fallback: %s", q)
+                    LOG.info("[dry-run]       then: %s", q)
+            if ("protein" in tiers or "hmm" in tiers) and aq:
+                # Every rung, not just the first. fetch_protein walks the ladder
+                # until it has enough sequences, so a dry run that showed only
+                # rung 1 was describing a retrieval that does not happen - and
+                # it is why the family-level relaxation could sit unreachable
+                # without anyone reading a plan and noticing.
+                LOG.info("[dry-run]     protein: %s", aq[0])
                 for q in aq[1:]:
-                    LOG.debug("[dry-run]     protein fallback: %s", q)
+                    LOG.info("[dry-run]       then: %s", q)
+                if "hmm" in tiers:
+                    LOG.info("[dry-run]       (hmm tier needs >= %d distinct protein "
+                             "sequences from the rungs above)", MIN_SEQS_FOR_HMM)
         LOG.info("[dry-run] combined outputs: markers.nt.fna (+ %s), markers.aa.faa "
                  "(+ MMseqs2 db), markers.hmm (+ hmmpress)",
                  ", ".join(f"markers.nt.{p}.mmi" for p in MM2_PRESETS))

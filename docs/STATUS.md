@@ -72,7 +72,7 @@ instead.
 | `packs/human/refs/masked/` | complete — **20,040,144 bp** over 359 genomes (0.349%); vector 104,404 bp / 45 contigs, crossgroup 81,934 / 50, host 2,737 / 5. The two vacuous rows were re-masked 2026-10-04 and both shared-assembly pairs now agree and carry `SHARED_SEQUENCE` flags. Per-source byte totals in D5 were double-counted and are upper bounds, not a partition |
 | `host/human/` | T2T-CHM13v2.0 + sr and map-ont indexes, 17 GB |
 | `sylph/` | `human_pack_refs.syldb`, 176 MB, 359 genomes at c=200/k=31. Reproducible since 2026-10-05 via `scripts/build_sylph_db.sh` (5 s at 32 threads); it was hand-sketched before that, with no recorded command |
-| `packs/human/markers/` | 163 manifest rows; 18 referenced by rules can only be UNKNOWN (5 failed, 4 curation_required, 9 motif_todo) — see the vaccine/veto note below |
+| `packs/human/markers/` | 163 manifest rows, **143 built**, 34 profile HMMs. 16 can only be UNKNOWN (3 failed, 4 curation_required, 9 motif_todo) and 4 are built on fewer tiers than declared — see the vaccine/veto note below. D30 closed 11 of the 18 gaps D27 tracked |
 | `kraken2/pluspf/` | **complete** 2026-10-02. `hash.k2d` 123.5 GB, `opts.k2d`, `taxo.k2d`, `seqid2taxid.map`, and `database{100,150,250}mers.kmer_distrib`. k=35, minimizer 31, full-sensitivity (no `--max-db-size`). Built against the pinned 2026-09-29 taxdump, md5-verified. Includes the 5,413 assemblies `kraken2-build` had silently dropped. `--clean` run 2026-10-03: 614 GB -> 233 GB. The remaining 125.5 GB is `database.kraken`, a Bracken BUILD intermediate - query-time Bracken reads only the `.kmer_distrib` files (measured: 0.6 s, 7.4 MB RSS). Keep it only to derive an extra read length without re-classifying the library |
 | `krakenuniq/` | not built. Opt-in by design (D2) |
 | `metabuli/refseq` | **built** 2026-10-03, 110 GB, NCBI-namespaced. The arm is now opt-in too (`--skip_metabuli` defaults true): measured, it changed zero findings on every scenario run, including the `divergent_*` pair meant to favour it. Kept, not removed, because its untested case — an agent absent from the index — cannot be simulated from a database. See D15 |
@@ -255,8 +255,13 @@ limit now raised to 24 h, and was not restarted.
 - *F. tularensis* vs *F. novicida* cannot currently be discriminated: both resolved to the
   same assembly and the duplicate was dropped. Needs a curated distinct assembly.
 - `curation_required` markers (4) and `motif_todo` markers (9) need manual work; they
-  cannot be automated. These are now load-bearing: they are most of the 18 markers that
-  make 8 vaccine rules and 6 veto rules inoperative (above).
+  cannot be automated. These are now load-bearing: 9 of 10 `vaccine_if` rules and 4 of 10
+  `veto_if` rules still reference a marker with no built tier. D30 cut the veto count from
+  6 by repairing `bthai_ara`'s query (it was searching `araBAD`, an operon name NCBI does
+  not index), which restores the *B. pseudomallei* and *B. mallei* vetoes. The four
+  remaining retrieval gaps each carry a measured diagnosis in `markers.tsv`; note in
+  particular that **`bruc_S19_eri` must not be "fixed" by retrieval** — it is a deletion,
+  and supplying the eri operon would make `vaccine_if` fire on wild-type *B. abortus*.
 - `-profile test` has no sample data (`tests/data/samplesheet_test.csv` is a header
   only). An empty samplesheet is now a hard error rather than a green run that analysed
   nothing, but the profile still needs a real fixture and built databases to be useful.
