@@ -204,8 +204,18 @@ STATUS_PARTIAL = "partial"
 STATUS_CURATION = "curation_required"
 STATUS_FAILED = "failed"
 STATUS_MOTIF = "motif_todo"
+# A REQUEST THAT FAILED IS NOT A SEARCH THAT FOUND NOTHING.
+#
+# Entrez.esearch()/efetch() catch EntrezError and return []/"" at LOG.debug, so the
+# `except EntrezError` handlers in process_marker() are unreachable and a rate-limit
+# block, a 5xx exhaustion or a truncated efetch was written as `failed` - documented
+# as "retrieval was attempted and returned nothing usable", i.e. evidence that NCBI
+# has nothing. The note then asserted "N queries tried, all empty", a positive claim
+# about a search that did not complete. This host was HTTP 429'd throughout the
+# 2026-10-15 rebuild, so that was not hypothetical.
+STATUS_RETRIEVAL_ERROR = "retrieval_error"
 ALL_STATUSES = [STATUS_BUILT, STATUS_PARTIAL, STATUS_CURATION,
-                STATUS_FAILED, STATUS_MOTIF]
+                STATUS_FAILED, STATUS_MOTIF, STATUS_RETRIEVAL_ERROR]
 
 KNOWN_STRATEGIES = {"gene_in_organism", "gene_family", "named_region", "motif",
                     "curate_required"}
@@ -729,6 +739,9 @@ class Entrez:
         self._last_request = 0.0
         self.n_requests = 0
         self.n_cache_hits = 0
+        # Requests that FAILED, as distinct from requests that returned nothing.
+        self.n_errors = 0
+        self.last_error = ""
         if not self.api_key:
             LOG.info("no NCBI API key supplied: limiting to %.0f request(s)/second. "
                      "An API key raises this to %.0f and makes a full pack build "
@@ -836,7 +849,10 @@ class Entrez:
         try:
             body = self._request("esearch.fcgi", params, ENTREZ_CACHE_TTL_SEARCH_DAYS)
         except EntrezError as exc:
-            LOG.debug("esearch failed (%s): %s", term, exc)
+            self.n_errors += 1
+            self.last_error = f"esearch {term!r}: {exc}"
+            LOG.warning("esearch FAILED (%s): %s - this is not an empty result",
+                        term, exc)
             return []
         try:
             data = json.loads(body)
@@ -865,7 +881,10 @@ class Entrez:
         try:
             return self._request("efetch.fcgi", params, ENTREZ_CACHE_TTL_FETCH_DAYS)
         except EntrezError as exc:
-            LOG.debug("efetch failed (%s %s): %s", db, rettype, exc)
+            self.n_errors += 1
+            self.last_error = f"efetch {db}/{rettype}: {exc}"
+            LOG.warning("efetch FAILED (%s %s): %s - this is not an empty result",
+                        db, rettype, exc)
             return ""
 
 
@@ -1755,6 +1774,8 @@ def process_marker(row: dict, ctx: Context, prior: Dict[str, dict]) -> dict:
                             "- rebuilding", marker_id, old.get("status"))
 
     want = MAX_SEQS_FAMILY if strategy == "gene_family" else MAX_SEQS_SINGLE
+    # Snapshot so an incomplete search cannot be written as a completed one.
+    errors_before = ctx.ez.n_errors
 
     want_dna = "dna" in tiers
     want_aa = "protein" in tiers
@@ -1849,6 +1870,24 @@ def process_marker(row: dict, ctx: Context, prior: Dict[str, dict]) -> dict:
     if has_hmm:
         obtained.append("hmm")
 
+    n_errors = ctx.ez.n_errors - errors_before
+
+    if not obtained and n_errors:
+        # THE SEARCH DID NOT COMPLETE, SO ITS EMPTINESS MEANS NOTHING.
+        #
+        # Reporting `failed` here would record a transient 429 or a truncated
+        # efetch as "NCBI has nothing", put the marker on the curation list, and
+        # send a human looking for sequence that may well exist. Downstream this
+        # is UNKNOWN either way; the difference is what the operator is told, and
+        # whether a rebuild can be mistaken for a result.
+        notes.insert(0, f"NOT ESTABLISHED - {n_errors} Entrez request(s) FAILED "
+                        f"for this marker (last: {ctx.ez.last_error}). Nothing "
+                        "here is evidence about what NCBI holds; re-run when the "
+                        "service is reachable.")
+        LOG.error("  %s: %d Entrez request(s) failed - recorded as %s, NOT as a "
+                  "negative result", marker_id, n_errors, STATUS_RETRIEVAL_ERROR)
+        return blank_manifest_row(row, STATUS_RETRIEVAL_ERROR, " | ".join(notes))
+
     if not obtained:
         # A ROW THAT BUILT NO QUERY WAS NEVER SEARCHED, AND MUST NOT SAY `failed`.
         #
@@ -1882,6 +1921,11 @@ def process_marker(row: dict, ctx: Context, prior: Dict[str, dict]) -> dict:
         status = STATUS_BUILT
     else:
         status = STATUS_PARTIAL
+        if n_errors:
+            notes.insert(0, f"CAUTION: {n_errors} Entrez request(s) failed during "
+                            "this marker's retrieval, so a missing tier below may "
+                            "be a transient service failure rather than absent "
+                            "sequence")
         missing = [t for t in requested if t not in obtained]
         notes.insert(0, "tiers built: " + "+".join(obtained) +
                      "; tiers MISSING: " + "+".join(missing))
@@ -2347,9 +2391,43 @@ def self_test() -> int:
         back = load_manifest(mpath)
         check("manifest round-trips by marker_id", list(back) == ["fnov_specific"])
         check("manifest preserves the status", back["fnov_specific"]["status"] == STATUS_CURATION)
-        check("status taxonomy is exactly the documented five",
+        check("status taxonomy is exactly the documented six",
               set(ALL_STATUSES) == {"built", "partial", "curation_required",
-                                    "failed", "motif_todo"})
+                                    "failed", "motif_todo", "retrieval_error"})
+        check("a failed request is a DIFFERENT status from an empty result",
+              STATUS_RETRIEVAL_ERROR != STATUS_FAILED)
+
+        print("-- a failed request is not an empty result --")
+
+        class _FlakyEz:
+            """esearch raises the way _request does when NCBI refuses."""
+
+            def __init__(self):
+                self.n_requests = 0
+                self.n_cache_hits = 0
+                self.n_errors = 0
+                self.last_error = ""
+
+            def esearch(self, db, term):
+                # Mirrors the real client: swallow, count, return empty.
+                self.n_errors += 1
+                self.last_error = f"esearch {term!r}: HTTP 429"
+                return []
+
+            def efetch(self, db, uids, rettype):
+                return ""
+
+        flaky = _FlakyEz()
+        famrow2 = {"marker_id": "ebola_NP", "taxon": "Zaire ebolavirus", "gene": "NP",
+                   "aliases": "nucleoprotein", "query_strategy": "gene_family",
+                   "marker_class": "required"}
+        recs_f, _ = fetch_protein(flaky, famrow2, MIN_SEQS_FOR_HMM)
+        check("a throttled ladder still returns no records", recs_f == [])
+        check("every failed request is counted, not swallowed",
+              flaky.n_errors == len(aa_queries(famrow2)),
+              "%d errors for %d rungs" % (flaky.n_errors, len(aa_queries(famrow2))))
+        check("the client records what failed", "429" in flaky.last_error,
+              flaky.last_error)
 
         print("-- catalogue parsing --")
         cat = tmpdir / "markers.tsv"
@@ -2619,9 +2697,15 @@ examples:
 manifest status values (markers.manifest.tsv):
   built              usable sequence for every evidence tier the catalogue asked for
   partial            some tiers only; the note says which are missing and why
-  curation_required  query_strategy=curate_required - not automatable, a human task
-  failed             retrieval was attempted and returned nothing usable; the note
-                     records the query that was used
+  curation_required  not automatable, a human task. Either query_strategy=
+                     curate_required, or a catalogue row that builds no query at all
+  failed             retrieval COMPLETED and returned nothing usable; the note records
+                     the queries that were used. This is a statement about what NCBI
+                     holds, so it is only written when the search actually finished
+  retrieval_error    retrieval DID NOT COMPLETE - one or more Entrez requests failed
+                     (rate limit, 5xx, truncated read). Says nothing about what NCBI
+                     holds. Re-run when the service is reachable; the run exits
+                     non-zero so an incomplete build cannot be mistaken for a result
   motif_todo         a motif row needing a manual residue/position specification
 
   EVERY catalogue row gets a manifest row. A marker with no usable sequence has a
@@ -3066,15 +3150,34 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # retrieved. Those taxa cannot reach confirmed_in_silico without it, and a
     # CI or Nextflow wrapper should fail loudly rather than ship a pack that
     # silently cannot confirm anthrax.
+    # STATUS_RETRIEVAL_ERROR counts here too. The whole point of separating it from
+    # STATUS_FAILED is that it is NOT a verdict about NCBI - which makes shipping a
+    # pack built from one worse than shipping a pack with a known gap, because the
+    # gap is real and the error is an artefact of the network.
     blocking = [r for r in manifest_rows
-                if r["status"] == STATUS_FAILED
+                if r["status"] in (STATUS_FAILED, STATUS_RETRIEVAL_ERROR)
                 and r["marker_class"] == "required"
                 and categories.get(r["taxon"].lower()) == "high_consequence"]
     if blocking:
         LOG.error("--- BLOCKING: required marker(s) for high_consequence taxa failed ---")
         for r in blocking:
-            LOG.error("  %s (%s)", r["marker_id"], r["taxon"])
+            LOG.error("  %s (%s) [%s]", r["marker_id"], r["taxon"], r["status"])
         LOG.error("exiting non-zero: these taxa cannot be confirmed at all.")
+        return 1
+
+    # A RUN THAT HIT THE NETWORK AND LOST MUST NOT LOOK LIKE A CLEAN RUN, even when
+    # every affected marker happened to be low-consequence. Without this, a rebuild
+    # throttled end to end exits 0 and the manifest it leaves behind is read as a
+    # measurement of what NCBI holds.
+    errored = [r for r in manifest_rows if r["status"] == STATUS_RETRIEVAL_ERROR]
+    if errored or ez.n_errors:
+        LOG.error("--- %d Entrez request(s) FAILED during this run ---", ez.n_errors)
+        for r in errored:
+            LOG.error("  %s (%s): not established, retry when reachable",
+                      r["marker_id"], r["taxon"])
+        LOG.error("exiting non-zero: this build is INCOMPLETE, not a result. "
+                  "Re-run when the service is reachable; completed markers are "
+                  "skipped, so a retry is cheap.")
         return 1
     return 0
 

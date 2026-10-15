@@ -2529,7 +2529,12 @@ briefly papered over it with junk.
 
 **Three retrieval failures were catalogue defects, not absent sequence.**
 
-* `henipa_cedar` built **no query at all** and was recorded `failed`. Its gene
+* `henipa_cedar` built **no query at all** and was recorded `failed`.
+  **CORRECTION (D31): the fix described below is vacuous and this marker is
+  still `failed`.** The same commit added the `nucleoprotein` alias, so the row
+  now builds queries and never reaches the new branch; the static suite check
+  then guarantees no shipped row can. The diagnosis in the rest of this bullet
+  is sound, the remedy as shipped is not. Its gene
   symbol is `N`, one character, below `MIN_QUERY_NAME_LEN`, with aliases `-`, so
   `query_names()` returned `[]` and not one request was ever issued. `failed` is
   documented as "retrieval was attempted and returned nothing usable" — evidence
@@ -2568,3 +2573,110 @@ Eleven new self-test checks on the ladder split and the relaxation gate, plus
 one static suite check. `--dry-run` now prints every rung and names the
 3-sequence minimum, because a plan that showed only rung 1 is how a dead
 relaxation stayed invisible for its whole life.
+
+---
+
+## D31 — The protein tier's coverage gate was unreachable for 107 of 125 markers, and a failed Entrez request was being written as a verdict about NCBI
+
+2026-10-15. Two findings from a Fable review pass, both in the shape the
+standing principle names: a result indistinguishable from a clean negative.
+The first is partly a regression D30 introduced.
+
+### The protein coverage denominator
+
+`fasta_lengths()` returned `marker_id -> SUMMED length` over every allele a
+marker holds, and `aa_evidence()` divided the union of target intervals by it.
+A marker carrying 8 alternative representations of one locus therefore capped
+at **0.125** however well any single allele was covered, against catalogue
+floors of 0.50-0.60.
+
+**This is the third place the same defect has been found.** `nt_evidence()`
+fixed it and wrote down why:
+
+> BREADTH IS PER SEQUENCE, NOT OVER THEIR SUMMED LENGTH. A marker often carries
+> several ALTERNATIVE representations of one locus [...] Dividing covered bases
+> by the summed 1878 bp caps breadth at 0.5 even when one allele is covered end
+> to end, so a min_coverage of 0.80 is structurally unreachable at ANY depth.
+
+It was never carried to the protein tier. Measured on the shipped pack: **107 of
+125** protein markers could not reach their own `min_coverage` on a perfect,
+full-length, high-identity hit. `ebola_NP`, `nipah_L`, `marburg_NP`, `lassa_NP`,
+`junin_GPC` and most of the other divergent-agent markers were among them — the
+tier that exists to see through synonymous divergence was dead for exactly the
+markers it was built for.
+
+The harm is not a missing call. The row writes a confident **ABSENT**, which
+feeds `absent()` as TRUE and can fire a `veto_if` or `vaccine_if` rule.
+
+**D30 made nine of them worse.** Raising `ebola_NP` and eight siblings from 1-2
+alleles to 8 cut their best achievable coverage from ~1.0 to 0.125. D30 gained
+nine HMM tiers and killed nine protein tiers doing it, and said nothing about it
+because nothing measured it.
+
+**The fix mirrors `nt_evidence()` exactly:** lengths are keyed per reference
+sequence, coverage is computed per target and the best one decides. Identity,
+bits and e-value now come from the best-scoring hit **on that same sequence**,
+so the two numbers the gate compares describe one protein — they previously came
+from the best hit anywhere in the marker while coverage was unioned over every
+allele, so a marker could pass identity on one allele using coverage accumulated
+from another.
+
+Measured after, against the real `markers.aa.faa` with a synthetic perfect
+full-length hit on each marker's longest allele: **125 of 125 reach coverage
+1.0000 and state PRESENT**, where 107 previously could not pass at all. The gate
+still rejects — the same hits truncated to 20% give **125 of 125 ABSENT**, and
+30% on each of four alleles does not sum to a pass.
+
+Two new columns, `aa_n_seqs` and `aa_best_ref`, record which allele the
+denominator came from. `aa_n_seqs` counts the SEARCH INDEX, not the manifest:
+`concat_files()` collapses near-identical alleles when it builds
+`markers.aa.faa`, so the manifest's `n_aa_seqs` (the archive) and this column
+disagree by design and the gap is large — ebola_NP is 8 archived, 2 searched.
+The coverage denominator needs the searched number.
+
+The protein and HMM tiers also had **no reference-naming guard**, which
+`nt_evidence()` has: a target present in the hits but absent from the FASTA gets
+no length, so its coverage computes as 0 and the marker reads ABSENT in silence.
+Now warned.
+
+Eight `aacov` checks, mutation-verified: reverting the denominator alone turns
+four of them red. The suite passed throughout the defect's life and had nothing
+pinning this.
+
+### A failed request is not an empty result
+
+`Entrez.esearch()` and `efetch()` catch `EntrezError`, log at `LOG.debug` and
+return `[]`/`""`, so the two `except EntrezError` handlers in `process_marker()`
+are **unreachable** and a rate-limit block, a 5xx exhaustion or a truncated
+efetch was recorded as `failed` — documented as *"retrieval was attempted and
+returned nothing usable"*, i.e. a verdict about what NCBI holds. D30's own
+`_tried_phrase` then asserted *"N queries tried, all empty"*, a positive claim
+about a search that did not complete, and the marker landed on the curation list
+sending a human to look for sequence that may well exist.
+
+This host was HTTP 429'd throughout the 2026-10-15 rebuild, so it is not
+hypothetical.
+
+**A sixth status, `retrieval_error`**, now separates "the search did not
+complete" from "the search found nothing". Failures are counted on the client
+and logged at WARNING, `process_marker()` compares the count before and after
+each marker, and a `partial` row whose retrieval also errored says so rather
+than presenting its gaps as established. The run **exits non-zero** when any
+request failed, because a build throttled end to end otherwise exits 0 and
+leaves a manifest that reads as a measurement. `retrieval_error` also joins
+`failed` in the blocking check for required high-consequence markers — shipping
+a pack built from one is worse than shipping a known gap, because the gap is
+real and the error is an artefact of the network.
+
+203 passed, 0 failed, 2 skipped.
+
+**Still open from the same review pass, not addressed here:** `flua_HA_H5` and
+`flua_HA_H7` hold identical pan-subtype reference sets (1 of 7 is H5, 1 of 7 is
+H7); `C3L` matches `SUBSTITUTION_RE` and is dropped before any query is built,
+so `mpox_C3L` was filled from the `[All Fields]` fallback with B5R and
+haemagglutinin; `nipah_N` and `rvfv_N` carry L polymerase and phosphoprotein;
+132 of 163 manifest rows predate D30 and the resume drift-check compares neither
+`gene` nor `aliases`, so no rerun refreshes them without `--force`; D30's
+`curation_required` branch for unsearchable rows is dead code, because the same
+commit added the alias that stops `henipa_cedar` reaching it — the commit
+message and D30 both claim otherwise and are **wrong**.

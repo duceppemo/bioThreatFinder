@@ -2155,6 +2155,111 @@ def test_marker_tier_gap(tmp: Path) -> None:
            f"got {got.get('none_built', {}).get('state')}")
 
 
+def test_protein_coverage_per_sequence(tmp: Path) -> None:
+    """Protein coverage is per allele; the summed denominator made it unreachable.
+
+    `fasta_lengths()` returned marker_id -> SUMMED length and `aa_evidence()`
+    divided the union of target intervals by it. A marker holding 8 alternative
+    representations of one locus therefore capped at 0.125 however well any
+    single allele was covered, against catalogue floors of 0.50-0.60.
+
+    Measured on the shipped pack when this was found: 107 of 125 protein markers
+    could not reach their own `min_coverage` on a PERFECT full-length hit -
+    ebola_NP, nipah_L, marburg_NP, lassa_NP and most of the other
+    divergent-agent markers among them. The failure is not a missing call: the
+    row writes a confident ABSENT, which feeds `absent()` as TRUE and can fire a
+    veto_if or vaccine_if rule.
+
+    This is the same defect nt_evidence() documents fixing ("BREADTH IS PER
+    SEQUENCE, NOT OVER THEIR SUMMED LENGTH ... structurally unreachable at ANY
+    depth"), which was never carried to the protein tier. Third place it has
+    been found; the suite had nothing pinning it, and passed throughout.
+    """
+    cat = tmp / "cov_markers.tsv"
+    cat.write_text(
+        "marker_id\ttaxon\tgene\taliases\tmarker_class\tevidence_type\tlocus\t"
+        "min_coverage\tmin_identity\tcopy_expectation\tquery_strategy\tsource_db\tnotes\n"
+        "multi\tTestus multiplex\tg1\t\trequired\tprotein\tchr\t"
+        "0.60\t0.80\tsingle\texact\ttest\tfour alleles of one locus\n"
+        "single\tTestus solus\tg2\t\trequired\tprotein\tchr\t"
+        "0.60\t0.80\tsingle\texact\ttest\tone allele, the control\n")
+    man = tmp / "cov.manifest.tsv"
+    man.write_text(
+        "marker_id\ttaxon\tgene\tmarker_class\tevidence_type\tquery_strategy\t"
+        "status\tn_nt_seqs\tn_aa_seqs\thas_hmm\n"
+        "multi\tTestus multiplex\tg1\trequired\tprotein\texact\tbuilt\t0\t4\tno\n"
+        "single\tTestus solus\tg2\trequired\tprotein\texact\tbuilt\t0\t1\tno\n")
+
+    # Four alleles of 100 aa each: summed 400, best 100.
+    faa = tmp / "cov.faa"
+    faa.write_text(
+        "".join(f">marker|multi|A{i} allele {i} [Testus multiplex]\n" + "M" * 100 + "\n" for i in range(4))
+        + ">marker|single|B0 only [Testus solus]\n" + "M" * 100 + "\n")
+
+    def states(hits_text, tag):
+        hits = tmp / f"cov_{tag}.m8"
+        hits.write_text(hits_text)
+        out = tmp / f"covstates_{tag}.tsv"
+        run([sys.executable, BIN / "marker_evidence.py", "--markers", cat,
+             "--manifest", man, "--aa-hits", hits, "--aa-fasta", faa,
+             "--sample", "S1", "--out", out])
+        with out.open() as fh:
+            return {r["marker_id"]: r for r in csv.DictReader(fh, delimiter="\t")}
+
+    # One allele covered END TO END. Under the summed denominator this is 100/400
+    # = 0.25 and ABSENT; per sequence it is 1.0 and PRESENT.
+    full = states("r\tmarker|multi|A2\t0.95\t100\t0\t0\t1\t100\t1\t100\t1e-9\t200.0\n"
+                  "r\tmarker|single|B0\t0.95\t100\t0\t0\t1\t100\t1\t100\t1e-9\t200.0\n",
+                  "full")
+    record("aacov:a full-length hit on ONE allele is PRESENT",
+           full.get("multi", {}).get("state") == "PRESENT",
+           f"got {full.get('multi', {}).get('state')!r}, "
+           f"coverage {full.get('multi', {}).get('aa_coverage')!r}")
+    record("aacov:coverage is 1.0, not 1/n_alleles",
+           full.get("multi", {}).get("aa_coverage") == "1.0000",
+           f"got {full.get('multi', {}).get('aa_coverage')!r}, want '1.0000'")
+    record("aacov:the denominator is one allele, not their sum",
+           full.get("multi", {}).get("aa_length") == "100",
+           f"got {full.get('multi', {}).get('aa_length')!r}, want '100' (sum is 400)")
+    record("aacov:the chosen allele is named",
+           full.get("multi", {}).get("aa_best_ref") == "marker|multi|A2",
+           f"got {full.get('multi', {}).get('aa_best_ref')!r}")
+    record("aacov:a single-allele marker is unaffected",
+           full.get("single", {}).get("state") == "PRESENT",
+           f"got {full.get('single', {}).get('state')!r}")
+
+    # THE GATE MUST STILL REJECT. A fix that makes everything reachable by
+    # shrinking the denominator to nothing would pass the checks above.
+    part = states("r\tmarker|multi|A2\t0.95\t20\t0\t0\t1\t20\t1\t20\t1e-9\t200.0\n",
+                  "partial")
+    record("aacov:a 20% hit on that same allele is still ABSENT",
+           part.get("multi", {}).get("state") == "ABSENT",
+           f"got {part.get('multi', {}).get('state')!r}, "
+           f"coverage {part.get('multi', {}).get('aa_coverage')!r}")
+
+    # Coverage may not be accumulated ACROSS alleles to clear the floor: 30% of
+    # each of four alleles is not 120% of the locus.
+    spread = states("".join(
+        f"r\tmarker|multi|A{i}\t0.95\t30\t0\t0\t1\t30\t1\t30\t1e-9\t200.0\n"
+        for i in range(4)), "spread")
+    record("aacov:partial hits on four alleles do not sum to coverage",
+           spread.get("multi", {}).get("state") == "ABSENT",
+           f"got {spread.get('multi', {}).get('state')!r}, "
+           f"coverage {spread.get('multi', {}).get('aa_coverage')!r}")
+
+    # A target absent from the FASTA has no length, so its coverage silently
+    # computes as 0. nt_evidence() warns on exactly this; the protein tier did not.
+    hits = tmp / "cov_unknown.m8"
+    hits.write_text("r\tmarker|multi|ZZZ\t0.95\t100\t0\t0\t1\t100\t1\t100\t1e-9\t200.0\n")
+    out = tmp / "covstates_unknown.tsv"
+    pr = run([sys.executable, BIN / "marker_evidence.py", "--markers", cat,
+              "--manifest", man, "--aa-hits", hits, "--aa-fasta", faa,
+              "--sample", "S1", "--out", out])
+    record("aacov:a target missing from the FASTA is warned about, not silent",
+           "absent from the marker FASTA" in pr.stderr,
+           f"stderr tail: {pr.stderr[-200:]!r}")
+
+
 def test_marker_catalogue_watchlist_join(tmp: Path) -> None:
     """Three hand-maintained files agree on literal strings; something must check.
 
@@ -2463,6 +2568,7 @@ CASES = {
     "protfloor": test_protein_tier_honours_catalogue,
     "markerexp": test_marker_expectation_cli,
     "tiergap": test_marker_tier_gap,
+    "aacov": test_protein_coverage_per_sequence,
     "markerjoin": test_marker_catalogue_watchlist_join,
     "hopguard": test_index_hop_batch_guard,
     "defaults": test_scorer_defaults_match_shipped_config,

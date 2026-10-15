@@ -115,18 +115,42 @@ def union_length(intervals: list[tuple[int, int]]) -> int:
 
 
 def fasta_lengths(path: Path | None) -> dict[str, int]:
-    """marker_id -> summed sequence length, from a combined marker FASTA."""
-    out: dict[str, int] = defaultdict(int)
+    """REFERENCE NAME -> sequence length, from a combined marker FASTA.
+
+    PER SEQUENCE, NOT SUMMED PER MARKER. This returned `marker_id -> summed
+    length`, and aa_evidence() divided covered residues by that sum - the exact
+    defect nt_evidence() documents fixing, never carried across:
+
+        "BREADTH IS PER SEQUENCE, NOT OVER THEIR SUMMED LENGTH. A marker often
+         carries several ALTERNATIVE representations of one locus ... Dividing
+         covered bases by the summed 1878 bp caps breadth at 0.5 even when one
+         allele is covered end to end, so a min_coverage of 0.80 is structurally
+         unreachable at ANY depth."
+
+    Measured on the shipped pack before this fix: 107 of 125 protein markers
+    could not reach their own `min_coverage` on a PERFECT full-length hit. An
+    8-allele marker caps at 0.125 against floors of 0.50-0.60, so `ebola_NP`,
+    `nipah_L`, `marburg_NP`, `lassa_NP` and most of the other divergent-agent
+    markers wrote a confident ABSENT - which feeds `absent()` as TRUE and can
+    fire a veto_if or vaccine_if rule.
+
+    The key is the first whitespace-delimited token of the header, which is what
+    MMseqs2/DIAMOND report in the m8 target column.
+    """
+    out: dict[str, int] = {}
     if not path or not path.exists():
         return {}
     current = None
     with path.open() as fh:
         for line in fh:
             if line.startswith(">"):
-                current = marker_of(line[1:].strip())
+                name = line[1:].strip().split()[0] if line[1:].strip() else ""
+                current = name or None
+                if current:
+                    out.setdefault(current, 0)
             elif current:
                 out[current] += len(line.strip())
-    return dict(out)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -298,12 +322,27 @@ def nt_evidence(bam: Path, mapq_min: int) -> dict[str, dict]:
 def aa_evidence(hits: Path, aa_lengths: dict[str, int]) -> dict[str, dict]:
     """m8: query target fident alnlen mismatch gapopen qstart qend tstart tend evalue bits
 
-    The marker protein is the TARGET; reads are queries. Marker coverage is the
-    union of target intervals, so many reads stacked on one domain do not read as
+    The marker protein is the TARGET; reads are queries. Coverage is the union of
+    target intervals, so many reads stacked on one domain do not read as
     full-length coverage.
+
+    COVERAGE IS PER TARGET SEQUENCE AND THE BEST ONE DECIDES, mirroring
+    nt_evidence(). A marker holds ALTERNATIVE representations of one locus; a
+    read matching any of them is evidence for the marker, and dividing by their
+    summed length made the gate unreachable (see fasta_lengths()).
+
+    Identity, bits and e-value are taken from the best-scoring hit ON THE CHOSEN
+    SEQUENCE, so the two numbers the gate compares describe the same protein.
+    They previously came from the best hit anywhere in the marker while coverage
+    was unioned over every allele, so a marker could pass identity on one allele
+    using coverage accumulated from another. `aa_hits` stays a whole-marker
+    count, because it reports how much evidence there is, not where it landed.
     """
+    # Per TARGET, so the best representative can be chosen below.
     intervals: dict[str, list[tuple[int, int]]] = defaultdict(list)
-    best: dict[str, dict] = {}
+    best_on: dict[str, dict] = {}
+    n_hits: dict[str, int] = defaultdict(int)
+    unknown_targets: set[str] = set()
     with hits.open() as fh:
         for line in fh:
             if not line.strip() or line.startswith("#"):
@@ -311,7 +350,8 @@ def aa_evidence(hits: Path, aa_lengths: dict[str, int]) -> dict[str, dict]:
             f = line.rstrip("\n").split("\t")
             if len(f) < 12:
                 continue
-            mid = marker_of(f[1])
+            target = f[1]
+            mid = marker_of(target)
             if not mid:
                 continue
             try:
@@ -323,19 +363,53 @@ def aa_evidence(hits: Path, aa_lengths: dict[str, int]) -> dict[str, dict]:
             # MMseqs2 reports fident as a fraction, DIAMOND as a percentage.
             if fident > 1.0:
                 fident /= 100.0
-            intervals[mid].append((tstart, tend))
-            cur = best.get(mid)
+            if aa_lengths and target not in aa_lengths:
+                unknown_targets.add(target)
+            intervals[target].append((tstart, tend))
+            n_hits[mid] += 1
+            cur = best_on.get(target)
             if cur is None or bits > cur["aa_bits"]:
-                best[mid] = {"aa_identity": fident, "aa_bits": bits,
-                             "aa_evalue": evalue, "aa_hits": 0}
+                best_on[target] = {"aa_identity": fident, "aa_bits": bits,
+                                   "aa_evalue": evalue}
+
+    # A TARGET THAT IS IN THE HITS BUT NOT IN THE FASTA HAS NO LENGTH, so its
+    # coverage silently computes as 0 and the marker reads ABSENT. nt_evidence()
+    # warns on the same mismatch; this tier did not, so an aligner run against a
+    # different or stale marker FASTA produced confident negatives in silence.
+    if unknown_targets:
+        sample = ", ".join(sorted(unknown_targets)[:3])
+        sys.stderr.write(
+            f"[marker] WARNING: {len(unknown_targets)} protein target(s) in "
+            f"{hits.name} are absent from the marker FASTA (e.g. {sample}); "
+            "their coverage cannot be computed and those markers will read "
+            "ABSENT. Is --aa-fasta the same build the search used?\n")
+
+    by_marker: dict[str, list[str]] = defaultdict(list)
+    for target in intervals:
+        by_marker[marker_of(target)].append(target)
+
+    n_seqs: dict[str, int] = defaultdict(int)
+    for name in aa_lengths:
+        mid = marker_of(name)
+        if mid:
+            n_seqs[mid] += 1
+
     out = {}
-    for mid, ivs in intervals.items():
-        length = aa_lengths.get(mid, 0)
-        rec = dict(best.get(mid, {"aa_identity": 0.0, "aa_bits": 0.0, "aa_evalue": 1.0}))
-        rec["aa_hits"] = len(ivs)
-        rec["aa_coverage"] = (union_length(ivs) / length) if length else 0.0
-        rec["aa_length"] = length
-        out[mid] = rec
+    for mid, targets in by_marker.items():
+        best, best_frac = None, -1.0
+        for t in sorted(targets):
+            length = aa_lengths.get(t, 0)
+            frac = (union_length(intervals[t]) / length) if length else 0.0
+            if frac > best_frac:
+                best, best_frac = t, frac
+        hit = dict(best_on.get(best, {"aa_identity": 0.0, "aa_bits": 0.0,
+                                      "aa_evalue": 1.0}))
+        hit["aa_hits"] = n_hits[mid]
+        hit["aa_coverage"] = max(0.0, best_frac)
+        hit["aa_length"] = aa_lengths.get(best, 0) if best else 0
+        hit["aa_n_seqs"] = n_seqs.get(mid, 0)
+        hit["aa_best_ref"] = best or ""
+        out[mid] = hit
     return out
 
 
@@ -574,6 +648,18 @@ def main() -> int:
             # apart from a marker whose FASTA header did not parse and whose coverage
             # gate was therefore SKIPPED entirely (the aa_length == 0 bypass below).
             "aa_length": "",
+            # The denominator's PROVENANCE. `aa_length` is now one sequence's
+            # length, not the marker's summed length, so without these a reader
+            # cannot tell which of several alleles the coverage describes - the
+            # same gap `aa_length` itself was added to close.
+            #
+            # `aa_n_seqs` COUNTS THE SEARCH INDEX, NOT THE MANIFEST. The manifest's
+            # `n_aa_seqs` counts the per-marker archive; concat_files() collapses
+            # near-identical alleles when it builds markers.aa.faa, so the two
+            # disagree by design and the gap is large (ebola_NP: 8 archived, 2
+            # searched). This column is the one that describes what was actually
+            # searched, which is what a coverage denominator needs.
+            "aa_n_seqs": "", "aa_best_ref": "",
             # Carried so score_evidence.py can compute, from the target's observed
             # depth, whether a marker that was not found would have been SAMPLED at
             # all. Without the length, "searched and not found" cannot be told apart
@@ -678,6 +764,8 @@ def main() -> int:
                     "aa_identity": f"{e['aa_identity']:.4f}",
                     "aa_bits": f"{e['aa_bits']:.1f}",
                     "aa_length": e.get("aa_length", ""),
+                    "aa_n_seqs": e.get("aa_n_seqs", ""),
+                    "aa_best_ref": e.get("aa_best_ref", ""),
                 })
                 tried.append("protein")
                 # THE CATALOGUE'S FLOOR, NOT A BLANKET SUBTRACTION FROM IT.
