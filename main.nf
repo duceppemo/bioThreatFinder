@@ -152,6 +152,71 @@ def fillMissing(base, produced) {
  * A silent false negative on every watchlist organism is worse than a crash, so this
  * is refused rather than warned about. The build scripts record the namespace in
  * BTF_BUILD_MANIFEST.txt precisely so it can be checked here. */
+// A PACK CAN BE MASKED AND STILL HAVE REFERENCES THAT WERE NEVER EXAMINED.
+//
+// The check below this used to be all-or-nothing: the masked/ directory exists, or
+// it does not. It cannot see the state the human pack was actually in for twelve
+// days (D34) - 371 references, 359 mask BEDs, with every file of the Filoviridae
+// group entry unmasked because the entry was added to the pack after the masking
+// pass. Six of those had contigs in no BED anywhere, and coverage_stats reads every
+// BED into one contig->intervals map, so a contig in no BED is simply absent from it
+// - which is exactly what a contig with no masked intervals looks like.
+//
+// mask_pack_refs.py now reconciles this and exits non-zero, but that only helps
+// someone who re-runs the masker. A run uses whatever is on disk, so the run says so
+// too. WARN rather than exit: a partially masked pack is usable and the finding is
+// still worth having, which is not true of the GTDB-namespace case below, where the
+// arm contributes literally nothing.
+def warnIfPackPartlyMasked(refsManifest, maskedDir, packName) {
+    if (!refsManifest || !refsManifest.exists() || !maskedDir || !maskedDir.exists()) {
+        return
+    }
+    def lines = refsManifest.readLines()
+    if (lines.size() < 2) { return }
+    def header = lines[0].split('\t') as List
+    def iPath = header.indexOf('path')
+    def iName = header.indexOf('name')
+    if (iPath < 0) { return }
+
+    // Basenames, never full paths: bed_path is recorded absolute, so a pack mounted
+    // somewhere other than where it was masked would otherwise look wholly unmasked
+    // - a false alarm in a guard teaches people to stop reading it.
+    def haveBeds = (maskedDir.listFiles() ?: [])
+        .findAll { it.name.endsWith('.mask.bed') }
+        .collect { it.name } as Set
+
+    // Counted over rows that HAVE a path, which is what mask_pack_refs.py masks and
+    // therefore the only denominator the two can agree on. The manifest carries a
+    // few rows with no path (a watchlist entry whose genome could not be fetched);
+    // they are a different gap, reported as `no_reference` at scoring time.
+    def considered = 0
+    def missing = []
+    lines.drop(1).each { line ->
+        def f = line.split('\t') as List
+        if (f.size() <= iPath) { return }
+        def pth = f[iPath]?.trim()
+        if (!pth) { return }
+        // `considered++` is rejected by Nextflow's strict script syntax.
+        considered += 1
+        def stem = pth.split('/')[-1].replaceAll(/\.fna(\.gz)?$/, '')
+        if (!haveBeds.contains("${stem}.mask.bed".toString())) {
+            missing << (iName >= 0 && f.size() > iName ? f[iName] : stem)
+        }
+    }
+    if (!missing) { return }
+
+    def shown = missing.unique().take(6).join(', ')
+    log.warn "${missing.size()} of ${considered} references in the ${packName} " +
+             "pack have NO masking result (${shown}${missing.unique().size() > 6 ? ', ...' : ''}). " +
+             "A reference that was never examined is NOT a clean one: coverage_stats " +
+             "loads every BED into one contig map, so a contig that appears in no BED " +
+             "is indistinguishable there from a contig with nothing to mask. Findings " +
+             "on these references carry a full-length breadth denominator and no " +
+             "reads_in_masked_regions. Fix with:\n" +
+             "  python3 scripts/mask_pack_refs.py --pack ${packName} --dry-run   " +
+             "(read-only; lists them and exits 1)"
+}
+
 def assertNcbiTaxonomy(dbDir, label) {
     def manifest = file("${dbDir}/BTF_BUILD_MANIFEST.txt")
     if (!manifest.exists()) {
@@ -580,6 +645,10 @@ workflow {
                  "cross-contaminated sequence inside a reference will collect reads " +
                  "and inflate breadth. Run scripts/mask_pack_refs.py --pack ${pack.name}."
         masked_dir = []
+    } else {
+        warnIfPackPartlyMasked(
+            file(pack.confirm.refs_manifest ?: "${pack.confirm.refs_dir}/manifest.tsv"),
+            masked_dir, pack.name)
     }
     COVERAGE_STATS(MINIMAP2_COMPETITIVE.out.bam, masked_dir)
 

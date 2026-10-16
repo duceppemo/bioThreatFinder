@@ -3122,6 +3122,26 @@ unknown** — not to silence, because an omitted section is what a run with no
 summary at all produces, and a reader cannot tell "no arms to report" from
 "could not read what the arms did".
 
+### The run says it too, not only the builder
+
+`mask_pack_refs.py` reconciling itself only helps someone who re-runs the masker.
+A pipeline run uses whatever is on disk, and the workflow's own check was
+all-or-nothing — the `masked/` directory exists or it does not — so it could not
+see the state the pack was in for twelve days. `warnIfPackPartlyMasked()` now
+compares the refs manifest to the BEDs present and names what has no result.
+
+It WARNS rather than exits, unlike the GTDB-namespace guard beside it. A
+partially masked pack still produces findings worth having; a GTDB-namespaced
+index produces an arm that contributes literally nothing. Those deserve different
+answers.
+
+Verified both ways on the real pack — silent when complete, and `1 of 371 ...
+(Shigella)` with one BED moved aside and restored byte-identical afterwards. The
+first attempt at that verification printed nothing and looked like a pass; it was
+a Groovy compile error (`considered++` is rejected by Nextflow's strict script
+syntax), which is worth recording as its own small lesson: a check that produces
+no output is not the same as a check that passed.
+
 ### How it was found, which is the part worth not repeating
 
 By diffing a directory listing against a manifest, by hand, while doing something
