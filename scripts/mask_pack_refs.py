@@ -342,10 +342,174 @@ def read_manifest(path: Path) -> list[dict]:
     return usable
 
 
+def ref_stem(row: dict) -> str:
+    """The identity of one reference: its file stem.
+
+    NOT its taxid. One taxid can own many references - the Filoviridae group entry
+    owns twelve, one per member assembly - so anything keyed on taxid treats twelve
+    distinct references as one, which is how the mask manifest came to drop rows it
+    was not rewriting.
+    """
+    return Path(row["path"]).name.replace(".fna.gz", "").replace(".fna", "")
+
+
+def reconcile(all_rows: list[dict], mask_dir: Path, args) -> int:
+    """0 if every pack reference has a masking result, 1 otherwise.
+
+    RECONCILES THE WHOLE PACK, NOT THIS RUN'S SCOPE, AND RUNS ON EVERY EXIT PATH.
+
+    This is the step that was missing, and it was missing in the direction that does
+    not announce itself. On 2026-10-15 the human pack held 375 references and 359
+    mask BEDs: all twelve of the Filoviridae group entry's files had never been
+    masked, because the group entry was added to the pack (D24/D25) AFTER the masking
+    pass and nothing re-ran it. Six of those twelve carry contigs that appear in no
+    BED anywhere in the pack, so coverage_stats scored them with the mask map simply
+    not containing them - byte-identical in effect to "examined and found clean".
+    That is the confusion D5 and the shared-assembly fix are about, one level up: not
+    an unmasked INTERVAL but an unmasked REFERENCE.
+
+    It was found by hand-diffing a directory listing against the manifest, which is
+    not a procedure anyone will repeat. The question "does this pack hold a reference
+    nobody has ever masked" has nothing to do with what was asked for today, so the
+    scope here is always every row - including on the early exit where this run had
+    nothing to do, which is exactly the run that most needs to say it.
+
+    An EXAMINED-AND-CLEAN reference is not a missing one. Low-complexity masking
+    finds something in essentially every genome, so a BED exists either way; the
+    empty-BED case is a result like any other and is counted as present.
+    """
+    mpath = mask_dir / "mask_manifest.tsv"
+    known: set[str] = set()
+    if mpath.exists():
+        try:
+            with mpath.open() as fh:
+                known = {str(r.get("bed_path", "")).strip()
+                         for r in csv.DictReader(fh, delimiter="\t")}
+        except OSError as exc:
+            warn(f"cannot read {mpath} to reconcile ({exc}); "
+                 "falling back to the BEDs on disk")
+    if not known:
+        known = {str(b) for b in mask_dir.glob("*.mask.bed")}
+
+    unmasked = [r for r in all_rows
+                if str(mask_dir / f"{ref_stem(r)}.mask.bed") not in known]
+    if not unmasked:
+        log("")
+        log(f"all {len(all_rows)} pack reference(s) have a masking result")
+        return 0
+
+    log("")
+    warn(f"{len(unmasked)} of {len(all_rows)} pack reference(s) have NO masking "
+         f"result. A reference that was never examined is not a clean one, and "
+         f"nothing downstream can tell the two apart:")
+    for r in unmasked[:30]:
+        warn(f"  {r['taxid']:>9}  {r['name']}  [{ref_stem(r)}]")
+    if len(unmasked) > 30:
+        warn(f"  ... and {len(unmasked) - 30} more")
+    by_taxid: dict[str, int] = defaultdict(int)
+    for r in unmasked:
+        by_taxid[r["taxid"]] += 1
+    args_line = " ".join(f"--only-taxid {t}" for t in sorted(by_taxid))
+    warn("")
+    warn("Mask them with:")
+    warn(f"  python3 scripts/mask_pack_refs.py --pack {args.pack} "
+         f"--btf-db {args.btf_db} {args_line} --threads {args.threads}")
+    # Blunt on purpose, the same way the marker builder's exit code is (D32): this
+    # run did what it was asked and the PACK is still incomplete. An exit code that
+    # reflects only the former is how this went unnoticed for twelve days.
+    return 1
+
+
+def self_test() -> int:
+    """Offline unit tests for the two things that decide what gets RECORDED.
+
+    Neither needs minimap2, a pack or a genome, and both were wrong in ways that
+    produce a plausible-looking manifest rather than an error.
+    """
+    failures: list[str] = []
+
+    def check(name: str, cond: bool, detail: str = "") -> None:
+        print(f"  {'ok  ' if cond else 'FAIL'} {name}"
+              + (f": {detail}" if detail and not cond else ""))
+        if not cond:
+            failures.append(name)
+
+    print("mask_pack_refs.py --self-test")
+    print("-- a reference is identified by its file stem, never by its taxid --")
+
+    # 11266 owns twelve references. Keyed on taxid they are one thing, which is how
+    # the manifest merge came to delete rows it was not rewriting, and how a test
+    # reading the manifest into {taxid: row} silently kept only the last of twelve.
+    rows = [
+        {"taxid": "11266", "name": "Filoviridae", "accession": "GCF_000848505.1",
+         "path": "/p/refs/11266_Filoviridae.fna.gz"},
+        {"taxid": "11266", "name": "Filoviridae", "accession": "GCF_000889155.1",
+         "path": "/p/refs/11266_Filoviridae.GCF_000889155.1.fna.gz"},
+        {"taxid": "186538", "name": "Zaire ebolavirus", "accession": "GCF_000848505.1",
+         "path": "/p/refs/186538_Zaire_ebolavirus.fna.gz"},
+        {"taxid": "565995", "name": "Bundibugyo virus", "accession": "GCF_000889155.1",
+         "path": "/p/refs/565995_Bundibugyo_virus.fna.gz"},
+    ]
+    stems = [ref_stem(r) for r in rows]
+    check("twelve references under one taxid stay distinct",
+          len(set(stems)) == 4, f"got {stems}")
+    check("ref_stem strips .fna.gz and keeps the accession suffix",
+          stems[1] == "11266_Filoviridae.GCF_000889155.1", stems[1])
+
+    print("-- shared assemblies come from the manifest, not from what a run loaded --")
+    by_acc: dict[str, list[dict]] = defaultdict(list)
+    for r in rows:
+        by_acc[r["accession"]].append(r)
+    shared = {a: rs for a, rs in by_acc.items() if len(rs) > 1}
+    check("both shared assemblies are found without reading a single genome",
+          set(shared) == {"GCF_000848505.1", "GCF_000889155.1"}, str(sorted(shared)))
+    # The case the old run-time detection could never see: the two partners are
+    # different TAXIDS, so no --only-taxid invocation puts them in one run, and the
+    # flag was therefore empty on both no matter how the script was called.
+    partners = [o for o in shared["GCF_000848505.1"]
+                if ref_stem(o) != "11266_Filoviridae"]
+    check("a group bundle's partner is named even though their taxids differ",
+          [ref_stem(o) for o in partners] == ["186538_Zaire_ebolavirus"],
+          str([ref_stem(o) for o in partners]))
+
+    print("-- reconciliation sees a reference that has no result --")
+    with tempfile.TemporaryDirectory() as td:
+        mask_dir = Path(td)
+        (mask_dir / "186538_Zaire_ebolavirus.mask.bed").write_text("")
+        (mask_dir / "565995_Bundibugyo_virus.mask.bed").write_text("")
+
+        class _A:
+            pack, btf_db, threads = "human", Path("/p"), 4
+
+        # No manifest: fall back to the BEDs on disk. The two 11266 references have
+        # neither, which is the state the human pack was actually in.
+        rc = reconcile(rows, mask_dir, _A())
+        check("a pack missing a masking result exits non-zero", rc == 1, f"rc={rc}")
+
+        for st in ("11266_Filoviridae", "11266_Filoviridae.GCF_000889155.1"):
+            (mask_dir / f"{st}.mask.bed").write_text("")
+        rc = reconcile(rows, mask_dir, _A())
+        check("a complete pack exits zero", rc == 0, f"rc={rc}")
+
+        # An EMPTY bed is a result - examined and clean - not a missing one. All four
+        # files written above are empty, so the zero above already proves it; this
+        # states it so a future change cannot "fix" emptiness into absence.
+        check("an empty BED counts as examined, not as missing", rc == 0)
+
+    print()
+    if failures:
+        print(f"{len(failures)} FAILED: {', '.join(failures)}")
+        return 1
+    print("all self-tests passed")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--pack", required=True)
+    # NOT required=True: --self-test needs no pack, and argparse enforces required
+    # arguments before any of our code runs.
+    ap.add_argument("--pack")
     ap.add_argument("--btf-db", type=Path, default=DEFAULT_BTF_DB)
     ap.add_argument("--packs-dir", type=Path,
                     default=Path(__file__).resolve().parent.parent / "packs")
@@ -369,7 +533,14 @@ def main() -> int:
     ap.add_argument("--only-taxid", action="append", default=[])
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--self-test", action="store_true",
+                    help="offline unit tests; needs no pack, genome or minimap2")
     args = ap.parse_args()
+
+    if args.self_test:
+        return self_test()
+    if not args.pack:
+        ap.error("--pack is required (except with --self-test)")
 
     sources = [s.strip() for s in args.sources.split(",") if s.strip()]
     bad = [s for s in sources if s not in ALL_SOURCES]
@@ -389,6 +560,41 @@ def main() -> int:
         if not rows:
             die(f"no genomes matched --only-taxid {sorted(want)}")
         log(f"--only-taxid: masking {len(rows)} of {len(all_rows)} genome(s)")
+
+    # WHICH REFERENCES ARE THE SAME ASSEMBLY, FROM THE MANIFEST RATHER THAN FROM
+    # WHAT THIS INVOCATION HAPPENED TO LOAD.
+    #
+    # A reference is identified by its FILE STEM, not by its taxid: one taxid can
+    # own many references (the Filoviridae group entry owns twelve), so a taxid is
+    # not a key for anything here.
+    #
+    # Sharing used to be detected only from RUN-TIME contig collisions, as genomes
+    # were read into contig_owner. That is correct when both partners are in the same
+    # invocation and silently incomplete otherwise: `--only-taxid 620` masked
+    # Shigella on its own, produced the right numbers, and wrote an EMPTY
+    # SHARED_SEQUENCE flag - so the manifest's provenance column depended on how the
+    # script was called. decisions.md already names that exact shape ("a guard that
+    # asserts how a script was invoked is not a guard").
+    #
+    # `accession` is an artifact of the pack build, not of this run, so it answers the
+    # question the same way every time. It is also a better answer than the old one:
+    # it finds EIGHT sharing pairs in the human pack, not the two that were known.
+    # Six of them are the Filoviridae group bundle sharing an assembly with the member
+    # taxon it was built from (11266/186538, /186539, /186540, /565995 and twice with
+    # /3052505), which no --only-taxid invocation would ever have put in one run.
+    by_accession: dict[str, list[dict]] = defaultdict(list)
+    accession_of: dict[str, str] = {}
+    for r in all_rows:
+        acc = (r.get("accession") or "").strip()
+        if acc and acc != "-":
+            by_accession[acc].append(r)
+            accession_of[ref_stem(r)] = acc
+    shared_acc = {a: rs for a, rs in by_accession.items() if len(rs) > 1}
+    if shared_acc:
+        log(f"{len(shared_acc)} assembly/assemblies are referenced by more than one "
+            f"pack entry; their masking is computed once and shared:")
+        for acc, rs in sorted(shared_acc.items()):
+            log(f"  {acc}: " + ", ".join(f"{r['taxid']} {r['name']}" for r in rs))
 
     log(f"pack={args.pack} genomes={len(rows)} sources={','.join(sources)}")
     log(f"masked output -> {mask_dir}")
@@ -447,7 +653,9 @@ def main() -> int:
             log("[dry-run]   (crossgroup subjects are built from the full manifest even "
                 "under --only-taxid, so a subset run does not under-mask)")
         log("[dry-run] nothing written")
-        return 0
+        # Reconciliation is read-only, so --dry-run is the cheapest way to ask
+        # whether the pack has a reference nobody has ever masked.
+        return reconcile(all_rows, mask_dir, args)
 
     mask_dir.mkdir(parents=True, exist_ok=True)
     cache.mkdir(parents=True, exist_ok=True)
@@ -536,7 +744,11 @@ def main() -> int:
                  "re-masking. The BEDs are the operative artifact, but the manifest "
                  "is the auditable record D5 cites - re-run with --force to restore it.")
         shutil.rmtree(tmpdir, ignore_errors=True)
-        return 0
+        # Reconcile even here - ESPECIALLY here. "Nothing to do" is the run most
+        # likely to be taken as "the pack is complete", and a reference excluded by
+        # --only-taxid never enters `todo` at all, so this exit can be reached with
+        # the pack missing results it has never had.
+        return reconcile(all_rows, mask_dir, args)
 
     log(f"masking {len(todo)} genome(s), {sum(contig_len.values())} bp total")
 
@@ -658,9 +870,19 @@ def main() -> int:
                 if own:
                     by_reason[src] += total_len(merge_intervals(own))
 
+        # THE FLAG COMES FROM THE MANIFEST, NOT FROM WHAT THIS RUN LOADED.
+        #
+        # `alias_of` is still used - it is what makes a second copy reuse the first's
+        # intervals within one invocation - but it is no longer what DECIDES the flag,
+        # because it is empty whenever the partner was not in scope. A `--only-taxid`
+        # run of one half of a shared pair produced correct numbers and a blank flag,
+        # so the provenance column recorded how the script was called rather than what
+        # is true of the pack.
+        partners = [o for o in shared_acc.get(accession_of.get(stem, ""), [])
+                    if ref_stem(o) != stem]
         flag = ""
-        if stem in alias_of:
-            flag = f"SHARED_SEQUENCE:{alias_of[stem]}"
+        if partners:
+            flag = "SHARED_SEQUENCE:" + ";".join(sorted(ref_stem(o) for o in partners))
         if frac > args.max_masked_fraction:
             flag = f"OVER_MASKED,{flag}" if flag else "OVER_MASKED"
             over_masked.append((taxid, name, frac))
@@ -727,13 +949,19 @@ def main() -> int:
         # 363 BEDs still on disk and exit code 0. `--only-taxid 263` cut it to one
         # row. This is the same truncation already fixed in build_pack_refs.py and
         # build_marker_db.py; it was never fixed here.
-        fresh = {str(row["taxid"]) for row in summary}
+        # KEYED ON THE REFERENCE, NOT ON THE TAXID - which is the same truncation
+        # one level down. A taxid can own MANY references: 11266 owns twelve, 186538
+        # owns three. Rows were dropped from `carried` whenever their taxid appeared
+        # in this run, so masking one of 186538's three files rewrote one row and
+        # deleted the other two, leaving a taxid with three BEDs and one manifest
+        # row. bed_path is unique per reference and is already a column.
+        fresh = {str(row["bed_path"]) for row in summary}
         carried: list[dict] = []
         if mpath.exists():
             try:
                 with mpath.open() as fh:
                     for old in csv.DictReader(fh, delimiter="\t"):
-                        if str(old.get("taxid", "")).strip() not in fresh:
+                        if str(old.get("bed_path", "")).strip() not in fresh:
                             carried.append(old)
             except OSError as exc:
                 die(f"cannot read {mpath} to merge ({exc}). Refusing to continue: "
@@ -776,7 +1004,8 @@ def main() -> int:
             "separately. Nothing is deleted.")
     else:
         warn("no genomes were masked")
-    return 0
+
+    return reconcile(all_rows, mask_dir, args)
 
 
 if __name__ == "__main__":

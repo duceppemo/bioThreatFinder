@@ -141,6 +141,7 @@ def test_selftests(tmp: Path) -> None:
          [sys.executable, BIN / "evaluate_benchmark.py", "--self-test",
           "--scenarios", "x", "--manifest", "x", "--findings", "x", "--out-dir", "x"]),
         ("selftest:build_marker_db", [sys.executable, SCRIPTS / "build_marker_db.py", "--self-test"]),
+        ("selftest:mask_pack_refs", [sys.executable, SCRIPTS / "mask_pack_refs.py", "--self-test"]),
     ]:
         p = run(cmd)
         record(name, p.returncode == 0, p.stderr.strip().splitlines()[-1] if p.returncode else "")
@@ -1134,23 +1135,38 @@ def test_shared_assembly_masking(tmp: Path) -> None:
     and an interval-free BED - byte-identical in meaning to "examined and found clean".
     Both shipped BEDs were in that state until 2026-10-03.
 
-    The invariant is agreement, not a flag: identical sequence must produce identical
-    masking. The SHARED_SEQUENCE flag is deliberately NOT asserted here, because it is
-    set from run-time contig collisions and so only appears when both partners are in
-    the same invocation - a --only-taxid run of one partner produces correct numbers with
-    an empty flag. See docs/STATUS.md.
+    The invariant is agreement: identical sequence must produce identical masking.
+    The SHARED_SEQUENCE flag is now asserted too - it used to be set from RUN-TIME
+    contig collisions, so it only appeared when both partners were in the same
+    invocation and a --only-taxid run of one partner produced correct numbers with an
+    empty flag. It is now derived from the refs manifest's `accession` column, which
+    is an artifact of the pack rather than of how the script was called.
 
     Skips rather than fails when the built artifacts are absent, since the suite is
     meant to run offline on a checkout without /media/8tb.
     """
     import csv as _csv
+    refs_manifest = pathlib.Path(
+        "/media/8tb/bioThreatFinder/packs/human/refs/manifest.tsv")
     mask_manifest = pathlib.Path(
         "/media/8tb/bioThreatFinder/packs/human/refs/masked/mask_manifest.tsv")
     if not mask_manifest.exists():
         skip("shared_assembly:pairs agree", f"no built artifacts at {mask_manifest}")
         return
+    # KEYED ON THE REFERENCE, NOT THE TAXID. This dict used to be {taxid: row}, and
+    # taxid 11266 has TWELVE rows, so eleven of them were silently discarded by the
+    # comprehension - the same taxid-as-key mistake that made the manifest writer
+    # drop rows it was not rewriting. The pairs checked below happen to be
+    # one-reference taxa, so the test passed; it was asserting less than it looked.
     with mask_manifest.open() as fh:
-        rows = {r["taxid"]: r for r in _csv.DictReader(fh, delimiter="\t")}
+        mask_rows = list(_csv.DictReader(fh, delimiter="\t"))
+    rows: dict = {}
+    for r in mask_rows:
+        rows.setdefault(r["taxid"], r)
+    record("shared_assembly:no reference is lost to taxid-keyed bookkeeping",
+           len({r.get("bed_path") for r in mask_rows}) == len(mask_rows),
+           f"{len(mask_rows)} rows, "
+           f"{len({r.get('bed_path') for r in mask_rows})} distinct bed_path")
 
     for a, b, label in (("263", "264", "F. tularensis / F. novicida"),
                         ("620", "622", "Shigella / S. dysenteriae")):
@@ -1173,6 +1189,40 @@ def test_shared_assembly_masking(tmp: Path) -> None:
         record(f"shared_assembly:{label} not vacuous",
                ra.get("genome_bp") not in ("", "0") and rb.get("genome_bp") not in ("", "0"),
                f"genome_bp {ra.get('genome_bp')} / {rb.get('genome_bp')}")
+        # Now assertable, because the flag no longer depends on how the script was
+        # invoked. Each partner must NAME the other: agreement makes the numbers
+        # auditable, the flag is what says the agreement is intentional.
+        record(f"shared_assembly:{label} say so in the flag",
+               "SHARED_SEQUENCE" in (ra.get("flag") or "")
+               and "SHARED_SEQUENCE" in (rb.get("flag") or ""),
+               f"flags {ra.get('flag')!r} / {rb.get('flag')!r}")
+
+    # EVERY PACK REFERENCE MUST HAVE A MASKING RESULT.
+    #
+    # The invariant above is about two references agreeing. This one is about a
+    # reference existing at all, and it is the one that was being violated: on
+    # 2026-10-15 the pack held 371 references and 359 mask BEDs, with all twelve of
+    # the Filoviridae group entry's files unmasked because the group entry (D24/D25)
+    # was added AFTER the masking pass. Six of the twelve had contigs in no BED
+    # anywhere, so coverage_stats scored them against a mask map that simply did not
+    # contain them - indistinguishable from examined-and-clean. Found by hand-diffing
+    # a directory listing against a manifest, which is why it is asserted here and
+    # reconciled by the script itself.
+    if refs_manifest.exists():
+        with refs_manifest.open() as fh:
+            refs = [r for r in _csv.DictReader(fh, delimiter="\t")
+                    if (r.get("path") or "").strip()]
+        have = {pathlib.Path(r["bed_path"]).name for r in mask_rows if r.get("bed_path")}
+        missing = [r for r in refs
+                   if pathlib.Path(r["path"]).name
+                   .replace(".fna.gz", "").replace(".fna", "") + ".mask.bed" not in have]
+        record("shared_assembly:every pack reference has a masking result",
+               not missing,
+               f"{len(missing)} unmasked, e.g. "
+               + ", ".join(sorted({r['name'] for r in missing})[:3]))
+    else:
+        skip("shared_assembly:every pack reference has a masking result",
+             "no refs manifest")
 
 
 def test_exhaustive_absent(tmp: Path) -> None:

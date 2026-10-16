@@ -121,17 +121,32 @@ made their per-source columns agree; `crossgroup_bp` had differed 1,835 vs 2,204
 rows with identical intervals. The original note follows, since the mechanism still applies
 to any future subset run.
 
-**Known gap (historical): the `SHARED_SEQUENCE` flag is empty on all four rows.**
-`mask_pack_refs.py` detects sharing from RUN-TIME contig collisions (`contig_owner` is
-populated as genomes load), so the flag only appears when both partners are masked in the
-same invocation. A `--only-taxid` run of one partner produces correct numbers with no
-flag, which means the manifest's provenance column depends on how the script was invoked -
-the precise shape decisions.md warns about ("a guard that asserts how a script was invoked
-is not a guard"). The numbers are right either way; what is missing is the marker saying
-the agreement is intentional. The durable fix is to derive sharing from the refs manifest's
-`accession` column, which is an artifact rather than run state.
+**Closed 2026-10-16 (D34), and doing it found something larger.**
+`mask_pack_refs.py` used to detect sharing from RUN-TIME contig collisions, so the flag
+only appeared when both partners were masked in the same invocation - the precise shape
+decisions.md warns about ("a guard that asserts how a script was invoked is not a
+guard"). It is now derived from the refs manifest's `accession` column, an artifact
+rather than run state, and the flag is symmetric: each partner names the other.
 
-Then confirm both rows have non-zero `genome_bp` in `masked/mask_manifest.tsv`.
+Reading that column is what surfaced the rest. **The pack has eight shared assemblies,
+not two** - six of them the Filoviridae group entry sharing an assembly with the member
+taxon it was built from, which no `--only-taxid` run could ever have put in one
+invocation because the partners have different taxids. **And twelve references had no
+masking result at all:** every `11266_Filoviridae*` file, because the group entry was
+added to the pack on 2026-10-13/14 and the masking pass ran 2026-10-03/04. Six of the
+twelve had contigs in no BED anywhere, so `coverage_stats` scored them against a mask
+map that did not contain them - indistinguishable from examined-and-clean.
+
+All 371 references now have a result; the twelve came back at 0 bp masked, so the
+practical cost was nil, but that is now measured rather than assumed. The script
+reconciles the whole pack against the manifest on every exit path (including
+`--dry-run` and the "nothing to do" early return) and exits 1 when a reference has no
+result, so this cannot recur silently:
+
+```bash
+python3 scripts/mask_pack_refs.py --pack human \
+        --btf-db /media/8tb/bioThreatFinder --dry-run    # read-only; exits 1 if incomplete
+```
 
 ## A behaviour change to be aware of: unevaluable vaccine and veto checks now cap the tier
 

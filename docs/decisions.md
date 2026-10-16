@@ -2984,3 +2984,125 @@ every sylph hit, and as the thirty-odd before it: *produces an empty or degraded
 result indistinguishable from a clean negative*. It is also the one case the
 CAVEAT in `detect.nf` predicted in writing and then mitigated with a file that
 nothing read.
+
+## D34 — Twelve references had never been masked, and the record of what was examined was keyed on a taxid that owns twelve of them
+
+**Found 2026-10-15 while implementing a different fix**, which is the only reason
+it was found at all. STATUS.md carried a to-do: the `SHARED_SEQUENCE` flag is
+derived from run-time contig collisions, so a `--only-taxid` run of one partner
+produces correct numbers with an empty flag, and "the durable fix is to derive
+sharing from the refs manifest's `accession` column, which is an artifact rather
+than run state."
+
+Doing that required looking at the `accession` column, and the column says
+something the to-do did not anticipate.
+
+### The human pack has eight shared assemblies, not two
+
+| accession | entries |
+|---|---|
+| GCF_000833355.1 | 263 *F. tularensis* / 264 *F. novicida* |
+| GCF_022354085.1 | 622 *S. dysenteriae* / 620 *Shigella* |
+| GCF_000848505.1 | **11266 Filoviridae** / 186538 Zaire ebolavirus |
+| GCF_000854085.1 | **11266 Filoviridae** / 186539 Reston ebolavirus |
+| GCF_000855585.1 | **11266 Filoviridae** / 186540 Sudan ebolavirus |
+| GCF_000857325.3 | **11266 Filoviridae** / 3052505 Marburg marburgvirus |
+| GCF_000889155.1 | **11266 Filoviridae** / 565995 Bundibugyo virus |
+| GCF_000943645.1 | **11266 Filoviridae** / 3052505 Marburg marburgvirus |
+
+Six of the eight are the Filoviridae group entry (D24/D25) sharing an assembly
+with the member taxon it was built from. The run-time detection could never have
+seen any of them: the partners have **different taxids**, so no `--only-taxid`
+invocation puts them in one run, and a full-pack run is the only arrangement in
+which they collide at all.
+
+### And then: twelve references had no masking result whatsoever
+
+Reconciling the refs manifest against the masked directory by hand — 371
+references, 359 BEDs — all twelve of `11266_Filoviridae*` were missing. The
+group entry was added to the pack on 2026-10-13/14; the masking pass ran
+2026-10-03/04 and nothing re-ran it.
+
+Six of the twelve share an assembly with a member taxon, so their contigs appear
+in that member's BED and they were masked by accident. **The other six carry
+contigs that appear in no BED anywhere in the pack:**
+
+| accession | contig | in any BED |
+|---|---|---|
+| GCF_000888475.1 | NC_014372.1 | no |
+| GCF_000896415.1 | NC_016144.1 | no |
+| GCF_003505815.1 | NC_039345.1 | no |
+| GCF_004788975.1 | NC_055175.1 | no |
+| GCF_004788995.1 | NC_055176.1 | no |
+| GCF_013088285.1 | NC_055510.1 | no |
+
+`coverage_stats.load_mask()` reads every BED in the directory into one
+contig→intervals map. A contig that is in no BED is simply absent from that map,
+which is exactly what a contig with no masked intervals looks like. So those six
+references were scored with their full length in the breadth denominator and no
+`reads_in_masked_regions`, and **nothing distinguishes that from "examined and
+found clean."** This is D5's lesson one level up: not an unmasked interval but an
+unmasked reference.
+
+The practical cost here is probably small — every filovirus reference that WAS
+masked came back at 0 bp, and these are 19 kb RNA virus genomes — but "probably
+small" is a statement that could not be made from the artifacts, only from
+re-running them. The whole point of the mask manifest is to not have to.
+
+It also lands on the one entry that exists to catch a divergent agent. D25
+measured the Filoviridae group entry recovering Bundibugyo 3/3 at zero
+specificity cost; its references were the unmasked ones.
+
+### The record was keyed on the wrong thing, in two places
+
+`mask_manifest.tsv` is merged, not rewritten — a fix already made here once,
+after an interrupted run destroyed the record of 296 masked genomes. The merge
+key was **taxid**:
+
+```python
+fresh = {str(row["taxid"]) for row in summary}
+... if old["taxid"] not in fresh: carried.append(old)
+```
+
+A taxid is not a reference. 11266 owns twelve references and 186538 owns three,
+so masking one of 186538's three files writes one fresh row and drops the other
+two: a taxid with three BEDs and one manifest row, exit code 0. The same
+truncation the comment above it says was fixed, surviving one level down because
+the key was never the thing being written. It is now `bed_path`, which is unique
+per reference and was already a column.
+
+`tests/test_pipeline.py` had the identical bug, and it is worth recording because
+it is why the suite was green. The `shared_assembly` group read the manifest into
+`{r["taxid"]: r}` — so eleven of 11266's twelve rows were discarded by the
+comprehension. The pairs it checks are one-reference taxa, so it passed. It was
+asserting less than it appeared to.
+
+### What is now in place
+
+`ref_stem(row)` is the single definition of a reference's identity, and the
+docstring says what it is not. `SHARED_SEQUENCE` is derived from `accession`, so
+it no longer depends on how the script was called. And `reconcile()` compares
+**every** row of the refs manifest against the results on disk, on every exit
+path including `--dry-run` and including the "nothing to do" early return — which
+is the run most likely to be read as "the pack is complete", and the one where a
+`--only-taxid` reference never enters `todo` at all. It names each reference with
+no result, prints the command that would fix it, and returns 1. Blunt on purpose,
+the same way D32's retrieval exit code is: the run did what it was asked and the
+PACK is still incomplete, and an exit code reflecting only the former is how this
+sat unnoticed for twelve days.
+
+A `--self-test` was added (the script had none) covering the three conventions
+offline, with no pack, genome or minimap2: that twelve references under one taxid
+stay distinct, that a shared assembly is found from the manifest without reading
+a genome, and that an **empty** BED counts as examined rather than missing —
+because low-complexity masking finds something in essentially every genome, a BED
+exists either way, and a later change that "fixed" emptiness into absence would
+re-create the confusion this entry is about.
+
+### How it was found, which is the part worth not repeating
+
+By diffing a directory listing against a manifest, by hand, while doing something
+else. Nothing in the pipeline, the suite, the mask manifest or the run logs said
+371 ≠ 359. D32 closes with almost the same sentence about a hand `awk` that
+should not have been necessary; this is the second time, and the remedy is the
+same both times — have the artifact reconcile itself and fail when it cannot.

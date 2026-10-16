@@ -24,7 +24,7 @@ including D30's eleven on the protein query ladder.
 
 | Group | Checks | The behaviour being pinned down |
 |---|---|---|
-| `selftest` | 4 | The self-tests inside `btf_yaml`, `marker_rules`, `evaluate_benchmark`, `build_marker_db` |
+| `selftest` | 5 | The self-tests inside `btf_yaml`, `marker_rules`, `evaluate_benchmark`, `build_marker_db`, `mask_pack_refs` |
 | `tier` | 9 | All six decision paths: true positive, conserved-repeat artifact → `attributed_to_neighbour`, below-floor lead, control-suppressed, control's own background, and a database gap surfacing as `no_reference` rather than a negative |
 | `marker` | 10 | **Identical** alignment evidence yielding four different tiers on marker state alone: both plasmids → confirmed; pXO2 confidently absent → held; pXO2 **untested** → held *and named as a database gap*; *B. cereus* cereulide present → veto. Plus BCG → `vaccine_strain`, and disclosure when a veto could not be evaluated |
 | `wright` | 6 | The Wright et al. composite: genuine call confirms; **96.2% identity held** (genus right, species wrong); 18% mapped fraction held; and a genuinely divergent CCHFV at 89.2% still confirming via the virus-specific floor |
@@ -36,7 +36,7 @@ including D30's eleven on the protein query ladder.
 | `eval` | 9 | The benchmark evaluator's tier→outcome mapping, LoD derivation and expectation checking |
 | `absent` | 6 | `truth_absent` is the full watchlist minus what is genuinely present, so a false positive on an unlisted organism cannot be scored `unlisted` and dropped from specificity (D14) |
 | `platform` | 3 | Every finding carries ITS OWN row's platform; a short-circuiting row cannot inherit the previous one's |
-| `shared_assembly` | 4 | Taxa sharing one NCBI assembly carry identical masking numbers across all eight columns, and neither is the vacuous `genome_bp=0` row |
+| `shared_assembly` | 7 | Taxa sharing one NCBI assembly carry identical masking numbers across all eight columns, and neither is the vacuous `genome_bp=0` row. Each partner now also NAMES the other in `SHARED_SEQUENCE` (D34 - the flag is derived from the manifest's `accession`, so it no longer depends on how the script was invoked). Plus the two invariants whose violation was invisible: **every pack reference has a masking result**, and no reference is lost to taxid-keyed bookkeeping - this test itself read the manifest into `{taxid: row}` and so discarded eleven of taxid 11266's twelve rows |
 | `workflow` | 6 | Every script the workflow invokes is in `bin/` and executable; no shared placeholder for optional inputs; stage 2 does not re-filter on assigned reads |
 | `report` | 7 | **The first coverage `make_report.py` has ever had** - which is part of why an entire input could go missing from it unnoticed (D33). A stage-1 arm that was enabled and produced nothing is bannered above the findings, not buried; the unclassified fraction reaches the page; bracken's by-design exit carries no alarm; and a report rendered without a screen summary omits the section rather than drawing an empty one that reads as all-clear |
 
@@ -73,6 +73,10 @@ One-offs against real data, not automated:
 - **Taxonomy drift**: the previously-default snapshot measured 201 days old, +288,764
   taxids behind current, 2,581 descendant nodes short inside watchlist clades.
 - **Masking**: 20,040,144 bp over 359 genomes (0.349%); 104.4 kb vector across 45 contigs.
+  As of 2026-10-16 all **371** pack references have a result: the twelve Filoviridae
+  group-entry files had never been masked (D34) and came back at 0 bp. The script now
+  reconciles the whole pack and exits non-zero when a reference has no result, so the
+  count no longer has to be checked by hand.
 - **Guards refuse correctly**: GTDB-namespaced Metabuli index rejected; wrong refs base
   rejected; 201-day taxdump rejected by both the resolver and the Kraken2 builder;
   kraken2 2.0.8-beta rejected for lacking `--report-minimizer-data`.
