@@ -259,9 +259,28 @@ def main() -> int:
     #     the run; the cost is that its failure looks exactly like a clean negative.
     #     An enabled arm that produced no report is a HOLE IN THE SCREEN'S COVERAGE,
     #     and a report that does not say so is claiming a search it did not perform.
+    #
+    # THIS STEP MUST NOT BE ABLE TO END THE RUN, AND IT IS NEW ENOUGH TO.
+    #
+    # MAKE_REPORT sets no errorStrategy, so an exception here kills the pipeline
+    # AFTER stage 1, stage 2, the marker tier and scoring have all finished -
+    # trading the actual result for the view of it. That is the exact failure
+    # bf9744d fixed in PAVIAN_EXPORT, and adding a new input to the last step in
+    # the run re-opens it: a truncated or half-written summary makes read_tsv
+    # raise, and a non-numeric unclassified_fraction makes float() raise.
+    #
+    # So the whole thing degrades to a visible note. A report that cannot show the
+    # coverage table is worth having; a run that produces no report because the
+    # coverage table was malformed is not.
     screen_rows: list[dict] = []
+    screen_error = ""
     for sp in args.screen_summary:
-        screen_rows.extend(read_tsv(sp))
+        try:
+            screen_rows.extend(read_tsv(sp))
+        except Exception as exc:                                  # noqa: BLE001
+            screen_error = f"{getattr(sp, 'name', sp)}: {exc}"
+            sys.stderr.write(f"[report] WARNING: cannot read screen summary {sp}: "
+                             f"{exc}; stage-1 coverage will not be shown\n")
     dead_arms = [r for r in screen_rows
                  if r.get("flag") in ("ARM_PRODUCED_NOTHING", "ARM_EMPTY_REPORT")]
     high_unc = [r for r in screen_rows if r.get("flag") == "HIGH_UNCLASSIFIED"]
@@ -319,7 +338,13 @@ def main() -> int:
             "&lsquo;Stage-1 screen coverage&rsquo; below and the screen logs.</div>")
 
     if high_unc:
-        worst = max(float(r.get("unclassified_fraction") or 0) for r in high_unc)
+        def _frac(v) -> float:
+            try:
+                return float(v or 0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        worst = max(_frac(r.get("unclassified_fraction")) for r in high_unc)
         n_s = len({r.get("sample") for r in high_unc})
         parts.append(
             f"<div class='banner'><strong>{n_s} sample(s) left a high fraction of "
@@ -409,6 +434,13 @@ def main() -> int:
     # something went wrong cannot be distinguished from a missing table. Rows that
     # cost the run coverage are sorted to the top; `not_run` rows stay, because an
     # arm the operator disabled is also a limit on what this report can claim.
+    if screen_error and not screen_rows:
+        parts.append(
+            "<h2>Stage-1 screen coverage <span class='pill warn'>?</span></h2>"
+            "<p class='sub'>The per-sample screen summary could not be read, so "
+            "this report cannot say which classifier arms actually ran. Do not read "
+            "the absence of this table as a clean screen &mdash; check "
+            f"<code>screen/</code> directly. ({esc(screen_error)})</p>")
     if screen_rows:
         tone = "warn" if dead_arms else "muted"
         parts.append("<h2>Stage-1 screen coverage <span class='pill "

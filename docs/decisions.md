@@ -3099,6 +3099,29 @@ because low-complexity masking finds something in essentially every genome, a BE
 exists either way, and a later change that "fixed" emptiness into absence would
 re-create the confusion this entry is about.
 
+### Self-review of this change found two more, both of my own making
+
+Worth recording because both are the same category as everything above.
+
+**`reconcile()` compared full paths.** `bed_path` is written absolute, so a pack
+copied to another machine, mounted elsewhere, or masked through a symlink would
+have matched nothing and the function would have reported all 371 references
+unmasked. A false alarm in a check whose only value is being believed is worse
+than no check: the habit it teaches is to stop reading the warning. Compared by
+basename now, and the self-test writes a manifest under a foreign root and
+requires it to reconcile.
+
+**MAKE_REPORT could be killed by its new input.** It sets no `errorStrategy`, so
+an exception there ends the run **after** stage 1, stage 2, the marker tier and
+scoring have all finished — trading the result for the view of it. That is
+precisely what bf9744d fixed in PAVIAN_EXPORT one commit earlier, and wiring a
+new file into the last step of the run re-opened it: `read_tsv` raises on a
+truncated or non-UTF-8 summary, and `float()` raises on a non-numeric
+`unclassified_fraction`. It now degrades to a note **that says the coverage is
+unknown** — not to silence, because an omitted section is what a run with no
+summary at all produces, and a reader cannot tell "no arms to report" from
+"could not read what the arms did".
+
 ### How it was found, which is the part worth not repeating
 
 By diffing a directory listing against a manifest, by hand, while doing something

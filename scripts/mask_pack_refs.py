@@ -378,21 +378,27 @@ def reconcile(all_rows: list[dict], mask_dir: Path, args) -> int:
     finds something in essentially every genome, so a BED exists either way; the
     empty-BED case is a result like any other and is counted as present.
     """
+    # COMPARED BY BASENAME, NOT BY FULL PATH. `bed_path` is written absolute, so
+    # comparing it to a path built from THIS run's --btf-db says "nothing is masked"
+    # for a pack that was copied to another machine, mounted elsewhere, or masked
+    # through a symlink - and this function's whole job is to be believed when it
+    # says a reference has no result. A false alarm here is a loud one (exit 1), but
+    # the habit it would teach is to stop reading the warning.
     mpath = mask_dir / "mask_manifest.tsv"
     known: set[str] = set()
     if mpath.exists():
         try:
             with mpath.open() as fh:
-                known = {str(r.get("bed_path", "")).strip()
-                         for r in csv.DictReader(fh, delimiter="\t")}
+                known = {Path(str(r.get("bed_path", "")).strip()).name
+                         for r in csv.DictReader(fh, delimiter="\t")
+                         if str(r.get("bed_path", "")).strip()}
         except OSError as exc:
             warn(f"cannot read {mpath} to reconcile ({exc}); "
                  "falling back to the BEDs on disk")
     if not known:
-        known = {str(b) for b in mask_dir.glob("*.mask.bed")}
+        known = {b.name for b in mask_dir.glob("*.mask.bed")}
 
-    unmasked = [r for r in all_rows
-                if str(mask_dir / f"{ref_stem(r)}.mask.bed") not in known]
+    unmasked = [r for r in all_rows if f"{ref_stem(r)}.mask.bed" not in known]
     if not unmasked:
         log("")
         log(f"all {len(all_rows)} pack reference(s) have a masking result")
@@ -495,6 +501,19 @@ def self_test() -> int:
         # files written above are empty, so the zero above already proves it; this
         # states it so a future change cannot "fix" emptiness into absence.
         check("an empty BED counts as examined, not as missing", rc == 0)
+
+        # A manifest written on another machine, or before the volume moved, carries
+        # absolute bed_paths that will not match anything built from this run's
+        # --btf-db. Comparing full paths made that look like a wholly unmasked pack.
+        man = mask_dir / "mask_manifest.tsv"
+        with man.open("w") as fh:
+            fh.write("taxid\tbed_path\n")
+            for r in rows:
+                fh.write(f"{r['taxid']}\t/some/other/host/masked/"
+                         f"{ref_stem(r)}.mask.bed\n")
+        rc = reconcile(rows, mask_dir, _A())
+        check("a manifest written under a different root still reconciles",
+              rc == 0, f"rc={rc}")
 
     print()
     if failures:

@@ -2788,6 +2788,43 @@ def test_report_screen_coverage(tmp: Path) -> None:
     record("report:no summary means no section, not an empty one implying all-clear",
            html2.exists() and "Stage-1 screen coverage" not in html2.read_text())
 
+    # A PRESENTATIONAL STEP MUST NOT BE ABLE TO END THE RUN.
+    #
+    # MAKE_REPORT sets no errorStrategy, so an exception here kills the pipeline
+    # AFTER stage 1, stage 2, the marker tier and scoring have all finished - the
+    # actual result traded for the view of it. bf9744d fixed exactly that in
+    # PAVIAN_EXPORT, and wiring a new input into the LAST step of the run re-opens
+    # it. A non-numeric unclassified_fraction is the cheap way in.
+    bad = tmp / "screen_bad.tsv"
+    bad.write_text(cols + "S1\tsample\tillumina\tkraken2\tok\tn/a\tn/a\t"
+                          "not-a-number\tHIGH_UNCLASSIFIED\t\n")
+    html3 = tmp / "r3.html"
+    p = run([sys.executable, BIN / "make_report.py", "--findings", findings,
+             "--screen-summary", bad, "--pack", "human",
+             "--html", html3, "--summary", tmp / "s3.tsv"])
+    record("report:a malformed screen summary degrades, it does not kill the run",
+           p.returncode == 0 and html3.exists(),
+           f"rc={p.returncode}: {p.stderr.strip()[-200:]}")
+
+    # And a file that cannot be parsed at all must SAY so on the page. Silence
+    # there is the same error one level up: a reader takes a missing coverage
+    # table for a screen with nothing to report.
+    unreadable = tmp / "screen_unreadable.tsv"
+    unreadable.write_bytes(b"\xff\xfe\x00binary garbage, not a TSV\x00\xff")
+    html4 = tmp / "r4.html"
+    p = run([sys.executable, BIN / "make_report.py", "--findings", findings,
+             "--screen-summary", unreadable, "--pack", "human",
+             "--html", html4, "--summary", tmp / "s4.tsv"])
+    ok = p.returncode == 0 and html4.exists()
+    doc4 = html4.read_text() if html4.exists() else ""
+    record("report:an unreadable screen summary still produces a report", ok,
+           f"rc={p.returncode}: {p.stderr.strip()[-200:]}")
+    record("report:and the page says the coverage is unknown rather than clean",
+           "could not be read" in doc4 and "clean screen" in doc4,
+           "a missing table reads as 'nothing to report'; the page has to say "
+           "the arms are UNKNOWN, not omit the section as it does when no summary "
+           "was supplied at all")
+
 
 
 CASES = {
