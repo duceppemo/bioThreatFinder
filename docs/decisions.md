@@ -2894,6 +2894,30 @@ argument about what was found. Routing it into the scorer would make "the
 metabuli job crashed" into a term in a tiering decision, which is the wrong kind
 of fact in the wrong place. It goes to MAKE_REPORT and stops there.
 
+### Addendum, same day: `not_applicable` is not a shade of `not_run`
+
+Caught by the restarted `zymo_ont` run, on the first real ONT data this coverage
+table has ever seen, and not by anything in the suite.
+
+Bracken does not run on long reads — its model takes one fixed read length —
+so the workflow drops it from the expected set for a non-Illumina sample. Dropped,
+it fell through to `not_run`, whose note reads "disabled for this run", **on a
+sample whose kraken2 row read `ok` and where nobody had disabled anything.** A
+reader would reasonably conclude an operator had passed `--skip_kraken2`.
+
+This is a smaller version of the same mistake the entry above is about: two
+different answers to "why was this not searched" collapsed into one, where the
+collapsed answer is the misleading one. An operator's choice and a property of
+the platform are not interchangeable. `--inapplicable-arms` now carries the
+second, and naming an arm as both expected and inapplicable is a contradiction in
+the workflow's own description of the run and is rejected rather than resolved to
+either.
+
+Worth noting about how it was found: the suite passed, the unit tests passed, and
+the preview passed. It took real data on the one platform the pipeline had never
+processed. That is the same lesson `benchmarking.md` already records, arriving
+again.
+
 ### Bracken is deliberately exempt from the alarm
 
 It is the one arm whose absence is not worth flagging, and the reason is not

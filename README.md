@@ -606,7 +606,16 @@ question the findings table cannot: *was this actually searched?*
 | `ok` | the arm ran and produced a usable report |
 | `empty_report` | the arm ran and produced a report with no usable rows |
 | `no_output` | the arm was **enabled** and produced nothing |
+| `not_applicable` | the arm cannot apply to this sample's platform |
 | `not_run` | the arm was disabled for this run |
+
+`not_applicable` is separate from `not_run` on purpose. Bracken is the only arm
+that currently takes it: its model is one fixed read length, which ONT violates,
+so it does not run on long reads no matter what the operator asked for. Folded
+into `not_run` it printed "disabled for this run" on an ONT sample whose kraken2
+row read `ok` — inviting the reader to conclude someone had passed
+`--skip_kraken2`. "Nobody asked for it" and "it cannot apply here" are different
+answers to why something was not searched.
 
 `no_output` is the one that matters. METABULI, KRAKENUNIQ and SYLPH each run
 under `errorStrategy 'ignore'`, deliberately, so that one dead arm cannot sink

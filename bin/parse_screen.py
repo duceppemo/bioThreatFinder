@@ -289,6 +289,12 @@ def main() -> int:
                          "missing argument, and the screen summary has to tell them "
                          "apart. Omitting it means every absent arm is reported as "
                          "`not_run`")
+    ap.add_argument("--inapplicable-arms", default="",
+                    help="arms that do not apply to THIS sample's platform, e.g. "
+                         "bracken on ONT (its model takes one fixed read length). "
+                         "Reported as `not_applicable`, which is a property of the "
+                         "platform and NOT the same answer as `not_run`, which is an "
+                         "operator's choice")
     ap.add_argument("--high-unclassified", type=float, default=0.40,
                     help="warn above this unclassified fraction - in a surveillance "
                          "context it is the signature of sequence the databases cannot "
@@ -496,11 +502,20 @@ def main() -> int:
     # a nucleotide one - that taxon is lost and nothing in the report says a search was
     # skipped. A row saying `no_output` is the difference between "we looked and found
     # nothing" and "we did not look".
+    #
+    # `not_applicable` IS NOT A SHADE OF `not_run`, AND CONFLATING THEM MISLEADS.
+    # Found on the first real ONT run: bracken does not run on long reads - its model
+    # takes one fixed read length, which ONT violates - so it fell through to
+    # `not_run`, "disabled for this run", on a run where kraken2 read `ok` and nobody
+    # had disabled anything. A reader would conclude an operator passed
+    # --skip_kraken2. The two answers to "why was this not searched" are an operator
+    # choice and a property of the platform, and they are not interchangeable.
     STATUS_NOTE = {
         "ok": "",
         "empty_report": "the arm ran and produced a report with no usable rows",
         "no_output": "ENABLED but produced no report - an ignored failure, NOT a "
                      "negative result",
+        "not_applicable": "not applicable to this sample's platform",
         "not_run": "disabled for this run",
     }
     # bracken cannot raise a candidate, so its absence loses nothing; and it exits
@@ -510,11 +525,20 @@ def main() -> int:
         "empty_report": "no abundance re-estimation; cannot lose a taxon",
         "no_output": "no abundance re-estimation - routine on a clean negative; "
                      "bracken never raises a candidate, so nothing is lost",
+        "not_applicable": "bracken models one fixed read length, which long reads "
+                          "violate; not run for this platform",
     }
+    ARMS = {"krakenuniq", "kraken2", "bracken", "metabuli", "sylph"}
     expected = {a.strip() for a in (args.expected_arms or "").split(",") if a.strip()}
-    unknown = expected - {"krakenuniq", "kraken2", "bracken", "metabuli", "sylph"}
+    na = {a.strip() for a in (args.inapplicable_arms or "").split(",") if a.strip()}
+    unknown = (expected | na) - ARMS
     if unknown:
-        sys.exit(f"ERROR: --expected-arms names unknown arm(s): {sorted(unknown)}")
+        sys.exit(f"ERROR: --expected-arms/--inapplicable-arms name unknown arm(s): "
+                 f"{sorted(unknown)}")
+    both = expected & na
+    if both:
+        sys.exit(f"ERROR: arm(s) given as both expected and inapplicable: "
+                 f"{sorted(both)}")
 
     # BRACKEN IS THE ONE ARM WHOSE ABSENCE IS NOT AN ALARM, AND THE REASON IS NOT
     # THAT IT MATTERS LESS. It never appears in `support` above - it re-estimates
@@ -536,8 +560,10 @@ def main() -> int:
             status = "ok"
         elif supplied_path:
             status = "empty_report"
+        elif label in expected:
+            status = "no_output"
         else:
-            status = "no_output" if label in expected else "not_run"
+            status = "not_applicable" if label in na else "not_run"
 
         # BLANK, NOT 0, WHERE THE NUMBER DOES NOT EXIST. `0` unclassified out of `0`
         # total reads is a statement about the data; "this arm does not report an

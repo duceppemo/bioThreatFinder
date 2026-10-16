@@ -684,6 +684,36 @@ def test_screen(tmp: Path) -> None:
     record("screen:a run where every arm died still writes its coverage table", ok,
            "no file" if not summ3.exists() else "")
 
+    # `not_applicable` IS NOT A SHADE OF `not_run`. Found on the first real ONT run,
+    # where bracken - which cannot run on long reads, its model taking one fixed read
+    # length - was reported "disabled for this run" on a sample whose kraken2 row read
+    # `ok` and where nobody had disabled anything. A reader would conclude an operator
+    # passed --skip_kraken2. An operator's choice and a property of the platform are
+    # different answers to why something was not searched.
+    summ5 = tmp / "summary_ont.tsv"
+    run([sys.executable, BIN / "parse_screen.py", "--kraken2-report", k2,
+         "--expected-arms", "kraken2", "--inapplicable-arms", "bracken",
+         "--platform", "ont", "--watchlist", wl, "--descendants", desc,
+         "--sample", "S5", "--out", tmp / "cand5.tsv", "--out-summary", summ5])
+    ok = False
+    if summ5.exists():
+        with summ5.open() as fh:
+            s5 = {r["classifier"]: r for r in csv.DictReader(fh, delimiter="\t")}
+        ok = (s5.get("bracken", {}).get("status") == "not_applicable"
+              and "platform" in s5.get("bracken", {}).get("note", "")
+              and s5.get("metabuli", {}).get("status") == "not_run")
+    record("screen:an arm the platform rules out is not reported as switched off", ok,
+           str(s5.get("bracken", {})) if summ5.exists() else "no summary")
+
+    # Naming an arm as both expected and inapplicable is a contradiction in the
+    # workflow's own description of the run, so it must not resolve to one of them.
+    p = run([sys.executable, BIN / "parse_screen.py", "--kraken2-report", k2,
+             "--expected-arms", "kraken2,bracken", "--inapplicable-arms", "bracken",
+             "--watchlist", wl, "--descendants", desc, "--sample", "S6",
+             "--out", tmp / "cand6.tsv", "--out-summary", tmp / "summary6.tsv"])
+    record("screen:an arm cannot be both expected and inapplicable",
+           p.returncode != 0 and "bracken" in p.stderr, p.stderr.strip()[-120:])
+
     # An unknown arm name must fail loudly: it would otherwise be a silently
     # unenforced expectation, which is the same shape as a misspelled assertion.
     p = run([sys.executable, BIN / "parse_screen.py", "--kraken2-report", k2,

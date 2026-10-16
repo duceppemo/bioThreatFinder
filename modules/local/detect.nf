@@ -322,8 +322,11 @@ process PARSE_SCREEN {
     // errorStrategy 'ignore') and an empty report to the same `[]`, so all three
     // reach the script as a missing argument. Without it the screen summary
     // reports an ignored failure as though the arm had been switched off.
+    // na_arms is the arms that cannot apply to THIS sample's platform - bracken on
+    // ONT - which is a different answer from "disabled", and was being given as the
+    // same one until the first real ONT run printed it.
     tuple val(meta), path(ku_report), path(k2_report), path(bracken),
-          path(metabuli), path(sylph), val(expected_arms)
+          path(metabuli), path(sylph), val(expected_arms), val(na_arms)
     path watchlist
     path descendants
 
@@ -357,6 +360,7 @@ process PARSE_SCREEN {
         --platform ${meta.platform} \\
         --min-reads ${params.min_screen_reads} \\
         --expected-arms '${expected_arms}' \\
+        --inapplicable-arms '${na_arms}' \\
         --high-unclassified ${params.high_unclassified} \\
         --out ${meta.id}.candidates.tsv \\
         --out-summary ${meta.id}.screen_summary.tsv \\

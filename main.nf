@@ -453,11 +453,18 @@ workflow {
     // asked for, so it says so and the screen summary can report an ignored failure as
     // a gap in coverage rather than as silence.
     //
-    // bracken is dropped for anything but Illumina HERE rather than in the module,
-    // because this is where that rule is made - BRACKEN is fed a channel filtered on
-    // `meta.platform == 'illumina'` thirty lines up (its model is a fixed read length,
-    // which ONT violates). Expecting it on an ONT sample would report the pipeline's
-    // own deliberate choice as a failed arm.
+    // bracken is handled for non-Illumina HERE rather than in the module, because this
+    // is where that rule is made - BRACKEN is fed a channel filtered on
+    // `meta.platform == 'illumina'` thirty lines up, since its model takes one fixed
+    // read length and ONT violates it. Expecting it on an ONT sample would report the
+    // pipeline's own deliberate choice as a failed arm.
+    //
+    // It is passed as INAPPLICABLE rather than simply dropped, and the distinction is
+    // not cosmetic. Dropping it made it fall through to `not_run`, "disabled for this
+    // run" - which the first real ONT run duly printed on a sample where kraken2 read
+    // `ok` and nobody had disabled anything, inviting the reader to conclude an
+    // operator had passed --skip_kraken2. "Nobody asked for it" and "it cannot apply
+    // here" are different answers to why something was not searched.
     def armsEnabled = []
     if (!SKIP.skip_krakenuniq) armsEnabled << 'krakenuniq'
     if (!SKIP.skip_kraken2)    armsEnabled += ['kraken2', 'bracken']
@@ -465,10 +472,10 @@ workflow {
     if (!SKIP.skip_sylph)      armsEnabled << 'sylph'
 
     ch_screen_in = ch_screen.map { meta, ku, k2, br, mb, sy ->
-        def expected = armsEnabled.findAll {
-            it != 'bracken' || meta.platform == 'illumina'
-        }
-        tuple(meta, ku, k2, br, mb, sy, expected.join(','))
+        def illumina = meta.platform == 'illumina'
+        def expected = armsEnabled.findAll { it != 'bracken' || illumina }
+        def na = (!illumina && armsEnabled.contains('bracken')) ? ['bracken'] : []
+        tuple(meta, ku, k2, br, mb, sy, expected.join(','), na.join(','))
     }
 
     PARSE_SCREEN(ch_screen_in, ch_watchlist.first(), ch_descendants.first())
