@@ -3149,3 +3149,123 @@ else. Nothing in the pipeline, the suite, the mask manifest or the run logs said
 371 ≠ 359. D32 closes with almost the same sentence about a hand `awk` that
 should not have been necessary; this is the second time, and the remedy is the
 same both times — have the artifact reconcile itself and fail when it cannot.
+
+## D35 — The first ONT measurement: specificity is clean, every call is capped by one provisional threshold, and the instrument scored a false FAIL on the only organism it got right
+
+`runs/zymo_ont` completed 2026-10-16 after 15h 36m, 425 CPU-hours. It is the
+first ONT data this project has ever processed end to end, and the only evidence
+the D10 identity floors have ever had.
+
+### It died at 4 h last time for exactly the reason D18 said
+
+`MARKER_SEARCH_AA` on `zymo_log_ont_ERR3152366` took **7h 20m 28s** at 2262% CPU
+(22.6 cores). The old 4 h base default was not marginally short; it was off by
+nearly a factor of two, and the run would have died at the same place. Everything
+else in the run is minutes — COVERAGE_STATS 2–19 m, MARKER_ALIGN_NT 3.5 m,
+MARKER_SEARCH_HMM 12.6 m, PAVIAN_EXPORT 12 s. One process is 97% of the wall
+clock, which is also why its `maxForks = 1` matters.
+
+### Specificity: clean
+
+84 taxa on the truth-absent list. Four produced findings, all held at
+`attributed_to_neighbour`, none reaching `supported` or above:
+
+| taxon | breadth | identity | attributed to |
+|---|---|---|---|
+| *Bacillus anthracis* | 0.0825 | 0.7010 | taxid 1405 — *B. subtilis* IS in the standard |
+| *Shigella dysenteriae* | 0.7810 | 0.8203 | 624 — *E. coli* is present, and Shigella is a pathotype within it |
+| *Candida auris* | 0.0053 | 0.7339 | 45357 |
+| *Cryptococcus gattii* | 0.0012 | 0.7490 | 40410 — *C. deneoformans* |
+
+**Zero false confirmations.** Tier PPV: `supported` 2/2 = 1.000.
+
+### Sensitivity: one of four, and the cap is a single threshold
+
+Four watchlist taxa are genuinely present. *L. monocytogenes* reached
+`supported`; *E. coli*, *S. enterica* and *C. neoformans* were all absorbed by
+`attributed_to_neighbour`, giving that tier a PPV of 0.556 (5 of 9 calls are on
+taxa that are actually there).
+
+The *Listeria* result is the one to read closely, because **the only gate it
+failed was the identity floor**:
+
+```
+read threshold met; failed: identity 0.8579 >= 0.9000 (ont/default)
+marker rule satisfied: lmono_hly and lmono_prfA
+marker_verdict: confirm_requires = TRUE; support_requires = TRUE
+```
+
+breadth 0.9525 / 0.9646, rpm 136,951 / 821,645, neighbour_ratio 9.74 / 12.13,
+both confirmatory markers PRESENT, `confirm_requires` satisfied. With any ONT
+identity floor at or below 0.849 both calls are `confirmed_in_silico`. At 0.90
+**no ONT sample in this run can reach `confirmed_in_silico` on anything** —
+observed identities span 0.70–0.89 across all eleven findings.
+
+### But this does NOT license lowering the floor, and the reason matters
+
+The data is Nicholls et al. 2019 (GridION, ERR3152364/ERR3152366) — **R9.4.1**.
+D10 reasoned the 0.90 default from **R10.4.1 simplex at ~97–98%**. Observed
+0.85–0.89 is exactly what R9.4.1 should give. So the floor was not falsified;
+**this benchmark cannot test it.** Fitting 0.90 down to R9 data would make the
+gate far too permissive for the chemistry it is actually calibrated for, which
+is the unsafe direction.
+
+What the data DOES support, and independently of chemistry, is the pack's own
+stated position that on ONT "read identity CANNOT do that job". Identity does not
+separate true from false here — *E. coli* is present at 0.7999 while the absent
+*S. dysenteriae* reads 0.8203. The gate is not discriminating; it is only
+capping. Discrimination is being done by competitive mapping and the marker
+tier, exactly as `pack.yaml` predicts.
+
+**So the action is not a new number. It is that the ONT arm still has no data on
+the chemistry it is calibrated for**, and `roadmap.md` F3 already records that no
+independent R10.4.1 benchmark of ONT shotgun classifiers exists to borrow from.
+Until R10.4.1 data is run, `confirmed_in_silico` on ONT should be understood as
+unreachable by construction rather than as a high bar.
+
+### The evaluator scored a false FAIL on the one organism the pipeline got right
+
+Scoring this run against the full manifest gave 5 pass / 5 fail, including:
+
+```
+FAIL zymo_even/Listeria monocytogenes min_tier: expected >= supported, observed no finding
+```
+
+*Listeria* was `supported` in the ONT sample. The scenario `zymo_even` spans an
+Illumina sample and an ONT one, `evaluate()` walks the MANIFEST rather than the
+run, and the Illumina partner simply was not in this findings file — so it scored
+`tier=None` → NEGATIVE, `_best()` returned "no finding", and the scenario failed.
+Restricted to the samples the run covered: 6 pass / 4 fail, and those four are
+substantive.
+
+This is not an edge case. Bracken takes one read length per run, so this project
+splits one mock community across `zymo_rl100`, `zymo_rl150` and `zymo_ont` **by
+necessity**, and every such run scored against the whole manifest charges itself
+for the samples it did not contain. The instrument used to judge everything else
+was the thing producing the wrong answer, and it produced it in the worst
+possible place.
+
+`--samplesheet` now names the samples a run analysed; manifest rows outside it
+are excluded from grading and counted, rather than scored as misses. Without it
+the old behaviour is kept and warned about — narrowing to "samples that produced
+findings" would silently reclassify a genuinely clean sample as "not run", which
+is the same conflation in the other direction.
+
+**Third occurrence of one lesson.** The samplesheet is authoritative for which
+samples are CONTROLS, because a spotless control produces no rows. PARSE_SCREEN
+must be told which stage-1 arms were enabled, because a crashed arm and a
+disabled one both produce nothing (D33). And now: a sample that ran and found
+nothing is indistinguishable, in a findings file, from one that never ran. Each
+time, absence of output was read as evidence of absence, and each time only the
+thing that launched the run could say which it was.
+
+### Also measured
+
+The unclassified fraction on real ONT against PlusPF is **0.000525** (EVEN) and
+**0.000136** (LOG) — a floor, not a typical value: ten organisms PlusPF knows
+well, with no host and no environmental diversity. It is the first time the
+number has been measured on long reads here.
+
+*C. neoformans* was not raised at stage 1 at all in the LOG community, where it
+sits at the bottom of a log-distributed standard. That is a genuine miss, at an
+abundance far below any LoD this pipeline claims.

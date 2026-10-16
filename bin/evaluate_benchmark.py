@@ -329,7 +329,8 @@ def load_covers(path: Path | None) -> dict[str, set[str]]:
 
 
 def evaluate(scenarios, manifest, findings, targeted: set[str] | None = None,
-             covers: dict[str, set[str]] | None = None):
+             covers: dict[str, set[str]] | None = None,
+             analysed: set[str] | None = None):
     """Build per-observation records: one per (sample, taxon-of-interest).
 
     `targeted` is the pack's watchlist. A spiked organism that is NOT on the
@@ -340,9 +341,37 @@ def evaluate(scenarios, manifest, findings, targeted: set[str] | None = None,
     are marked `present_untargeted` and excluded from sensitivity and LOD.
     """
     covers = covers or {}
+    # A SAMPLE THE RUN NEVER ANALYSED IS NOT A MISS.
+    #
+    # This loop walks the MANIFEST, so every row in it is graded whether or not the
+    # findings file covers that sample - and a sample with no rows scores tier=None,
+    # outcome=NEGATIVE, which at scenario level makes _best() return "no finding" and
+    # fails a min_tier check. That is not an edge case here: Bracken takes one read
+    # length per run, so this project splits one mock community across zymo_rl100,
+    # zymo_rl150 and zymo_ont BY NECESSITY, and every such run scored against the
+    # whole manifest charges itself for the samples it did not contain.
+    #
+    # Measured on runs/zymo_ont 2026-10-16: the full manifest gave 5 pass / 5 fail,
+    # including "zymo_even/Listeria monocytogenes min_tier: expected >= supported,
+    # observed no finding" - on the one genuinely present notifiable organism the
+    # pipeline had called CORRECTLY, at `supported`, in the ONT sample. The Illumina
+    # partner of that scenario simply was not in the findings file. Restricted to the
+    # samples the run covered: 6 pass / 4 fail, and the four are substantive.
+    #
+    # `analysed` is the set of samples the run actually processed, and it has to come
+    # from outside: a sample that ran and found nothing is indistinguishable, in a
+    # findings file, from one that never ran. That is the same reason the samplesheet
+    # is authoritative for which samples are CONTROLS (a spotless control produces no
+    # rows either) and the same reason PARSE_SCREEN must be told which stage-1 arms
+    # were enabled. Third occurrence of one lesson: absence of output is not evidence
+    # of absence, and only the thing that launched the run can say which it is.
+    skipped_not_run = []
     obs = []
     for m in manifest:
         sample = m["sample"]
+        if analysed is not None and sample not in analysed:
+            skipped_not_run.append(sample)
+            continue
         sid = m.get("scenario_id", "")
         sc = scenarios.get(sid, {})
         present = set(semi(m.get("truth_present")))
@@ -413,6 +442,28 @@ def evaluate(scenarios, manifest, findings, targeted: set[str] | None = None,
                 "unique_reads": (f or {}).get("unique_reads", ""),
                 "reasons": (f or {}).get("reasons", ""),
             })
+
+    if skipped_not_run:
+        sys.stderr.write(
+            f"[bench] {len(skipped_not_run)} manifest sample(s) were NOT in this "
+            f"run and are excluded from grading rather than scored as misses: "
+            f"{', '.join(sorted(skipped_not_run)[:8])}"
+            f"{' ...' if len(skipped_not_run) > 8 else ''}\n")
+    elif analysed is None:
+        # Without --samplesheet the old behaviour is kept, because narrowing to the
+        # samples that produced findings would silently reclassify a genuinely clean
+        # sample as "not run" - which is the same conflation in the other direction.
+        silent = sorted({m["sample"] for m in manifest}
+                        - {s for (s, _t) in findings})
+        if silent:
+            sys.stderr.write(
+                f"[bench] WARNING: {len(silent)} manifest sample(s) produced NO "
+                f"findings at all: {', '.join(silent[:8])}"
+                f"{' ...' if len(silent) > 8 else ''}. Each is graded as a MISS. If "
+                "any of them was simply not part of this run - which is normal here, "
+                "since Bracken forces one read length per run - those grades are "
+                "wrong and the scenario-level verdicts built on them are too. Pass "
+                "--samplesheet <the run's input csv> to exclude them instead.\n")
     return obs
 
 
@@ -1223,6 +1274,14 @@ def main() -> int:
                     help="Nextflow trace file for a variant, so the comparison reports "
                          "cost alongside accuracy. A tool that is one point better for "
                          "1400 GiB and 12 h is a bad trade.")
+    ap.add_argument("--samplesheet", type=Path,
+                    help="the run's input CSV. Names the samples this run actually "
+                         "analysed, so manifest samples it did not contain are "
+                         "EXCLUDED from grading instead of scored as misses. Without "
+                         "it a run covering one platform of a multi-platform scenario "
+                         "fails on its partner's absence - measured on runs/zymo_ont, "
+                         "which reported a false FAIL on the one notifiable organism "
+                         "it had called correctly")
     ap.add_argument("--watchlist", type=Path,
                     help="packs/<pack>/watchlist.resolved.tsv - spiked organisms not on "
                          "the watchlist are excluded from sensitivity/LOD, since the "
@@ -1300,7 +1359,25 @@ def main() -> int:
     trace_paths = split_named(args.variant_trace, "variant-trace")
 
     covers = load_covers(args.descendants)
-    obs = evaluate(scenarios, manifest, findings, targeted, covers)
+
+    analysed: set[str] | None = None
+    if args.samplesheet:
+        if not args.samplesheet.exists():
+            sys.exit(f"ERROR: --samplesheet {args.samplesheet} does not exist")
+        with args.samplesheet.open(newline="") as fh:
+            analysed = {(r.get("sample") or "").strip()
+                        for r in csv.DictReader(fh) if (r.get("sample") or "").strip()}
+        if not analysed:
+            sys.exit(f"ERROR: --samplesheet {args.samplesheet} names no samples. An "
+                     "empty sheet would exclude EVERY manifest row from grading and "
+                     "report a clean benchmark that tested nothing.")
+        unknown = analysed - {m["sample"] for m in manifest}
+        if unknown:
+            sys.stderr.write(
+                f"[bench] WARNING: {len(unknown)} sample(s) in the samplesheet are "
+                f"not in the manifest, so they carry no truth and cannot be scored: "
+                f"{', '.join(sorted(unknown)[:8])}\n")
+    obs = evaluate(scenarios, manifest, findings, targeted, covers, analysed)
     tables = {
         "sensitivity": sensitivity_table(obs),
         "specificity": specificity_table(obs),
@@ -1742,6 +1819,46 @@ def self_test() -> int:
               f"one lead covered nothing, got {r['n_leads_covering_nothing']}")
         check(r["species_recovered"] == "Bundibugyo ebolavirus",
               f"names the species recovered, got {r['species_recovered']!r}")
+
+    # A SAMPLE THE RUN NEVER ANALYSED MUST NOT BE SCORED AS A MISS.
+    #
+    # Measured on runs/zymo_ont 2026-10-16. One scenario, two samples, one platform
+    # per run because Bracken takes a single read length - so the findings file
+    # legitimately covers half the scenario. Graded against the whole manifest, the
+    # absent half made _best() return "no finding" and failed a min_tier check on a
+    # taxon the pipeline had called CORRECTLY in the sample it did run.
+    sc_split = {"split": {"id": "split", "kind": "mock_community",
+                          "expect": [{"taxon": "Listeria monocytogenes",
+                                      "min_tier": "supported"}]}}
+    mf_split = [
+        {"sample": "ont1", "scenario_id": "split", "platform": "ont", "replicate": "1",
+         "level_rpm": "", "role": "sample", "truth_present": "Listeria monocytogenes",
+         "truth_absent": "", "truth_vaccine": ""},
+        {"sample": "ill1", "scenario_id": "split", "platform": "illumina",
+         "replicate": "1", "level_rpm": "", "role": "sample",
+         "truth_present": "Listeria monocytogenes", "truth_absent": "",
+         "truth_vaccine": ""},
+    ]
+    fd_split = {("ont1", "Listeria monocytogenes"): {"tier": "supported"}}
+
+    graded = check_expectations(sc_split, evaluate(sc_split, mf_split, fd_split))
+    check(any(g["result"] == "FAIL" for g in graded),
+          "without the samplesheet the absent sample still fails (old behaviour kept, "
+          "because narrowing to samples that produced findings would reclassify a "
+          "genuinely clean sample as 'not run')")
+
+    graded = check_expectations(
+        sc_split, evaluate(sc_split, mf_split, fd_split, analysed={"ont1"}))
+    check(all(g["result"] == "PASS" for g in graded),
+          f"a sample outside the run is excluded, not failed; got "
+          f"{[(g['taxon'], g['result'], g['observed']) for g in graded]}")
+
+    # And the exclusion must not become a way to pass by testing nothing: a sample
+    # that WAS in the run and produced no row is still a miss.
+    graded = check_expectations(
+        sc_split, evaluate(sc_split, mf_split, fd_split, analysed={"ont1", "ill1"}))
+    check(any(g["result"] == "FAIL" for g in graded),
+          "a sample that ran and produced nothing is still a MISS")
 
     # Duration and memory parsing, which decide the cost half of the comparison.
     check(abs(_dur_min("2h 30m") - 150.0) < 1e-6, f"2h 30m -> 150 min, got {_dur_min('2h 30m')}")

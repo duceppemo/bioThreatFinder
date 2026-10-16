@@ -249,8 +249,22 @@ organisms as single-organism Illumina libraries. 54 GB, md5-verified. Run as `zy
 
 It refuted D12's neighbour-credibility threshold (now defaulted off) and answered D14's
 VERIFY on the tier ladder, cutting real-data false positives 12 → 2 with both simulated
-benchmarks unchanged. See **D18**. `zymo_ont` has NOT completed - it died on a 4 h task
-limit now raised to 24 h, and was not restarted.
+benchmarks unchanged. See **D18**.
+
+**`zymo_ont` COMPLETED 2026-10-16** (15h 36m, 425 CPU-hours) - the first ONT data this
+project has processed end to end. `MARKER_SEARCH_AA` took **7h 20m** on one sample, so
+the old 4 h default was off by nearly a factor of two and the 24 h raise was the right
+size. Specificity is clean: 84 absent taxa, four findings, all held at
+`attributed_to_neighbour`, zero false confirmations. Sensitivity is one of four:
+*L. monocytogenes* `supported`, the other three absorbed by `attributed_to_neighbour`.
+
+**Every ONT call is capped by the D10 identity floor and nothing else.** *Listeria* has
+breadth 0.95, rpm 136,951, neighbour_ratio 9.7 and BOTH confirmatory markers PRESENT -
+its only failed gate is `identity 0.8579 >= 0.9000 (ont/default)`. At 0.90 no ONT sample
+can reach `confirmed_in_silico` at all. **Do not lower the floor on this evidence:** the
+data is Nicholls 2019, which is R9.4.1, and D10's 0.90 was reasoned for R10.4.1 at
+~97-98%. The floor was not falsified; this benchmark cannot test it. The ONT arm still
+has no data on the chemistry it is calibrated for. See **D35**.
 
 ## Still unresolved
 
