@@ -265,7 +265,14 @@ limit now raised to 24 h, and was not restarted.
 - `-profile test` has no sample data (`tests/data/samplesheet_test.csv` is a header
   only). An empty samplesheet is now a hard error rather than a green run that analysed
   nothing, but the profile still needs a real fixture and built databases to be useful.
-- `screen_summary.tsv` is published but reaches neither `SCORE_EVIDENCE` nor
-  `MAKE_REPORT`. For a taxon that *was* raised the classifier columns do travel into
-  `findings.tsv`; but if an `errorStrategy 'ignore'` arm were the only one that would
-  have raised a taxon, it is lost with no trace in the report.
+- ~~`screen_summary.tsv` is published but reaches neither `SCORE_EVIDENCE` nor
+  `MAKE_REPORT`.~~ **Closed 2026-10-15 (D33), and it was worse than this bullet said.**
+  The summary held no row at all for an arm that produced nothing, so the file whose
+  job was to be the trace of an ignored failure recorded that failure as absence -
+  indistinguishable from a *disabled* arm, because `fillMissing()` pads both to `[]`.
+  The workflow now passes `--expected-arms`, the four states are named (`ok`,
+  `empty_report`, `no_output`, `not_run`), and the summary reaches `MAKE_REPORT`,
+  which banners a dead arm. It still does NOT reach `SCORE_EVIDENCE`, deliberately:
+  it is coverage, and must not move a call. The same fix surfaced the unclassified
+  fraction, which had been computed, logged, written and read by nothing - and made
+  `--high_unclassified` reachable, which it had never been.

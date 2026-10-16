@@ -77,6 +77,12 @@ def helpMessage() {
                          agent absent from the index. Treat its calls as leads.
       --skip_sylph       Disable ANI/containment.
       --min_distinct_kmers / --max_kmer_dup   stage-1 k-mer quality flags
+      --high_unclassified 0.40
+                         Unclassified-read fraction above which a sample is
+                         flagged and bannered. UNCALIBRATED, and matrix- and
+                         database-dependent. It is the only signal that
+                         survives a divergent agent being confidently
+                         mislabelled as a known taxon rather than missed.
       --skip_host_depletion
       --skip_markers     Disable marker gating. Taxa whose calls depend on
                          plasmid/toxin loci will then be promoted on alignment
@@ -437,7 +443,35 @@ workflow {
 
     ch_screen = ch_ku.join(ch_k2).join(ch_bracken).join(ch_mb).join(ch_sylph)
 
-    PARSE_SCREEN(ch_screen, ch_watchlist.first(), ch_descendants.first())
+    // WHICH ARMS WERE ENABLED, CARRIED ALONGSIDE THE REPORTS THEMSELVES.
+    //
+    // fillMissing() pads every absent arm to `[]`, which is the right fix for the
+    // basename collision it replaced and which also erases the only distinction that
+    // matters to a reader: a disabled arm, an arm that crashed under its
+    // `errorStrategy 'ignore'`, and an arm that emitted an empty report all arrive at
+    // PARSE_SCREEN as the same missing argument. Only this scope knows which arms were
+    // asked for, so it says so and the screen summary can report an ignored failure as
+    // a gap in coverage rather than as silence.
+    //
+    // bracken is dropped for anything but Illumina HERE rather than in the module,
+    // because this is where that rule is made - BRACKEN is fed a channel filtered on
+    // `meta.platform == 'illumina'` thirty lines up (its model is a fixed read length,
+    // which ONT violates). Expecting it on an ONT sample would report the pipeline's
+    // own deliberate choice as a failed arm.
+    def armsEnabled = []
+    if (!SKIP.skip_krakenuniq) armsEnabled << 'krakenuniq'
+    if (!SKIP.skip_kraken2)    armsEnabled += ['kraken2', 'bracken']
+    if (!SKIP.skip_metabuli)   armsEnabled << 'metabuli'
+    if (!SKIP.skip_sylph)      armsEnabled << 'sylph'
+
+    ch_screen_in = ch_screen.map { meta, ku, k2, br, mb, sy ->
+        def expected = armsEnabled.findAll {
+            it != 'bracken' || meta.platform == 'illumina'
+        }
+        tuple(meta, ku, k2, br, mb, sy, expected.join(','))
+    }
+
+    PARSE_SCREEN(ch_screen_in, ch_watchlist.first(), ch_descendants.first())
 
     // Browsable copies of the stage-1 reports, for Pavian. Takes the same
     // joined channel PARSE_SCREEN reads, so what the user browses is exactly
@@ -603,7 +637,15 @@ workflow {
         SCORE_EVIDENCE.out.findings,
         SEQKIT_STATS.out.stats.map { meta, s -> s }.collect().ifEmpty([]),
         file("${pack.dir}/pack.yaml"),
-        file(params.input, checkIfExists: true)
+        file(params.input, checkIfExists: true),
+        // WHAT STAGE 1 ACTUALLY SEARCHED. Until now this file was published and
+        // nothing more - it reached neither SCORE_EVIDENCE nor MAKE_REPORT - so the
+        // two things only it records never reached a reader: the unclassified
+        // fraction, which is the one signal that survives a divergent agent being
+        // confidently mislabelled as a known taxon, and an enabled arm that produced
+        // no output, which is a hole in the screen's coverage rather than a negative.
+        // It does not reach SCORE_EVIDENCE: it is coverage, and must not move a call.
+        PARSE_SCREEN.out.summary.map { meta, tsv -> tsv }.collect().ifEmpty([])
     )
 }
 

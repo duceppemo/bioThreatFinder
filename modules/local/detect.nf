@@ -242,12 +242,18 @@ process METABULI {
     // A Metabuli failure must not sink the run: Kraken2 is the primary arm (D2) and
     // the screen parser records which classifiers actually produced output.
     //
-    // CAVEAT on that last clause: screen_summary.tsv is the record, and it reaches
-    // neither SCORE_EVIDENCE nor MAKE_REPORT - it is only published. For a taxon that
-    // WAS raised, n_classifiers/classifiers do travel into findings.tsv, so a missing
-    // arm is visible there. But if this arm were the ONLY one that would have raised a
-    // taxon, its ignored failure loses that taxon with no trace in the report at all.
-    // The summary is published beside the results as the compensating record.
+    // That record used to be published and nothing more: screen_summary.tsv reached
+    // neither SCORE_EVIDENCE nor MAKE_REPORT, and it only ever held a row for an arm
+    // that HAD produced output - so an ignored failure here was an absent row, which
+    // is also what a disabled arm looks like. For a taxon that WAS raised,
+    // n_classifiers/classifiers travel into findings.tsv and the missing arm shows up
+    // there; but if this arm were the ONLY one that would have raised a taxon, the
+    // taxon was lost with no trace in the report at all.
+    //
+    // PARSE_SCREEN is now told which arms the workflow enabled, so a crash here is
+    // written as `status=no_output` / `flag=ARM_PRODUCED_NOTHING` rather than as
+    // silence, and the summary reaches MAKE_REPORT, which banners it. The arm can
+    // still fail without sinking the run - it just can no longer do so quietly.
     errorStrategy 'ignore'
 
     input:
@@ -310,14 +316,23 @@ process PARSE_SCREEN {
     // so there is no basename that can collide, and the script tests truthiness instead
     // of comparing a filename against a magic string.
     input:
+    // expected_arms is the list of stage-1 arms the WORKFLOW enabled for THIS
+    // sample. It cannot be inferred from the staged files: fillMissing() pads a
+    // disabled arm, a crashed arm (METABULI and KRAKENUNIQ run with
+    // errorStrategy 'ignore') and an empty report to the same `[]`, so all three
+    // reach the script as a missing argument. Without it the screen summary
+    // reports an ignored failure as though the arm had been switched off.
     tuple val(meta), path(ku_report), path(k2_report), path(bracken),
-          path(metabuli), path(sylph)
+          path(metabuli), path(sylph), val(expected_arms)
     path watchlist
     path descendants
 
     output:
     tuple val(meta), path("${meta.id}.candidates.tsv"), emit: candidates
-    tuple val(meta), path("${meta.id}.screen_summary.tsv"), optional: true, emit: summary
+    // NOT optional: the arms are enumerated from a fixed list, so this file is
+    // written even when every arm died - which is the run it has the most to say
+    // about. An `optional: true` here would let that run produce no row at all.
+    tuple val(meta), path("${meta.id}.screen_summary.tsv"), emit: summary
     path "${meta.id}.screen.log"                      , emit: log
 
     script:
@@ -341,6 +356,8 @@ process PARSE_SCREEN {
         --role ${meta.role} \\
         --platform ${meta.platform} \\
         --min-reads ${params.min_screen_reads} \\
+        --expected-arms '${expected_arms}' \\
+        --high-unclassified ${params.high_unclassified} \\
         --out ${meta.id}.candidates.tsv \\
         --out-summary ${meta.id}.screen_summary.tsv \\
         2> ${meta.id}.screen.log
@@ -498,6 +515,10 @@ process MAKE_REPORT {
     path read_stats
     path pack_yaml
     path samplesheet
+    // Per-sample, per-arm stage-1 coverage: the unclassified fraction and any arm
+    // that was enabled and produced nothing. Reporting only - it reaches MAKE_REPORT
+    // and deliberately not SCORE_EVIDENCE, so it cannot move a call.
+    path screen_summary
 
     output:
     path "biothreatfinder_report.html", emit: html
@@ -505,10 +526,12 @@ process MAKE_REPORT {
 
     script:
     def stats_arg = read_stats ? "--read-stats ${read_stats.join(' ')}" : ''
+    def screen_arg = screen_summary ? "--screen-summary ${screen_summary.join(' ')}" : ''
     """
     make_report.py \\
         --findings ${findings} \\
         ${stats_arg} \\
+        ${screen_arg} \\
         --pack-yaml ${pack_yaml} \\
         ${samplesheet ? "--samplesheet ${samplesheet}" : ''} \\
         --pack ${params.pack} \\

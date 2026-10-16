@@ -587,13 +587,53 @@ bleed are the norm in low-biomass metagenomics, not the exception.
 ```
 results/
   watchlist/        resolved watchlist + resolution log
-  screen/           per-sample stage-1 candidates
+  screen/           per-sample stage-1 candidates + screen_summary.tsv
   confirm/          per-(sample,taxon) coverage metrics
   score_evidence/   findings.tsv  <- the machine-readable result
   report/           biothreatfinder_report.html  <- the human-readable one
   pavian/           stage-1 reports, converted for Pavian, + optional HTML
   pipeline_info/    timeline, trace, DAG
 ```
+
+### What stage 1 searched, and what it could not
+
+`screen/<sample>.screen_summary.tsv` carries one row per sample per classifier
+arm, and the report renders it as **Stage-1 screen coverage**. It answers a
+question the findings table cannot: *was this actually searched?*
+
+| status | meaning |
+|---|---|
+| `ok` | the arm ran and produced a usable report |
+| `empty_report` | the arm ran and produced a report with no usable rows |
+| `no_output` | the arm was **enabled** and produced nothing |
+| `not_run` | the arm was disabled for this run |
+
+`no_output` is the one that matters. METABULI, KRAKENUNIQ and SYLPH each run
+under `errorStrategy 'ignore'`, deliberately, so that one dead arm cannot sink
+the run — and the cost of that choice is that a crash leaves a channel padded
+with the same empty value a *disabled* arm gets. For a taxon some other arm also
+raised, the gap shows up in `findings.tsv`'s `classifiers` column. For a taxon
+only the dead arm would have raised — which is the whole reason for running a
+divergence-catching arm beside a nucleotide one — there was no trace of it
+anywhere. The workflow now tells `parse_screen.py` which arms it enabled, so the
+difference is written down and bannered rather than inferred.
+
+Bracken is the exception: it never raises a candidate of its own, and it exits
+non-zero by design on a report with no reads at the requested level — which is
+what a clean negative control looks like. Its absence is recorded and not
+flagged.
+
+The same table carries the **unclassified fraction** per read-based arm, and
+flags it `HIGH_UNCLASSIFIED` above `--high_unclassified` (0.40). That number is
+uncalibrated and matrix-dependent; set it from your own negatives. It is here
+because of the failure mode in
+[Perseus](https://doi.org/10.1093/bioinformatics/btag687): sequence whose family
+is absent from the database is not reliably left unclassified, it is
+**confidently assigned to the nearest known taxon**, at a false-assignment rate
+approaching 50% on long reads. A novel agent then appears as familiar background
+rather than as a gap, and the unclassified fraction is the only signal that
+survives it. Triage that fraction — assemble it, protein-search it — rather than
+reading a clean findings table as a clean sample.
 
 ### Browsing the screen in Pavian
 

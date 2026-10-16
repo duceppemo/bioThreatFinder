@@ -281,6 +281,14 @@ def main() -> int:
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--out-summary", type=Path,
                     help="per-sample screen summary incl. the unclassified fraction")
+    ap.add_argument("--expected-arms", default="",
+                    help="comma-separated arms the WORKFLOW enabled for this sample "
+                         "(krakenuniq,kraken2,bracken,metabuli,sylph). Only the "
+                         "workflow knows this: a disabled arm, a crashed arm and an "
+                         "arm that emitted an empty report all arrive here as a "
+                         "missing argument, and the screen summary has to tell them "
+                         "apart. Omitting it means every absent arm is reported as "
+                         "`not_run`")
     ap.add_argument("--high-unclassified", type=float, default=0.40,
                     help="warn above this unclassified fraction - in a surveillance "
                          "context it is the signature of sequence the databases cannot "
@@ -469,29 +477,122 @@ def main() -> int:
                 "is contributing nothing. Verify with "
                 "scripts/build_metabuli_db.sh --mode refseq, or pass --skip_metabuli.\n")
 
-    # ---- unclassified fraction, per classifier ----
+    # ---- per-arm screen coverage, and the unclassified fraction ----
+    #
+    # WHAT THIS TABLE IS FOR, AND WHY IT HAS A ROW FOR AN ARM THAT PRODUCED NOTHING
+    #
+    # An arm can be absent here for three reasons that look identical downstream:
+    # it was disabled, it was enabled and crashed (METABULI and KRAKENUNIQ both run
+    # under `errorStrategy 'ignore'`, deliberately, so one arm cannot sink the run),
+    # or it ran and emitted an empty report. The channel pads all three to `[]`, so
+    # by the time this script is invoked the three are the same thing: no --<arm>-report
+    # argument. Only the workflow knows which arms it enabled, so it passes that in
+    # with --expected-arms, and this table names the difference.
+    #
+    # It matters because the ignored failure is otherwise invisible. For a taxon that
+    # WAS raised, n_classifiers/classifiers travel into findings.tsv, so a missing arm
+    # shows up there. But if the dead arm were the only one that would have raised a
+    # taxon - which is the entire point of running a divergence-catching arm alongside
+    # a nucleotide one - that taxon is lost and nothing in the report says a search was
+    # skipped. A row saying `no_output` is the difference between "we looked and found
+    # nothing" and "we did not look".
+    STATUS_NOTE = {
+        "ok": "",
+        "empty_report": "the arm ran and produced a report with no usable rows",
+        "no_output": "ENABLED but produced no report - an ignored failure, NOT a "
+                     "negative result",
+        "not_run": "disabled for this run",
+    }
+    # bracken cannot raise a candidate, so its absence loses nothing; and it exits
+    # non-zero by design on a report with no reads at the requested level, which is
+    # what a clean negative control looks like.
+    BRACKEN_NOTE = {
+        "empty_report": "no abundance re-estimation; cannot lose a taxon",
+        "no_output": "no abundance re-estimation - routine on a clean negative; "
+                     "bracken never raises a candidate, so nothing is lost",
+    }
+    expected = {a.strip() for a in (args.expected_arms or "").split(",") if a.strip()}
+    unknown = expected - {"krakenuniq", "kraken2", "bracken", "metabuli", "sylph"}
+    if unknown:
+        sys.exit(f"ERROR: --expected-arms names unknown arm(s): {sorted(unknown)}")
+
+    # BRACKEN IS THE ONE ARM WHOSE ABSENCE IS NOT AN ALARM, AND THE REASON IS NOT
+    # THAT IT MATTERS LESS. It never appears in `support` above - it re-estimates
+    # abundance over kraken2's report and cannot raise a candidate of its own - so no
+    # taxon can be lost by its dying. It also fails OUTRIGHT, by design, when a report
+    # has no reads at the requested level, which is the correct outcome for a clean
+    # negative control. Flagging that would put a warning on every spotless control in
+    # the run and teach the reader to skip the column. It is still given a row: what is
+    # being recorded here is what was searched, and "bracken did not run" is part of
+    # that even when it is benign.
     summary = []
-    for label, table in (("krakenuniq", ku), ("kraken2", k2), ("metabuli", mb)):
-        if not table:
-            continue
-        unc, tot = unclassified_fraction(table)
-        frac = (unc / tot) if tot else 0.0
+    for label, table, supplied_path, reads_based, raises in (
+            ("krakenuniq", ku, args.krakenuniq_report, True, True),
+            ("kraken2", k2, args.kraken2_report, True, True),
+            ("bracken", br, args.bracken_report, False, False),
+            ("metabuli", mb, args.metabuli_report, True, True),
+            ("sylph", sy, args.sylph_profile, False, True)):
+        if table:
+            status = "ok"
+        elif supplied_path:
+            status = "empty_report"
+        else:
+            status = "no_output" if label in expected else "not_run"
+
+        # BLANK, NOT 0, WHERE THE NUMBER DOES NOT EXIST. `0` unclassified out of `0`
+        # total reads is a statement about the data; "this arm does not report an
+        # unclassified fraction" is a statement about the arm. sylph reports ANI
+        # containment and has no read ledger at all, and bracken re-estimates
+        # abundance over kraken2's report rather than classifying reads itself, so
+        # its unclassified count is kraken2's and reporting it twice would read as
+        # corroboration from an independent arm. Same lesson as
+        # krakenuniq_distinct_kmers above.
+        unc_s = tot_s = frac_s = ""
+        flag = ""
+        if reads_based and status == "ok":
+            unc, tot = unclassified_fraction(table)
+            frac = (unc / tot) if tot else 0.0
+            unc_s, tot_s, frac_s = str(unc), str(tot), f"{frac:.6f}"
+            if frac >= args.high_unclassified:
+                flag = "HIGH_UNCLASSIFIED"
+                sys.stderr.write(
+                    f"[screen] {args.sample}: {label} left {frac:.1%} of reads "
+                    f"UNCLASSIFIED ({unc}/{tot}). In a surveillance context a high "
+                    "unclassified fraction is the signature of sequence the databases "
+                    "cannot name. It is also the only signal that survives the failure "
+                    "mode where a divergent agent is confidently mislabelled as a known "
+                    "taxon rather than missed - so triage this fraction, do not discard "
+                    "it.\n")
+        if status == "no_output" and raises:
+            flag = "ARM_PRODUCED_NOTHING"
+            sys.stderr.write(
+                f"[screen] {args.sample}: WARNING: the {label} arm is ENABLED but "
+                "produced no report for this sample. It runs under errorStrategy "
+                "'ignore', so a crash here does not fail the run - and a taxon only "
+                f"{label} would have raised is now missing from the screen with no "
+                "other trace. This is NOT a clean negative for that arm.\n")
+        elif status == "empty_report" and raises:
+            flag = "ARM_EMPTY_REPORT"
+            sys.stderr.write(
+                f"[screen] {args.sample}: WARNING: the {label} arm produced a report "
+                "with no usable rows. Treat it as not searched rather than as "
+                "negative.\n")
+
         summary.append({
             "sample": args.sample, "role": args.role, "platform": args.platform,
-            "classifier": label, "total_reads": tot, "unclassified_reads": unc,
-            "unclassified_fraction": f"{frac:.6f}",
-            "flag": ("HIGH_UNCLASSIFIED" if frac >= args.high_unclassified else ""),
+            "classifier": label, "status": status,
+            "total_reads": tot_s, "unclassified_reads": unc_s,
+            "unclassified_fraction": frac_s,
+            "flag": flag,
+            "note": (BRACKEN_NOTE.get(status, STATUS_NOTE[status])
+                     if label == "bracken" else STATUS_NOTE[status]),
         })
-        if frac >= args.high_unclassified:
-            sys.stderr.write(
-                f"[screen] {args.sample}: {label} left {frac:.1%} of reads UNCLASSIFIED "
-                f"({unc}/{tot}). In a surveillance context a high unclassified fraction "
-                "is the signature of sequence the databases cannot name. It is also the "
-                "only signal that survives the failure mode where a divergent agent is "
-                "confidently mislabelled as a known taxon rather than missed - so "
-                "triage this fraction, do not discard it.\n")
 
-    if args.out_summary and summary:
+    # Written unconditionally: the arms are enumerated from a fixed list, so this
+    # table exists even for a sample where every arm died. `if summary` used to guard
+    # it, and the one run where the file would have said the most - nothing produced
+    # output - is exactly the run where it was not written at all.
+    if args.out_summary:
         args.out_summary.parent.mkdir(parents=True, exist_ok=True)
         with args.out_summary.open("w", newline="") as fh:
             w = csv.DictWriter(fh, fieldnames=list(summary[0]), delimiter="\t")

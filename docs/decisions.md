@@ -2814,3 +2814,149 @@ when every marker recovered, as happened here. The alternative considered was to
 fire only when a marker ended non-`built`, and the data rejects it: a marker can
 end `built` and short, which is the case that most needs flagging and the one
 that refinement would have hidden.
+
+## D33 — An arm that was enabled and died looked exactly like an arm that was switched off, and the one signal that survives a mislabelled novel agent never reached the page
+
+**Found 2026-10-15, by reading a CAVEAT the code had written about itself.**
+`modules/local/detect.nf` carried this above METABULI's `errorStrategy 'ignore'`:
+
+> screen_summary.tsv is the record, and it reaches neither SCORE_EVIDENCE nor
+> MAKE_REPORT — it is only published. [...] if this arm were the ONLY one that
+> would have raised a taxon, its ignored failure loses that taxon with no trace
+> in the report at all. The summary is published beside the results as the
+> compensating record.
+
+The compensating record did not compensate, for two independent reasons, and the
+second is worse than the first.
+
+### 1. The record could not record the thing it existed for
+
+`fillMissing()` pads an absent arm with `[]`. That was the right fix for the
+basename collision it replaced (two padded arms sharing `assets/NO_FILE` killed
+PARSE_SCREEN with "input file name collision"), and it has a side effect nobody
+wrote down: by the time `parse_screen.py` runs, **three different events are one
+state**. A disabled arm, an arm that crashed under `errorStrategy 'ignore'`, and
+an arm that emitted an empty report all arrive as the same missing `--<arm>-report`
+argument.
+
+The summary loop then made it worse by skipping what it could not measure:
+
+```python
+for label, table in (("krakenuniq", ku), ("kraken2", k2), ("metabuli", mb)):
+    if not table:
+        continue
+```
+
+So the failure the CAVEAT describes produced **no row at all** — and neither did
+a disabled arm. The file whose entire job was to be the trace of an ignored
+failure recorded that failure as absence, which is the same thing it recorded
+for a deliberate configuration choice. `if args.out_summary and summary:` closed
+the circle: on the one run where every arm died, the file was not written at
+all.
+
+Only the workflow knows which arms it asked for, so it now says so
+(`--expected-arms`), and the four states are named: `ok`, `empty_report`,
+`no_output`, `not_run`. Every arm gets a row whether or not it misbehaved,
+because an answer printed only when something is wrong cannot be told apart from
+a missing table.
+
+### 2. The unclassified fraction was computed, logged, written, and never read
+
+This is the larger loss, and it was not in the CAVEAT. `unclassified_fraction()`
+carries a fourteen-line docstring explaining that it exists because of Perseus
+(Bioinformatics 2026, doi:10.1093/bioinformatics/btag687): sequence from a family
+absent from the database is not left unclassified, it is **confidently assigned
+to the nearest known taxon**, approaching a 50% false-assignment rate on long
+reads. The docstring's own words are that the unclassified fraction "is the only
+signal that survives that failure mode, so it is reported on every sample rather
+than thrown away."
+
+It was thrown away. It went to `screen_summary.tsv` and to stderr, and
+`screen_summary.tsv` reached nothing. An analyst reading the HTML report — the
+artifact this project treats as the deliverable, on the stated principle that "a
+caveat belongs on the finding and in the HTML, not in terminal output nobody
+keeps" — had no way to see it. The shape is the one `roadmap.md` §0b calls THE
+novel-agent failure mode, and the mitigation was built, tested, and then not
+plugged in.
+
+`--high_unclassified` compounded it: `parse_screen.py` has had the argument since
+the function was written, and **the process never passed it**, so the 0.40
+threshold could not be changed without editing the script. It is now a parameter,
+and documented as uncalibrated — the right value depends on matrix and database,
+and a clinical sample against PlusPF is not comparable to an environmental one.
+
+### Why this does not reach SCORE_EVIDENCE
+
+It is coverage, not evidence, and it must not move a call. A high unclassified
+fraction is a reason to look harder at a sample, not a reason to raise or lower
+a tier on any taxon in it; a dead arm is a hole in what was searched, not an
+argument about what was found. Routing it into the scorer would make "the
+metabuli job crashed" into a term in a tiering decision, which is the wrong kind
+of fact in the wrong place. It goes to MAKE_REPORT and stops there.
+
+### Bracken is deliberately exempt from the alarm
+
+It is the one arm whose absence is not worth flagging, and the reason is not
+that it matters less. It never appears in `support`, so it cannot raise a
+candidate and no taxon can be lost by its dying; and it **exits non-zero by
+design** when a report has no reads at the requested level, which is the correct
+outcome for a clean negative control. Flagging that would put a warning on every
+spotless control in the run and teach the reader to skip the column. It still
+gets a row — the question the table answers is what was searched — with a note
+saying the absence is routine.
+
+### What the report says now
+
+A dead enabled arm and a `HIGH_UNCLASSIFIED` sample each raise a banner above
+the findings, where a reader meets them before deciding the page is clean, and
+both are detailed in a **Stage-1 screen coverage** table that lists every arm for
+every sample with the failures sorted to the top.
+
+### Verified
+
+`tests/test_pipeline.py` gained a `report` group — **make_report.py had no test
+coverage at all before this**, which is part of why a whole input could be
+missing from it unnoticed — and eight new assertions in `screen`. They pin the
+distinctions that are easy to lose again: an arm nobody asked for is `not_run`
+and never a failure; an enabled arm that produced nothing is `no_output` with
+`ARM_PRODUCED_NOTHING`; bracken's absence is recorded without a flag; an arm with
+no read ledger reports **blank, not `0`** (`0` unclassified of `0` total is a
+claim about the data, and sylph has no read ledger while bracken's would be
+kraken2's counted twice); a run where every arm died still writes its table; a
+misspelled `--expected-arms` value fails rather than becoming a silently
+unenforced expectation; and a report rendered without a summary omits the section
+rather than drawing an empty one that reads as all-clear.
+
+Beyond the suite: `nextflow run -preview` on the plumbing samplesheet to check
+the channel arity, and two sylph-only end-to-end runs on the plumbing positive
+control — deliberately off the 123 GB PlusPF index, which would have put the box
+back under the `systemd-oomd` pressure trap recorded in STATUS.md.
+
+### The failure, reproduced end to end rather than argued
+
+The second run pointed `--sylph_db` at a file sylph cannot read, so the only
+enabled arm died **through the real channel topology**: `SYLPH_PROFILE` exited 1,
+`errorStrategy 'ignore'` swallowed it, `fillMissing()` padded it to `[]`, and the
+run continued to MAKE_REPORT and exited having analysed nothing.
+
+The input is the plumbing positive control: 2M reads carrying *Y. pestis* at
+5,000 RPM, whose scenario file says any outcome other than a confirmation is a
+configuration fault.
+
+| | old wiring | now |
+|---|---|---|
+| `findings.tsv` | header only, 0 rows | header only, 0 rows |
+| report | every tier renders "None."; the only banner is the unrelated "No negative control" | banner: *"A stage-1 classifier was enabled and produced nothing: sylph on 1 sample(s)"* |
+| mention of the dead arm anywhere in the HTML | **none** | banner + a `Stage-1 screen coverage` row, `no_output` / `ARM_PRODUCED_NOTHING` |
+| `screen_summary.tsv` | not written — `if summary` skipped the arm that produced nothing, leaving nothing to write | 5 rows, 4 `not_run` and 1 `no_output` |
+
+Re-rendering that same `findings.tsv` with the summary withheld reproduces the
+old page exactly: zero occurrences of "sylph", of "coverage", or of any word
+about an arm having failed. A clean screening report on a sample with a
+notifiable organism in it at 5,000 RPM, and the run exited reporting success.
+
+This is the same shape as the stage-2 read-count filter that silently discarded
+every sylph hit, and as the thirty-odd before it: *produces an empty or degraded
+result indistinguishable from a clean negative*. It is also the one case the
+CAVEAT in `detect.nf` predicted in writing and then mitigated with a file that
+nothing read.

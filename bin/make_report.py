@@ -225,6 +225,10 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--findings", required=True, type=Path)
     ap.add_argument("--read-stats", nargs="*", type=Path, default=[])
+    ap.add_argument("--screen-summary", nargs="*", type=Path, default=[],
+                    help="per-sample stage-1 coverage from parse_screen.py: the "
+                         "unclassified fraction per arm, and any arm that was enabled "
+                         "and produced nothing")
     ap.add_argument("--samplesheet", type=Path,
                     help="authoritative source of sample roles; see has_control")
     ap.add_argument("--pack-yaml", type=Path, default=None)
@@ -238,6 +242,30 @@ def main() -> int:
     args = ap.parse_args()
 
     findings = read_tsv(args.findings)
+
+    # STAGE-1 COVERAGE: what was searched, not what was found.
+    #
+    # Two things live only in this file, and until it was wired into this script both
+    # reached the published screen/ directory and no further:
+    #   * the unclassified fraction per arm. Perseus (Bioinformatics 2026) measured
+    #     that sequence from a family absent from the database is not left
+    #     unclassified but CONFIDENTLY ASSIGNED to a known taxon, approaching a 50%
+    #     false-assignment rate on long reads. The novel agent is then not missed, it
+    #     is mislabelled as background and dismissed. A high unclassified fraction is
+    #     the only signal that survives that, so it belongs on the page an analyst
+    #     reads rather than in a TSV they would have to know to open.
+    #   * an arm that was ENABLED and produced nothing. METABULI, KRAKENUNIQ and
+    #     SYLPH run under `errorStrategy 'ignore'` so that one dead arm cannot sink
+    #     the run; the cost is that its failure looks exactly like a clean negative.
+    #     An enabled arm that produced no report is a HOLE IN THE SCREEN'S COVERAGE,
+    #     and a report that does not say so is claiming a search it did not perform.
+    screen_rows: list[dict] = []
+    for sp in args.screen_summary:
+        screen_rows.extend(read_tsv(sp))
+    dead_arms = [r for r in screen_rows
+                 if r.get("flag") in ("ARM_PRODUCED_NOTHING", "ARM_EMPTY_REPORT")]
+    high_unc = [r for r in screen_rows if r.get("flag") == "HIGH_UNCLASSIFIED"]
+
     control_samples: set[str] = set()
     if args.samplesheet and args.samplesheet.exists():
         with args.samplesheet.open(newline="") as fh:
@@ -275,6 +303,32 @@ def main() -> int:
             "Reagent, index-hopping and carry-over contamination cannot be excluded "
             "for any finding below. Include a no-template control in future runs.</div>"
         )
+
+    if dead_arms:
+        by_arm: dict[str, set] = defaultdict(set)
+        for r in dead_arms:
+            by_arm[r.get("classifier", "?")].add(r.get("sample", "?"))
+        detail = "; ".join(f"{a} on {len(ss)} sample(s)"
+                           for a, ss in sorted(by_arm.items()))
+        parts.append(
+            "<div class='banner'><strong>A stage-1 classifier was enabled and "
+            f"produced nothing: {esc(detail)}.</strong> These arms run so that one "
+            "failure cannot sink the run, which means a failure here is silent. "
+            "Any organism that only the missing arm would have raised is absent "
+            "from this report, and its absence is NOT a negative result. See "
+            "&lsquo;Stage-1 screen coverage&rsquo; below and the screen logs.</div>")
+
+    if high_unc:
+        worst = max(float(r.get("unclassified_fraction") or 0) for r in high_unc)
+        n_s = len({r.get("sample") for r in high_unc})
+        parts.append(
+            f"<div class='banner'><strong>{n_s} sample(s) left a high fraction of "
+            f"reads unclassified (up to {worst:.0%}).</strong> Sequence whose family "
+            "is absent from the database is not reliably left unclassified - it is "
+            "frequently assigned, with confidence, to the nearest known taxon, so a "
+            "novel agent appears as familiar background rather than as a gap. The "
+            "unclassified fraction is the signal that survives that, and it should "
+            "be triaged (assembled, protein-searched) rather than discarded.</div>")
 
     parts.append(f"""<div class="meta">
 <div class="card"><div class="k">Laboratory</div><div class="v">{esc(args.lab)}</div></div>
@@ -348,6 +402,48 @@ def main() -> int:
         parts.append(f"<div class='scroll'><table><thead><tr>{head}</tr></thead>"
                      f"<tbody>{body}</tbody></table></div>")
 
+    # WHAT STAGE 1 SEARCHED, PER SAMPLE AND PER ARM.
+    #
+    # Every enabled arm gets a row even when it behaved, because the question this
+    # table answers is "was this searched?", and an answer that is only printed when
+    # something went wrong cannot be distinguished from a missing table. Rows that
+    # cost the run coverage are sorted to the top; `not_run` rows stay, because an
+    # arm the operator disabled is also a limit on what this report can claim.
+    if screen_rows:
+        tone = "warn" if dead_arms else "muted"
+        parts.append("<h2>Stage-1 screen coverage <span class='pill "
+                     f"{tone}'>{len(dead_arms)}</span></h2>")
+        blurb = ("One row per sample per classifier arm. `no_output` means the arm "
+                 "was enabled and produced nothing - treat it as not searched, not "
+                 "as negative. The unclassified fraction is reported only for the "
+                 "arms that classify reads themselves.")
+        parts.append(f"<p class='sub'>{esc(blurb)}</p>")
+        keys = ["sample", "role", "platform", "classifier", "status", "total_reads",
+                "unclassified_reads", "unclassified_fraction", "flag", "note"]
+        keys = [k for k in keys if k in screen_rows[0]]
+        head = "".join(f"<th>{esc(k.replace('_', ' '))}</th>" for k in keys)
+        num = {"total_reads", "unclassified_reads", "unclassified_fraction"}
+
+        def _rank(r: dict) -> tuple:
+            return ({"ARM_PRODUCED_NOTHING": 0, "ARM_EMPTY_REPORT": 1,
+                     "HIGH_UNCLASSIFIED": 2}.get(r.get("flag", ""), 3),
+                    r.get("sample", ""), r.get("classifier", ""))
+
+        body = ""
+        for r in sorted(screen_rows, key=_rank):
+            cells = ""
+            for k in keys:
+                cls = "num" if k in num else ("note" if k == "note" else "")
+                v = r.get(k, "")
+                if k == "flag" and v:
+                    pill = "crit" if v != "HIGH_UNCLASSIFIED" else "warn"
+                    cells += f"<td><span class='pill {pill}'>{esc(v)}</span></td>"
+                else:
+                    cells += f"<td class=\"{cls}\">{esc(v) if v != '' else '-'}</td>"
+            body += f"<tr>{cells}</tr>"
+        parts.append(f"<div class='scroll'><table><thead><tr>{head}</tr></thead>"
+                     f"<tbody>{body}</tbody></table></div>")
+
     stats_rows = []
     for p in args.read_stats:
         stats_rows.extend(read_tsv(p))
@@ -412,6 +508,17 @@ data alone - read the taxon caveats column.</p>
     )
     if not has_control:
         sys.stderr.write("[report] WARNING: no negative control in this run\n")
+    for r in sorted(dead_arms, key=lambda r: (r.get("sample", ""),
+                                              r.get("classifier", ""))):
+        sys.stderr.write(
+            f"[report] WARNING: {r.get('sample')}: the {r.get('classifier')} arm was "
+            f"enabled and produced {'an empty report' if r.get('flag') == 'ARM_EMPTY_REPORT' else 'nothing'}. "
+            "Anything only that arm would have raised is missing from this report "
+            "and is not a negative.\n")
+    if high_unc:
+        sys.stderr.write(
+            f"[report] WARNING: {len({r.get('sample') for r in high_unc})} sample(s) "
+            "flagged HIGH_UNCLASSIFIED - triage the unclassified fraction\n")
     return 0
 
 

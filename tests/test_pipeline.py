@@ -601,8 +601,97 @@ def test_screen(tmp: Path) -> None:
                s.get("kraken2", {}).get("flag") == "HIGH_UNCLASSIFIED"
                and s.get("kraken2", {}).get("unclassified_fraction", "").startswith("0.55"),
                str(s.get("kraken2", {})))
+        # Not passed --expected-arms, so no absent arm may be called a failure.
+        record("screen:an arm nobody asked for is `not_run`, never a failure",
+               all(s.get(a, {}).get("status") == "not_run"
+                   and not s.get(a, {}).get("flag")
+                   for a in ("metabuli", "sylph", "bracken")),
+               str({a: s.get(a, {}).get("status") for a in
+                    ("metabuli", "sylph", "bracken")}))
     else:
         record("screen:unclassified fraction is reported and flagged", False, "no summary")
+        record("screen:an arm nobody asked for is `not_run`, never a failure",
+               False, "no summary")
+
+    # AN ENABLED ARM THAT PRODUCED NOTHING IS A HOLE IN COVERAGE, NOT A NEGATIVE.
+    #
+    # METABULI, KRAKENUNIQ and SYLPH run under errorStrategy 'ignore' so one dead arm
+    # cannot sink the run, and fillMissing() then pads the crash to the same `[]` a
+    # DISABLED arm gets. By the time parse_screen.py runs, "skipped", "crashed" and
+    # "emitted an empty report" are one state: no argument. Only the workflow knows
+    # which it was, so it passes --expected-arms - and if that is ever dropped from
+    # the process the difference silently disappears again, which is what this pins.
+    summ2 = tmp / "summary_dead.tsv"
+    empty_mb = tmp / "mb_empty.tsv"
+    empty_mb.write_text("")
+    p = run([sys.executable, BIN / "parse_screen.py", "--kraken2-report", k2,
+             "--metabuli-report", empty_mb,
+             "--expected-arms", "kraken2,bracken,metabuli,sylph",
+             "--watchlist", wl, "--descendants", desc,
+             "--sample", "S2", "--out", tmp / "cand2.tsv", "--out-summary", summ2])
+    if summ2.exists():
+        with summ2.open() as fh:
+            s2 = {r["classifier"]: r for r in csv.DictReader(fh, delimiter="\t")}
+        record("screen:an enabled arm that produced nothing is named, not absent",
+               s2.get("sylph", {}).get("status") == "no_output"
+               and s2.get("sylph", {}).get("flag") == "ARM_PRODUCED_NOTHING",
+               str(s2.get("sylph", {})))
+        record("screen:an enabled arm's empty report is not a clean negative",
+               s2.get("metabuli", {}).get("status") == "empty_report"
+               and s2.get("metabuli", {}).get("flag") == "ARM_EMPTY_REPORT",
+               str(s2.get("metabuli", {})))
+        # bracken cannot raise a candidate and exits non-zero by design on a report
+        # with no reads at the requested level - which is a CLEAN NEGATIVE CONTROL.
+        # Flagging that would put a warning on every spotless control in the run.
+        record("screen:bracken missing is recorded but not flagged",
+               s2.get("bracken", {}).get("status") == "no_output"
+               and not s2.get("bracken", {}).get("flag"),
+               str(s2.get("bracken", {})))
+        # `0` unclassified out of `0` total is a claim about the data; sylph has no
+        # read ledger at all and bracken re-estimates over kraken2's, so reporting
+        # either would read as corroboration from an independent arm.
+        record("screen:an arm with no read ledger reports blank, not zero",
+               all(s2.get(a, {}).get("unclassified_fraction") == ""
+                   and s2.get(a, {}).get("total_reads") == ""
+                   for a in ("sylph", "bracken")),
+               str({a: s2.get(a, {}) for a in ("sylph", "bracken")}))
+        record("screen:every arm gets a row, so coverage is readable as a table",
+               set(s2) == {"krakenuniq", "kraken2", "bracken", "metabuli", "sylph"},
+               str(sorted(s2)))
+    else:
+        for t in ("an enabled arm that produced nothing is named, not absent",
+                  "an enabled arm's empty report is not a clean negative",
+                  "bracken missing is recorded but not flagged",
+                  "an arm with no read ledger reports blank, not zero",
+                  "every arm gets a row, so coverage is readable as a table"):
+            record(f"screen:{t}", False, "no summary written")
+
+    # A summary is written even when EVERY arm died, which is the run it has the most
+    # to say about. The writer used to be guarded by `if summary`, so that run
+    # produced no file at all and the gap was indistinguishable from a missing step.
+    summ3 = tmp / "summary_allfail.tsv"
+    run([sys.executable, BIN / "parse_screen.py",
+         "--expected-arms", "kraken2,metabuli,sylph",
+         "--watchlist", wl, "--descendants", desc,
+         "--sample", "S3", "--out", tmp / "cand3.tsv", "--out-summary", summ3])
+    ok = False
+    if summ3.exists():
+        with summ3.open() as fh:
+            s3 = [r for r in csv.DictReader(fh, delimiter="\t")]
+        ok = (len(s3) == 5
+              and {r["classifier"] for r in s3 if r["flag"] == "ARM_PRODUCED_NOTHING"}
+              == {"kraken2", "metabuli", "sylph"})
+    record("screen:a run where every arm died still writes its coverage table", ok,
+           "no file" if not summ3.exists() else "")
+
+    # An unknown arm name must fail loudly: it would otherwise be a silently
+    # unenforced expectation, which is the same shape as a misspelled assertion.
+    p = run([sys.executable, BIN / "parse_screen.py", "--kraken2-report", k2,
+             "--expected-arms", "kraken2,krakn2", "--watchlist", wl,
+             "--descendants", desc, "--sample", "S4", "--out", tmp / "cand4.tsv",
+             "--out-summary", tmp / "summary4.tsv"])
+    record("screen:a misspelled expected arm is rejected, not ignored",
+           p.returncode != 0 and "krakn2" in p.stderr, p.stderr.strip()[-120:])
 
 
 # ---------------------------------------------------------------------------
@@ -2544,6 +2633,83 @@ def test_supra_specific_entries_are_leads(tmp: Path) -> None:
            supra == ["Filoviridae"], f"capped entries: {supra}")
 
 
+def test_report_screen_coverage(tmp: Path) -> None:
+    """The report must say what stage 1 FAILED to search, not only what it found.
+
+    Nothing in this suite exercised make_report.py before, and the thing it was
+    silently not doing is the reason: screen_summary.tsv was published to the
+    results directory and read by nothing. The two facts that live only in it are
+    the two a reader most needs in order not to over-read a clean page -
+
+      * an arm that was ENABLED and produced nothing. METABULI, KRAKENUNIQ and
+        SYLPH run under `errorStrategy 'ignore'` so that one dead arm cannot sink
+        the run; the cost is that its failure is indistinguishable from a clean
+        negative. For a taxon something else also raised, the missing arm shows up
+        in findings.tsv's `classifiers` column - but a taxon ONLY the dead arm
+        would have raised leaves no trace anywhere, and a report that does not say
+        an arm died is claiming a search that did not happen.
+
+      * the unclassified fraction. Perseus (Bioinformatics 2026) measured that
+        sequence from a family absent from the database is not left unclassified
+        but CONFIDENTLY ASSIGNED to a known taxon, approaching 50% on long reads.
+        The novel agent this tool exists to catch is then not missed; it is
+        mislabelled as background. The unclassified fraction is the only signal
+        that survives that, so it has to be on the page.
+    """
+    findings = tmp / "findings.tsv"
+    findings.write_text(
+        "sample\trole\tplatform\ttier\ttaxid\ttaxon\tunique_reads\treasons\n"
+        "S1\tsample\tillumina\tconfirmed_in_silico\t632\tYersinia pestis\t5000\tgates met\n")
+
+    cols = ("sample\trole\tplatform\tclassifier\tstatus\ttotal_reads\t"
+            "unclassified_reads\tunclassified_fraction\tflag\tnote\n")
+    screen = tmp / "screen_summary.tsv"
+    screen.write_text(cols + "".join([
+        "S1\tsample\tillumina\tkraken2\tok\t1000000\t550000\t0.550000\tHIGH_UNCLASSIFIED\t\n",
+        "S1\tsample\tillumina\tmetabuli\tno_output\t\t\t\tARM_PRODUCED_NOTHING\tenabled, no report\n",
+        "S1\tsample\tillumina\tbracken\tno_output\t\t\t\t\troutine on a clean negative\n",
+        "S1\tsample\tillumina\tsylph\tok\t\t\t\t\t\n",
+        "S1\tsample\tillumina\tkrakenuniq\tnot_run\t\t\t\t\tdisabled for this run\n",
+    ]))
+
+    html, summ = tmp / "r.html", tmp / "s.tsv"
+    p = run([sys.executable, BIN / "make_report.py", "--findings", findings,
+             "--screen-summary", screen, "--pack", "human",
+             "--html", html, "--summary", summ])
+    if not html.exists():
+        record("report:renders with a screen summary", False, p.stderr[-300:])
+        return
+    doc = html.read_text()
+    record("report:renders with a screen summary", True)
+
+    record("report:a dead arm is bannered at the top, not buried in a table",
+           "produced nothing: metabuli" in doc
+           and "NOT a negative result" in doc
+           and doc.index("produced nothing: metabuli") < doc.index("Stage-1 screen"),
+           "the banner is what an analyst reads before deciding the page is clean")
+    record("report:the unclassified fraction reaches the page",
+           "0.550000" in doc and "HIGH_UNCLASSIFIED" in doc)
+    record("report:a high unclassified fraction is bannered",
+           "unclassified (up to 55%)" in doc, doc[doc.find("high fraction"):][:120])
+    record("report:every arm appears in the coverage table",
+           all(a in doc for a in ("kraken2", "metabuli", "bracken", "sylph",
+                                  "krakenuniq")))
+    record("report:bracken's routine absence carries no alarm pill",
+           "pill crit'>ARM" in doc and doc.count("pill crit'>ARM") == 1,
+           "only metabuli's failure should be pilled, not bracken's by-design exit")
+
+    # WITHOUT THE SUMMARY THE REPORT MUST LOOK THE SAME AS IT ALWAYS DID.
+    # The file is `optional:` nowhere now, but a report rendered from an older run
+    # directory has no such file, and the section must simply be absent rather than
+    # render an empty table that reads as "every arm was fine".
+    html2 = tmp / "r2.html"
+    run([sys.executable, BIN / "make_report.py", "--findings", findings,
+         "--pack", "human", "--html", html2, "--summary", tmp / "s2.tsv"])
+    record("report:no summary means no section, not an empty one implying all-clear",
+           html2.exists() and "Stage-1 screen coverage" not in html2.read_text())
+
+
+
 CASES = {
     "selftests": test_selftests,
     "tiering": test_tiering,
@@ -2551,6 +2717,7 @@ CASES = {
     "wright": test_wright_gates,
     "coverage": test_coverage_metrics,
     "screen": test_screen,
+    "report": test_report_screen_coverage,
     "pack": test_pack_integrity,
     "depth": test_depth_gate,
     "eval": test_evaluator,
