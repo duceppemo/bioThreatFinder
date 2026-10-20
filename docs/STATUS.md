@@ -304,4 +304,13 @@ has no data on the chemistry it is calibrated for. See **D35**.
   which banners a dead arm. It still does NOT reach `SCORE_EVIDENCE`, deliberately:
   it is coverage, and must not move a call. The same fix surfaced the unclassified
   fraction, which had been computed, logged, written and read by nothing - and made
-  `--high_unclassified` reachable, which it had never been.
+  `--high_unclassified` reachable, which it had never been. **Corrected 2026-10-19
+  (D36):** the five states became five, not four - `not_applicable` joined them on the
+  first ONT run (D34/e38372e) - and `empty_report` was raising a false alarm. sylph
+  searches the PACK and answers a sample with no watchlist organism in it with an
+  empty profile, so four of eleven correct answers in the first real Illumina
+  re-score were bannered as a classifier that had produced nothing. An empty report is
+  now an alarm only for the arms that search a comprehensive database; the run-level
+  check that replaces it - an arm empty on EVERY sample, which is what a truncated
+  database looks like - lives in `make_report.py`, the only place that sees every
+  sample at once.

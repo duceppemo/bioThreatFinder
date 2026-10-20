@@ -666,6 +666,48 @@ def test_screen(tmp: Path) -> None:
                   "an arm with no read ledger reports blank, not zero",
                   "every arm gets a row, so coverage is readable as a table"):
             record(f"screen:{t}", False, "no summary written")
+    # AN EMPTY REPORT IS ONLY AN ALARM IF THE ARM SEARCHED EVERYTHING.
+    #
+    # Found on the first real Illumina re-score: sylph profiles against the PACK -
+    # 371 watchlist references, nothing else - and emits one row per containment hit,
+    # so zero rows is how it says "no watchlist organism here". Four of eleven
+    # single-organism libraries were isolates of organisms nobody is watching for, and
+    # all four were flagged ARM_EMPTY_REPORT and bannered at the top of the report as
+    # a classifier that had produced nothing. The pipeline had in fact answered
+    # correctly. kraken2, krakenuniq and metabuli are the opposite case: parsed
+    # unfiltered off a comprehensive database, they emit rows for any input at all, so
+    # zero usable rows there really is a broken report. The two must not share a flag,
+    # because a warning that fires on correct behaviour is one the reader learns to
+    # skip - and ARM_PRODUCED_NOTHING, which is never routine, is in the same column.
+    summ3 = tmp / "summary_packarm.tsv"
+    empty_sy = tmp / "sy_empty.tsv"
+    empty_sy.write_text("Sample_file\tGenome_file\tTaxonomic_abundance\tAdjusted_ANI\n")
+    run([sys.executable, BIN / "parse_screen.py", "--kraken2-report", k2,
+         "--sylph-profile", empty_sy,
+         "--expected-arms", "kraken2,sylph",
+         "--watchlist", wl, "--descendants", desc,
+         "--sample", "S3", "--out", tmp / "cand3.tsv", "--out-summary", summ3])
+    if summ3.exists():
+        with summ3.open() as fh:
+            s3 = {r["classifier"]: r for r in csv.DictReader(fh, delimiter="\t")}
+        record("screen:a pack-restricted arm's empty report is the negative answer",
+               s3.get("sylph", {}).get("status") == "empty_report"
+               and not s3.get("sylph", {}).get("flag"),
+               str(s3.get("sylph", {})))
+        record("screen:and it still says so, rather than going quiet",
+               "negative answer" in s3.get("sylph", {}).get("note", ""),
+               "suppressing the flag must not suppress the explanation; the row is "
+               "still what tells a reader the arm ran at all")
+        record("screen:a crashed pack-restricted arm is STILL flagged",
+               s3.get("sylph", {}).get("status") == "empty_report"
+               and _crashed_sylph_flag(tmp, k2, wl, desc) == "ARM_PRODUCED_NOTHING",
+               "an absent file means the arm died; only a present-but-empty one is "
+               "the negative answer, and the suppression must not reach the crash")
+    else:
+        for name in ("screen:a pack-restricted arm's empty report is the negative answer",
+                     "screen:and it still says so, rather than going quiet",
+                     "screen:a crashed pack-restricted arm is STILL flagged"):
+            record(name, False, "no summary")
 
     # A summary is written even when EVERY arm died, which is the run it has the most
     # to say about. The writer used to be guarded by `if summary`, so that run
@@ -2713,6 +2755,23 @@ def test_supra_specific_entries_are_leads(tmp: Path) -> None:
            supra == ["Filoviridae"], f"capped entries: {supra}")
 
 
+def _crashed_sylph_flag(tmp: Path, k2: Path, wl: Path, desc: Path) -> str:
+    """The flag sylph gets when its output file is absent entirely (it crashed),
+    as opposed to present and empty (it found nothing)."""
+    out = tmp / "summary_sylph_dead.tsv"
+    run([sys.executable, BIN / "parse_screen.py", "--kraken2-report", k2,
+         "--expected-arms", "kraken2,sylph", "--watchlist", wl,
+         "--descendants", desc, "--sample", "S4",
+         "--out", tmp / "cand4.tsv", "--out-summary", out])
+    if not out.exists():
+        return "<no summary>"
+    with out.open() as fh:
+        for r in csv.DictReader(fh, delimiter="\t"):
+            if r["classifier"] == "sylph":
+                return r.get("flag", "")
+    return "<no sylph row>"
+
+
 def test_report_screen_coverage(tmp: Path) -> None:
     """The report must say what stage 1 FAILED to search, not only what it found.
 
@@ -2777,6 +2836,51 @@ def test_report_screen_coverage(tmp: Path) -> None:
     record("report:bracken's routine absence carries no alarm pill",
            "pill crit'>ARM" in doc and doc.count("pill crit'>ARM") == 1,
            "only metabuli's failure should be pilled, not bracken's by-design exit")
+
+    # THE RUN-LEVEL VIEW IS WHERE THE SUPPRESSION ABOVE IS PAID FOR.
+    #
+    # parse_screen.py deliberately does not flag a pack-restricted arm's empty
+    # profile, because on one sample it is the correct negative. The cost of that is
+    # a real blind spot: an empty syldb, or one truncated at build time, LOADS
+    # WITHOUT ERROR and returns zero rows for every sample, which per-sample is
+    # indistinguishable from a cohort that genuinely carries nothing. Across the run
+    # it is not indistinguishable at all, and the report is the only place that holds
+    # every sample at once. An arm that matched nothing anywhere is bannered; an arm
+    # that matched nothing on some samples and something on others is the normal
+    # mixed cohort and must stay silent.
+    multi = tmp / "screen_multi.tsv"
+    multi.write_text(cols + "".join([
+        f"S{i}\tsample\tillumina\tkraken2\tok\t1000\t10\t0.010000\t\t\n"
+        f"S{i}\tsample\tillumina\tsylph\tempty_report\t\t\t\t\tnegative answer\n"
+        for i in (1, 2, 3)]))
+    html3 = tmp / "r3.html"
+    run([sys.executable, BIN / "make_report.py", "--findings", findings,
+         "--screen-summary", multi, "--pack", "human",
+         "--html", html3, "--summary", tmp / "s3.tsv"])
+    doc3 = html3.read_text() if html3.exists() else ""
+    record("report:an arm empty on EVERY sample is bannered as a database problem",
+           "matched nothing anywhere in this run" in doc3
+           and "sylph on all 3 sample(s)" in doc3,
+           "an empty or truncated database is silent per-sample and loud per-run")
+    record("report:an arm empty on every sample is not called a crash",
+           "produced nothing: sylph" not in doc3,
+           "it ran; the question is whether its database had anything in it")
+
+    mixed = tmp / "screen_mixed.tsv"
+    mixed.write_text(cols + "".join([
+        "S1\tsample\tillumina\tsylph\tempty_report\t\t\t\t\tnegative answer\n",
+        "S2\tsample\tillumina\tsylph\tok\t\t\t\t\t\n",
+        "S3\tsample\tillumina\tsylph\tempty_report\t\t\t\t\tnegative answer\n",
+    ]))
+    html4 = tmp / "r4.html"
+    run([sys.executable, BIN / "make_report.py", "--findings", findings,
+         "--screen-summary", mixed, "--pack", "human",
+         "--html", html4, "--summary", tmp / "s4.tsv"])
+    doc4 = html4.read_text() if html4.exists() else ""
+    record("report:a mixed cohort raises no database alarm",
+           bool(doc4) and "matched nothing anywhere" not in doc4,
+           "one `ok` row proves the database loaded; the empties are then just "
+           "samples without a watchlist organism in them")
 
     # WITHOUT THE SUMMARY THE REPORT MUST LOOK THE SAME AS IT ALWAYS DID.
     # The file is `optional:` nowhere now, but a report rendered from an older run

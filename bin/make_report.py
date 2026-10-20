@@ -285,6 +285,26 @@ def main() -> int:
                  if r.get("flag") in ("ARM_PRODUCED_NOTHING", "ARM_EMPTY_REPORT")]
     high_unc = [r for r in screen_rows if r.get("flag") == "HIGH_UNCLASSIFIED"]
 
+    # AN ARM THAT MATCHED NOTHING IN THE WHOLE RUN IS A DIFFERENT CLAIM FROM AN ARM
+    # THAT MATCHED NOTHING IN ONE SAMPLE. sylph searches the pack, so an empty profile
+    # for a sample carrying no watchlist agent is the correct negative and
+    # parse_screen deliberately does not flag it - otherwise every clean sample
+    # carries a warning and the reader learns to skip the column. But that
+    # suppression has a cost, and this is where it is paid back: an empty syldb, or
+    # one truncated at build time, loads without error and returns zero rows for
+    # EVERY sample, which per-sample looks exactly like a cohort with nothing in it.
+    # Across the run it does not. Nothing else in the pipeline can see this, because
+    # only the report holds every sample at once.
+    silent_arms: list[tuple[str, int]] = []
+    searched: dict[str, list[str]] = defaultdict(list)
+    for r in screen_rows:
+        st = (r.get("status") or "").strip()
+        if st in ("ok", "empty_report"):
+            searched[(r.get("classifier") or "").strip()].append(st)
+    for arm, states in sorted(searched.items()):
+        if states and "ok" not in states and len(states) > 1:
+            silent_arms.append((arm, len(states)))
+
     control_samples: set[str] = set()
     if args.samplesheet and args.samplesheet.exists():
         with args.samplesheet.open(newline="") as fh:
@@ -336,6 +356,19 @@ def main() -> int:
             "Any organism that only the missing arm would have raised is absent "
             "from this report, and its absence is NOT a negative result. See "
             "&lsquo;Stage-1 screen coverage&rsquo; below and the screen logs.</div>")
+
+    if silent_arms:
+        detail = "; ".join(f"{a} on all {n} sample(s) it searched"
+                           for a, n in silent_arms)
+        parts.append(
+            "<div class='banner'><strong>A stage-1 classifier matched nothing "
+            f"anywhere in this run: {esc(detail)}.</strong> For an arm that searches "
+            "the pack rather than a comprehensive database, an empty result on one "
+            "sample is the correct negative and is not flagged. An arm that is empty "
+            "on every sample is also what an empty or truncated database looks like, "
+            "and the two are indistinguishable per-sample. Confirm the database was "
+            "built and loaded before reading this run&rsquo;s negatives as "
+            "negatives.</div>")
 
     if high_unc:
         def _frac(v) -> float:
@@ -547,6 +580,13 @@ data alone - read the taxon caveats column.</p>
             f"enabled and produced {'an empty report' if r.get('flag') == 'ARM_EMPTY_REPORT' else 'nothing'}. "
             "Anything only that arm would have raised is missing from this report "
             "and is not a negative.\n")
+    for arm, n in silent_arms:
+        sys.stderr.write(
+            f"[report] WARNING: the {arm} arm ran on {n} sample(s) in this run and "
+            "matched nothing in any of them. A single empty profile is a normal "
+            "negative; an arm that is empty everywhere is also what an empty or "
+            "truncated database looks like. Check the database before reading this "
+            "run's negatives as negatives.\n")
     if high_unc:
         sys.stderr.write(
             f"[report] WARNING: {len({r.get('sample') for r in high_unc})} sample(s) "

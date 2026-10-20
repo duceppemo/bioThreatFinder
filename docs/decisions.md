@@ -3269,3 +3269,116 @@ number has been measured on long reads here.
 *C. neoformans* was not raised at stage 1 at all in the LOG community, where it
 sits at the bottom of a log-distributed standard. That is a genuine miss, at an
 abundance far below any LoD this pipeline claims.
+
+## D36 — The first real Illumina re-score flagged four correct answers as failed arms, and the warning that fires on correct behaviour is the one the reader stops believing
+
+**Status:** fixed. Found mid-run, in the half of `runs/zymo_rl100_rescore` that had
+already completed, four days after D33 introduced it.
+
+### What happened
+
+D33 gave the stage-1 screen a coverage table, so that an arm which was *enabled and
+died* could no longer be read as a clean negative. It distinguishes five states, and
+two of them raise a flag that is bannered at the top of the report:
+
+- `no_output` → `ARM_PRODUCED_NOTHING` — the arm was enabled and emitted no report
+  at all. Under `errorStrategy 'ignore'` that is an invisible crash. This is the
+  state D33 existed to catch and it remains exactly as it was.
+- `empty_report` → `ARM_EMPTY_REPORT` — the arm emitted a report with no usable rows.
+
+The second one was wrong for sylph, and the first real Illumina data to reach it said
+so. Four of eleven single-organism libraries — *P. aeruginosa*, *S. aureus*,
+*E. faecalis*, *L. fermentum* — carried `ARM_EMPTY_REPORT` on sylph. All four were
+correct. Those four organisms are not on the watchlist and are not near anything on
+it, and sylph profiles against `human_pack_refs.syldb`: **the pack, 371 watchlist
+references and nothing else.** It emits one row per containment hit, so a
+header-only profile is how sylph says *none of the watchlist is in this sample*. That
+is the commonest correct answer the arm has.
+
+So the report for this run would have opened with a banner reading "A stage-1
+classifier was enabled and produced nothing: sylph on 4 sample(s) … its absence is
+NOT a negative result", on four samples where the pipeline had answered perfectly.
+
+### Why the arms are not alike
+
+The distinction is not the parser and not the arm's importance. It is what the arm
+searched:
+
+| arm | database | parsed | zero usable rows means |
+|---|---|---|---|
+| kraken2, krakenuniq, metabuli | comprehensive | unfiltered | **broken report** — these emit rows for any input at all: root, unclassified, host |
+| sylph | the pack (371 refs) | per containment hit | **the negative answer** |
+| bracken | re-estimates over kraken2 | — | nothing lost; it cannot raise a candidate (D33) |
+
+`raises` already existed as a per-arm property and already exempted bracken, but it
+does not capture this: sylph *does* raise candidates, so a sylph crash must still be
+flagged loudly. What differs is only whether an *empty* report is informative. That
+is now a separate property, `empty_is_negative`.
+
+The row is still written, still says `empty_report`, and now carries a note that
+says why it is not an alarm — `ran against the pack and matched no watchlist
+reference - this IS the negative answer, not a missing one`. Suppressing the flag
+must not suppress the explanation: the row is what tells a reader the arm ran at all.
+
+### Why this was worth stopping for
+
+This project's standing concern is the bug that produces an empty result
+indistinguishable from a clean negative. This is its mirror image, and it is not a
+cosmetic one. `ARM_PRODUCED_NOTHING` and `ARM_EMPTY_REPORT` share a column, a banner
+and a sort rank. A banner that fires on four correct answers in an eleven-sample run
+is a banner an analyst learns to scroll past — and the next thing it says may be that
+metabuli died and a divergent agent went unsearched. The same reasoning retired the
+`reconcile()` false alarm in D34's self-review: *a false alarm in a check whose only
+value is being believed is worse than no check.*
+
+### The cost of the suppression, and where it is paid
+
+Suppression opens a real hole. An empty `.syldb`, or one truncated at build time,
+**loads without error** and returns zero rows for every sample. Per-sample that is
+now indistinguishable from a cohort that genuinely carries nothing.
+
+Across a run it is not indistinguishable at all, and the report is the only place
+that holds every sample at once — `parse_screen.py` sees one sample and cannot know.
+So the alarm moved rather than vanishing: `make_report.py` now banners an arm that
+*searched more than one sample and matched nothing in any of them*, as a database
+problem rather than a crash. An arm empty on some samples and `ok` on others is a
+normal mixed cohort and stays silent — one `ok` row proves the database loaded.
+
+This run is the case that distinguishes them: sylph `ok` on 7, `empty_report` on 4.
+No banner, correctly.
+
+A corrupt or missing `--sylph_db` was already covered and is untouched: it makes
+sylph exit non-zero, so no file is produced, so the state is `no_output` and the
+alarm is `ARM_PRODUCED_NOTHING`. That is how D33 was proved in the first place.
+
+### Verified
+
+Reproduced on the real profile, not a fixture —
+`runs/zymo_rl100_rescore/sylph_profile/zymo_isolate_pseudomonas_aeruginosa_illumina_ERR2935853.sylph.tsv`,
+a genuine header-only sylph output, run through `parse_screen.py` at `HEAD` and at
+the fix:
+
+```
+BEFORE  flag column: [ARM_EMPTY_REPORT]   + a WARNING on stderr
+AFTER   flag column: []                   + the explanatory note, no warning
+```
+
+Six new assertions, **234 passed / 0 failed / 2 skipped** (was 228):
+
+- a pack-restricted arm's empty report is the negative answer, and is unflagged
+- it still says so in the note rather than going quiet
+- a *crashed* pack-restricted arm — file absent, not empty — is still
+  `ARM_PRODUCED_NOTHING`, so the suppression cannot reach the crash
+- an arm empty on every sample is bannered as a database problem
+- and is not described as a crash, because it ran
+- a mixed cohort raises no database alarm
+
+### Note on the in-flight run
+
+The flags are written by `PARSE_SCREEN`, which had already completed for all eleven
+samples when this was found, so `runs/zymo_rl100_rescore`'s own report will still
+carry the stale banner. Nothing in it is a call: the screen summary deliberately
+reaches `MAKE_REPORT` and never `SCORE_EVIDENCE` (D33), so no tier can move. The
+summaries and the HTML will be regenerated by direct script invocation after the run
+completes, rather than by `-resume`, which would re-hash `bin/` and risk redoing
+eleven hours of `MARKER_SEARCH_AA` to fix a banner.

@@ -528,6 +528,17 @@ def main() -> int:
         "not_applicable": "bracken models one fixed read length, which long reads "
                           "violate; not run for this platform",
     }
+    # AN EMPTY REPORT MEANS DIFFERENT THINGS DEPENDING ON WHAT THE ARM SEARCHED.
+    # kraken2, krakenuniq and metabuli search comprehensive databases and are parsed
+    # unfiltered, so they emit rows for any input at all - root, unclassified, the
+    # host. Zero usable rows from one of those is a broken report. sylph searches the
+    # PACK, 371 watchlist references and nothing else, and emits one row per
+    # containment hit; zero rows is its way of saying "none of the watchlist is in
+    # this sample", which is the commonest correct answer there is.
+    SYLPH_NOTE = {
+        "empty_report": "ran against the pack and matched no watchlist reference - "
+                        "this IS the negative answer, not a missing one",
+    }
     ARMS = {"krakenuniq", "kraken2", "bracken", "metabuli", "sylph"}
     expected = {a.strip() for a in (args.expected_arms or "").split(",") if a.strip()}
     na = {a.strip() for a in (args.inapplicable_arms or "").split(",") if a.strip()}
@@ -550,12 +561,12 @@ def main() -> int:
     # being recorded here is what was searched, and "bracken did not run" is part of
     # that even when it is benign.
     summary = []
-    for label, table, supplied_path, reads_based, raises in (
-            ("krakenuniq", ku, args.krakenuniq_report, True, True),
-            ("kraken2", k2, args.kraken2_report, True, True),
-            ("bracken", br, args.bracken_report, False, False),
-            ("metabuli", mb, args.metabuli_report, True, True),
-            ("sylph", sy, args.sylph_profile, False, True)):
+    for label, table, supplied_path, reads_based, raises, empty_is_negative in (
+            ("krakenuniq", ku, args.krakenuniq_report, True, True, False),
+            ("kraken2", k2, args.kraken2_report, True, True, False),
+            ("bracken", br, args.bracken_report, False, False, True),
+            ("metabuli", mb, args.metabuli_report, True, True, False),
+            ("sylph", sy, args.sylph_profile, False, True, True)):
         if table:
             status = "ok"
         elif supplied_path:
@@ -597,7 +608,7 @@ def main() -> int:
                 "'ignore', so a crash here does not fail the run - and a taxon only "
                 f"{label} would have raised is now missing from the screen with no "
                 "other trace. This is NOT a clean negative for that arm.\n")
-        elif status == "empty_report" and raises:
+        elif status == "empty_report" and raises and not empty_is_negative:
             flag = "ARM_EMPTY_REPORT"
             sys.stderr.write(
                 f"[screen] {args.sample}: WARNING: the {label} arm produced a report "
@@ -610,8 +621,9 @@ def main() -> int:
             "total_reads": tot_s, "unclassified_reads": unc_s,
             "unclassified_fraction": frac_s,
             "flag": flag,
-            "note": (BRACKEN_NOTE.get(status, STATUS_NOTE[status])
-                     if label == "bracken" else STATUS_NOTE[status]),
+            "note": ({"bracken": BRACKEN_NOTE,
+                      "sylph": SYLPH_NOTE}.get(label, {})
+                     .get(status, STATUS_NOTE[status])),
         })
 
     # Written unconditionally: the arms are enumerated from a fixed list, so this
