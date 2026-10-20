@@ -268,6 +268,20 @@ has no data on the chemistry it is calibrated for. See **D35**.
 
 ## Still unresolved
 
+- **No real-data samplesheet declares a negative control.** `runs/zymo_rl100_rescore`
+  put two *L. monocytogenes* `supported` calls in the *B. subtilis* and
+  *S. cerevisiae* isolate libraries at identity 0.9615/0.9646 against 0.9643 in
+  Listeria's own library - almost certainly real contaminant DNA (index hopping),
+  graded as false positives because nothing can tell the two apart without a control.
+  `supported` PPV of 0.600 is therefore a FLOOR. Adding a `role=control` row to the
+  real samplesheets is the highest-value cheap change available. See **D38**.
+- **The 0.98 illumina `min_read_identity` floor now binds on real data too.** A real
+  *L. monocytogenes* isolate at 620,881 RPM and 95% window occupancy reads 0.9643 -
+  strain divergence from the pack reference, not sequencing error. NOT lowered: 0.98
+  is a species-discrimination floor and relaxing it weakens *E. coli*/*Shigella* and
+  *F. tularensis*/*F. novicida*. The remedy is a better reference or a per-taxon
+  override. Mirror of D35's ONT finding, different cause. See **D38**.
+
 - **32 of 90 watchlist taxa have no `marker_rules.yaml` block, so `confirmed_in_silico`
   is unreachable for them by construction** (D17a's cap, which is correct). Measured
   2026-10-19: the alignment gates ARE now reachable on real 2x101 Illumina data -

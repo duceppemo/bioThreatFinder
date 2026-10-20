@@ -34,7 +34,7 @@ including D30's eleven on the protein query ladder.
 | `pack` | 18 | Rules compile and reference only real markers; scenario file parses; all seven NYSDOH categories present; plumbing positive control exists; every scenario taxon has a genome source; identity floors are group-aware; **every retrievable marker can build at least one query** (D30 — `henipa_cedar` built none, and a row that is never searched must not be filed as a retrieval failure) |
 | `aacov` | 8 | Protein coverage is per allele, not over their summed length (D31). A full-length hit on one of four alleles is PRESENT at coverage 1.0; the same hit at 20%, and 30% on each of four alleles, are both ABSENT; a target missing from the FASTA is warned about rather than silently scoring 0 |
 | `depth` | 13 | Marker absence is only called when depth could have shown it; below that it is UNKNOWN, not ABSENT |
-| `eval` | 9 | The benchmark evaluator's tier→outcome mapping, LoD derivation and expectation checking. Its self-test also now pins that a sample the run never analysed is EXCLUDED from grading rather than scored as a miss, that one which ran and produced nothing is still a miss, and that the old behaviour is kept when no samplesheet is given (D35 — graded against the whole manifest, this run reported a false FAIL on the one notifiable organism it had called correctly) |
+| `eval` | 9 | The benchmark evaluator's tier→outcome mapping, LoD derivation and expectation checking. Its self-test also now pins that a sample the run never analysed is EXCLUDED from grading rather than scored as a miss, that one which ran and produced nothing is still a miss, and that the old behaviour is kept when no samplesheet is given (D35 — graded against the whole manifest, this run reported a false FAIL on the one notifiable organism it had called correctly). D38 added ten more: a `max_tier` specificity cap is breached only by a tier that ASSERTS PRESENCE, so a neighbour attribution, a marker veto and a group lead each PASS one and each say why, while `supported`, `confirmed_in_silico`, `indistinguishable_complex` and `vaccine_strain` still FAIL — the rank-only comparison failed the pipeline's strongest exonerations, `marker_veto` outranking a POSITIVE tier |
 | `absent` | 6 | `truth_absent` is the full watchlist minus what is genuinely present, so a false positive on an unlisted organism cannot be scored `unlisted` and dropped from specificity (D14) |
 | `platform` | 3 | Every finding carries ITS OWN row's platform; a short-circuiting row cannot inherit the previous one's |
 | `shared_assembly` | 7 | Taxa sharing one NCBI assembly carry identical masking numbers across all eight columns, and neither is the vacuous `genome_bp=0` row. Each partner now also NAMES the other in `SHARED_SEQUENCE` (D34 - the flag is derived from the manifest's `accession`, so it no longer depends on how the script was invoked). Plus the two invariants whose violation was invisible: **every pack reference has a masking result**, and no reference is lost to taxid-keyed bookkeeping - this test itself read the manifest into `{taxid: row}` and so discarded eleven of taxid 11266's twelve rows |
@@ -90,7 +90,19 @@ One-offs against real data, not automated:
   against the `lod_v1` manifest. sylph alone and Kraken2+sylph give the SAME limit. See
   `docs/validation.md` and decisions D12/D13/D14. What remains unmeasured is accuracy on
   REAL sequencing data - `benchmarks/scenarios/real_mock_communities.yaml` and
-  `scripts/fetch_mock_communities.py` exist for that and nothing has been downloaded.
+  `scripts/fetch_mock_communities.py` exist for that.
+- **(superseded) Real-data accuracy IS now measured, on ZymoBIOMICS D6300.**
+  `runs/zymo_rl100_rescore` (2026-10-20, 11 Illumina libraries): **no false
+  confirmations on absent taxa**, and tier PPV is monotone - `supported` 0.600
+  (5 calls), `attributed_to_neighbour` 0.111, `screened_only` 0.000.
+  **`confirmed_in_silico` has zero calls on real data**, so the question the PPV table
+  exists to answer is still unanswered: the top tier is unreachable for the 32 of 90
+  watchlist taxa with no marker rule block (D37), and every other `supported` call is
+  held by the 0.98 illumina identity floor, which a real *L. monocytogenes* isolate
+  misses at 0.9643 through strain divergence from the pack reference (D38). Both
+  figures are a FLOOR, not a measurement, because **no real-data samplesheet declares
+  a negative control** - so two `supported` calls that are almost certainly library
+  cross-contamination cannot be told from false positives. See D37, D38.
 - **The pipeline HAS run end to end, repeatedly** - `plumbing_001`, `plumbing_v2`,
   `lod_v1`, `lod_v2_kraken2`, `mmap_test`, `hostqc_test`, `metabuli_smoke`,
   `lod_v3_threearm`, `lod_v4`, the `divergent_v1` bake-off and (in progress) `d12fine` all

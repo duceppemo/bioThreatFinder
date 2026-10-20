@@ -703,12 +703,49 @@ def check_expectations(scenarios, obs, manifest=None, marker_states=None):
                     # max_tier is graded over ALL items, including NOT_ASSESSED:
                     # a no_reference tier cannot exceed a cap, so it cannot produce a
                     # spurious FAIL here the way it could against a floor.
-                    bad = [o for o in items if tier_rank(o["tier"]) > tier_rank(cap)]
+                    #
+                    # AND IT IS GRADED ON OUTCOME, NOT ON RANK ALONE, BECAUSE THIS FILE
+                    # ALREADY HOLDS THAT THOSE ARE DIFFERENT QUESTIONS. TIER_ORDER ranks
+                    # tiers by HOW MUCH PRESENCE THEY ASSERT, and four tiers that assert
+                    # none at all - attributed_to_neighbour, marker_veto,
+                    # control_background, group_lead - are interleaved with ones that do.
+                    # `marker_veto` sits at rank 6, ABOVE `indistinguishable_complex` at
+                    # 5, which is POSITIVE. So a rank-only comparison FAILS a specificity
+                    # bound on the pipeline's STRONGEST exonerations while passing a
+                    # weaker positive, and it contradicts the specificity rate computed a
+                    # few hundred lines below, which counts only `PRESENCE_ASSERTING`.
+                    #
+                    # Measured on runs/zymo_rl100_rescore: B. anthracis is absent from the
+                    # ZymoBIOMICS log community by construction, B. subtilis IS present,
+                    # and the two are near neighbours in the pack - so competitive mapping
+                    # attributed the reads to B. subtilis and said so. That is the
+                    # machinery working exactly as designed, and it was reported as
+                    # "FAIL ... expected <= screened_only, observed
+                    # attributed_to_neighbour". Third time the grading instrument has
+                    # produced a FAIL on correct behaviour (D35, D37).
+                    #
+                    # A bound is still breached by any tier that ASSERTS PRESENCE above
+                    # it, so every real false positive still FAILs: `max_tier: supported`
+                    # against an observed `confirmed_in_silico` is POSITIVE and ranked
+                    # higher, and fails as before.
+                    over = [o for o in items if tier_rank(o["tier"]) > tier_rank(cap)]
+                    bad = [o for o in over if o["outcome"] in PRESENCE_ASSERTING]
+                    exonerated = [o for o in over if o not in bad]
+                    detail = _detail(bad)
+                    if not bad and exonerated:
+                        # Not silently green: a cap passed because the pipeline actively
+                        # placed the reads elsewhere reads very differently from a cap
+                        # passed because nothing happened, and the reader needs to see
+                        # which it was.
+                        seen = sorted({o["tier"] for o in exonerated})
+                        detail = (f"above the cap by rank but asserts no presence: "
+                                  f"{', '.join(seen)} - counted as a correct "
+                                  f"exoneration, not a false positive")
                     results.append({
                         "scenario_id": sid, "taxon": taxon, "check": "max_tier",
                         "expected": f"<= {cap}", "observed": _worst(items),
                         "result": "FAIL" if bad else "PASS",
-                        "detail": _detail(bad),
+                        "detail": detail,
                     })
 
             if "min_tier" in exp:
@@ -1257,10 +1294,10 @@ def write_summary(path: Path, tables: dict, exp_results: list[dict], abl):
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--scenarios", required=True, type=Path)
-    ap.add_argument("--manifest", required=True, type=Path,
+    ap.add_argument("--scenarios", type=Path)
+    ap.add_argument("--manifest", type=Path,
                     help="benchmark manifest.tsv from simulate_benchmark.py")
-    ap.add_argument("--findings", required=True, nargs="+", type=Path,
+    ap.add_argument("--findings", nargs="+", type=Path,
                     help="findings.tsv from one or more pipeline runs")
     ap.add_argument("--ablation-findings", nargs="*", type=Path, default=[],
                     help="findings.tsv from the same data scored WITHOUT marker gating")
@@ -1297,7 +1334,7 @@ def main() -> int:
                          "watchlist entry: without it a group_lead finding cannot "
                          "be connected to the species the truth names, and both "
                          "the lead and the species read as failures.")
-    ap.add_argument("--out-dir", required=True, type=Path)
+    ap.add_argument("--out-dir", type=Path)
     ap.add_argument("--fail-on-skip", action="store_true",
                     help="treat SKIPped expectations as failures (for CI)")
     ap.add_argument("--self-test", action="store_true")
@@ -1305,6 +1342,20 @@ def main() -> int:
 
     if args.self_test:
         return self_test()
+
+    # ENFORCED HERE, NOT BY `required=True`, SO THAT --self-test IS REACHABLE.
+    # argparse validates required arguments before any code runs, so with them marked
+    # required `evaluate_benchmark.py --self-test` died on "the following arguments are
+    # required: --scenarios, --manifest, --findings, --out-dir" and the suite had to
+    # pass four dummy "x" values to get past it. A self-test nobody can invoke by hand
+    # is a self-test that stops being run. Same defect, same fix as mask_pack_refs.py
+    # (D34), which had no self-test at all until `--pack` stopped blocking one.
+    missing_args = [name for name, val in (("--scenarios", args.scenarios),
+                                           ("--manifest", args.manifest),
+                                           ("--findings", args.findings),
+                                           ("--out-dir", args.out_dir)) if not val]
+    if missing_args:
+        ap.error("the following arguments are required: " + ", ".join(missing_args))
 
     scenarios = load_scenarios(args.scenarios)
     manifest = read_tsv(args.manifest)
@@ -1626,6 +1677,43 @@ def self_test() -> int:
           "one replicate below the floor must FAIL min_tier_at_rpm")
     check(by[("vac_z", "max_tier")]["result"] == "PASS",
           "correct vaccine tiering must PASS")
+
+    # ---- a specificity cap is about OUTCOME, not about rank ------------------
+    # TIER_ORDER ranks tiers by how much presence they assert, and four tiers that
+    # assert none are interleaved with ones that do - `marker_veto` at rank 6 sits
+    # ABOVE `indistinguishable_complex` at 5, which is POSITIVE. A rank-only cap
+    # therefore FAILS the pipeline's strongest exonerations. Measured on
+    # runs/zymo_rl100_rescore: B. anthracis, absent by construction, had its reads
+    # attributed to B. subtilis, which IS in the mix - and that was reported as a
+    # specificity FAILURE.
+    exo_sc = {"exo": {"id": "exo", "kind": "specificity", "expect": [
+        {"taxon": "Bacillus anthracis", "max_tier": "screened_only"}]}}
+    for tier, label in (("attributed_to_neighbour", "a neighbour attribution"),
+                        ("marker_veto", "a marker veto"),
+                        ("group_lead", "a group lead")):
+        exo_obs = [{"scenario_id": "exo", "sample": "e1", "platform": "illumina",
+                    "taxon": "Bacillus anthracis", "truth": "absent", "tier": tier,
+                    "outcome": outcome_of(tier), "rpm": 10.0, "replicate": "e1"}]
+        r = {(x["scenario_id"], x["check"]): x
+             for x in check_expectations(exo_sc, exo_obs)}[("exo", "max_tier")]
+        check(r["result"] == "PASS",
+              f"{label} asserts no presence and must PASS a specificity cap, "
+              f"got {r['result']}")
+        check("exoneration" in r["detail"],
+              f"{label} passing a cap must SAY it was an exoneration rather than "
+              f"going silently green, got {r['detail']!r}")
+    # The guard that keeps the above from being a hole: a tier that DOES assert
+    # presence still breaches the cap, whatever its rank.
+    for tier in ("supported", "confirmed_in_silico", "indistinguishable_complex",
+                 "vaccine_strain"):
+        exo_obs = [{"scenario_id": "exo", "sample": "e1", "platform": "illumina",
+                    "taxon": "Bacillus anthracis", "truth": "absent", "tier": tier,
+                    "outcome": outcome_of(tier), "rpm": 10.0, "replicate": "e1"}]
+        r = {(x["scenario_id"], x["check"]): x
+             for x in check_expectations(exo_sc, exo_obs)}[("exo", "max_tier")]
+        check(r["result"] == "FAIL",
+              f"{tier} asserts presence on an absent taxon and must still FAIL, "
+              f"got {r['result']}")
 
     # ---- marker-state expectations -------------------------------------
     # The axis that exists because a findings row is only ever written for a

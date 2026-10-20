@@ -3525,3 +3525,153 @@ the harder claim: *E. coli* in its own library is attributed to *Shigella*
 *C. neoformans* is attributed to *C. gattii*, its sibling in the same species
 complex. Full grading waits for the remaining six samples and
 `evaluate_benchmark.py --samplesheet`.
+
+## D38 — The rl100 re-score: `supported` collapses 43 → 5, every remaining gate is identified, and the grading instrument produced a false FAIL for the third time
+
+**Status:** run complete (11h 1m 36s, 150 tasks, exit 0). Evaluator bug fixed; no
+threshold changed.
+
+### Tier movement against the Oct 7 baseline (all 11 samples, 82 findings)
+
+| tier | Oct 7 | 2026-10-20 | Δ |
+|---|---|---|---|
+| `confirmed_in_silico` | 0 | **0** | — |
+| `supported` | 43 | **5** | **−38** |
+| `attributed_to_neighbour` | 16 | 45 | +29 |
+| `screened_only` | 23 | 32 | +9 |
+
+The collapse is the same direction rl150 moved on its Oct 15 re-score (6 → 1) and it
+is **specificity improving, not sensitivity lost.** These are single-organism
+libraries, so a *Salmonella* call in the *E. coli* library is a cross-attribution
+artifact and `attributed_to_neighbour` is the right answer. Tier PPV is now monotone:
+
+| tier | calls | truth present | truth absent | PPV |
+|---|---|---|---|---|
+| `supported` | 5 | 3 | 2 | **0.600** |
+| `attributed_to_neighbour` | 45 | 5 | 40 | 0.111 |
+| `screened_only` | 32 | 0 | 32 | 0.000 |
+
+No false confirmations on absent taxa. `confirmed_in_silico` has no calls, so the
+question the table exists to answer — does the top tier earn its complexity — still
+cannot be answered on real data.
+
+### What holds each of the five `supported` calls
+
+Exactly **one** passed every alignment gate: *S. enterica* in its own library, capped
+solely by the missing marker rule block. That is D37's diagnosis confirmed on the
+full run rather than on five samples.
+
+The other four are all *L. monocytogenes*, and all four fail the **same** gate:
+
+```
+listeria_monocytogenes    rpm 620881  breadth 0.8751  occupancy 0.9525  identity 0.9643
+zymo_log                  rpm 537533  breadth 0.8836  occupancy 0.9528  identity 0.9658
+bacillus_subtilis         rpm   1817  breadth 0.7391  occupancy 0.9375  identity 0.9615
+saccharomyces_cerevisiae  rpm    356  breadth 0.2092  occupancy 0.7552  identity 0.9646
+```
+
+`min_read_identity` for illumina/default is **0.98**. A genuine *L. monocytogenes*
+isolate at 620,881 RPM with 95% window occupancy misses by 1.6 points.
+
+**This is D35's ONT finding repeating on Illumina, and the floor is again NOT being
+lowered.** On ONT every call was capped by the identity floor and the reason was
+R9.4.1 chemistry; here the cause is different — Illumina substitution error is
+0.1–1%, so 96.4% is **strain divergence from the pack reference**, not sequencing
+error. That is a real and expected property of a species reference pack, and it is
+the right thing to measure. But 0.98 was chosen as a *species-discrimination* floor
+(Wright et al.), and lowering it is exactly the trade this project has refused twice:
+it would weaken the gate that separates *E. coli* from *Shigella* and
+*F. tularensis* from *F. novicida* in order to admit one organism whose reference is
+simply a different lineage. **The remedy is a better reference, or a per-taxon
+override, not a lower global floor.** Recorded as the next calibration question.
+
+### The two false positives are probably not false
+
+The two truth-absent `supported` calls are *Listeria* in the *B. subtilis* and
+*S. cerevisiae* isolate libraries. They are graded false positives, and the evidence
+says they are **real Listeria DNA**: identity 0.9615 and 0.9646 against 0.9643 in
+Listeria's own library. Spurious mapping of *B. subtilis* reads onto a *Listeria*
+reference would not land within 0.3 points of the real thing, and breadth 0.7391 at
+77,052 reads is 74% of the genome, not a trace. Library cross-contamination (index
+hopping is documented for this dataset) is the parsimonious reading.
+
+**The benchmark cannot tell that apart from a false positive, because this run has no
+negative control** — `samplesheet_illumina_rl100.csv` declares no `role=control` row,
+and the report says so. Until it has one, `supported` PPV of 0.600 is a floor, not a
+measurement. Adding a control to the real-data samplesheets is now the highest-value
+cheap change available.
+
+### The evaluator failed a correct exoneration (third occurrence)
+
+First grading run reported:
+
+```
+FAIL zymo_log/Bacillus anthracis max_tier: expected <= screened_only,
+                                 observed attributed_to_neighbour
+```
+
+*B. anthracis* is absent from the log community by construction, *B. subtilis* IS
+present, and they are near neighbours in the pack — so competitive mapping attributed
+the reads to *B. subtilis* and said so. **That is the machinery working as designed,
+reported as a specificity failure.**
+
+The cause is a structural inconsistency inside `evaluate_benchmark.py`, not a
+judgement call about the scenario. `TIER_ORDER` ranks tiers by *how much presence they
+assert*, and four tiers that assert none are interleaved with ones that do:
+
+| tier | outcome | rank |
+|---|---|---|
+| `screened_only` | NEGATIVE | 2 |
+| `attributed_to_neighbour` | NEGATIVE | 3 |
+| `group_lead` | LEAD | 4 |
+| `indistinguishable_complex` | **POSITIVE** | 5 |
+| `marker_veto` | NEGATIVE | **6** |
+
+`marker_veto` — the strongest exoneration the pipeline can produce — outranks a
+POSITIVE tier. So a rank-only `max_tier` comparison fails the pipeline's best
+negatives while passing a weaker positive, and it **contradicts the specificity rate
+computed in the same file**, which counts only `PRESENCE_ASSERTING`. The scenario's
+own comment already said the narrower thing: *"a confirmed call for any of these is a
+false positive."*
+
+`max_tier` is now breached only by a tier that is both above the cap **and**
+presence-asserting, and a pass granted on that basis says so rather than going
+silently green:
+
+```
+PASS  above the cap by rank but asserts no presence: attributed_to_neighbour
+      - counted as a correct exoneration, not a false positive
+```
+
+Ten new assertions inside `selftest:evaluate_benchmark` pin both halves: a neighbour
+attribution, a marker veto and a group lead each PASS a specificity cap and each say
+why, while `supported`, `confirmed_in_silico`, `indistinguishable_complex` and
+`vaccine_strain` all still FAIL one. No scenario expectation was relaxed.
+
+**Three for three now:** D35 scored a sample that never ran as a miss, D37 printed a
+remedy that could not parse, D38 failed a correct exoneration. The instrument that
+measures the pipeline has produced more wrong verdicts than the pipeline has.
+
+### `--self-test` was unreachable by hand
+
+`evaluate_benchmark.py --self-test` died on *"the following arguments are required:
+--scenarios, --manifest, --findings, --out-dir"*, because argparse validates required
+arguments before any code runs — so the suite had been passing four dummy `"x"` values
+to get past it. Identical defect and identical fix to `mask_pack_refs.py` in D34,
+where `--pack` blocked a self-test that did not exist yet. A self-test nobody can
+invoke by hand is one that stops being run.
+
+### The report was regenerated, and nothing moved
+
+`PARSE_SCREEN` completed before D36 was found, so this run's summaries carried the
+four false `ARM_EMPTY_REPORT` flags. Regenerated by direct invocation of
+`parse_screen.py` and `make_report.py`: **4 flags → 0**, and the "a stage-1 classifier
+was enabled and produced nothing" banner is gone, leaving only the true one, *"No
+negative control in this run."* `biothreatfinder_summary.tsv` tier columns are
+byte-identical before and after — the screen summary reaches `MAKE_REPORT` and never
+`SCORE_EVIDENCE` (D33), so it cannot move a call. `score_evidence/findings.tsv` was
+not touched. `runs/zymo_rl100_rescore/report/REGENERATED.txt` records this in the run
+directory so the regeneration is not invisible to anyone reading the results later.
+
+`-resume` was deliberately not used: changing `bin/` re-hashes the tasks and would
+have redone ~11 h of `MARKER_SEARCH_AA` to fix a banner.
