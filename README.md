@@ -28,8 +28,8 @@ across human, animal and plant health.
 | [`docs/STATUS.md`](docs/STATUS.md) | Session handoff: what is running, environment traps, unresolved questions. |
 
 ```bash
-python3 tests/test_pipeline.py     # 108 checks with samtools on PATH; 89 passed /
-                                   # 2 skipped without it, ~30 s, no databases
+python3 tests/test_pipeline.py     # 241 checks; 239 passed / 2 skipped without
+                                   # samtools on PATH, ~30 s, no databases
 ```
 
 ## Workflow
