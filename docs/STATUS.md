@@ -268,6 +268,17 @@ has no data on the chemistry it is calibrated for. See **D35**.
 
 ## Still unresolved
 
+- **32 of 90 watchlist taxa have no `marker_rules.yaml` block, so `confirmed_in_silico`
+  is unreachable for them by construction** (D17a's cap, which is correct). Measured
+  2026-10-19: the alignment gates ARE now reachable on real 2x101 Illumina data -
+  *S. enterica* in its own library passes all six, including the
+  `mean_alignment_length 99 >= 61` that was `99 >= 100` on Oct 7 - so the binding
+  constraint on the top tier is no longer a threshold but curation. The escape hatch
+  `no_markers_available: true` now parses (D37; it never did), but it is a statement
+  that no marker exists and is therefore the WRONG answer for taxa that have
+  well-known targets. *Salmonella* (*invA*, *ttrRSBCA*) needs a real block, not a
+  declaration. See **D37**.
+
 - ~~Metabuli: keep as a recall arm or drop?~~ **Decided 2026-10-05: kept, defaulted OFF.**
   The bake-off ran on both the identity-matched LoD batch and the `divergent_*` pair, and
   the arm changed no finding in either — `findings.tsv` identical in every scored column,

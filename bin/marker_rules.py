@@ -215,7 +215,16 @@ def compile_rule(expr: str):
 # ---------------------------------------------------------------------------
 
 RULE_KEYS = {"confirm_requires", "support_requires", "veto_if", "vaccine_if",
-             "report_always", "rationale"}
+             "report_always", "rationale", "no_markers_available"}
+
+# Keys whose value is a flag rather than an expression. They are coerced to a real
+# bool here, and ANYTHING ELSE IS AN ERROR, because the string "false" is truthy in
+# Python and this particular flag lifts the cap that stops a taxon with no marker
+# evidence reaching confirmed_in_silico. `no_markers_available: flase` must not read
+# as permission; silence must not grant it and neither must a typo.
+BOOL_KEYS = {"no_markers_available"}
+_TRUE = {"true", "yes", "on", "1"}
+_FALSE = {"false", "no", "off", "0"}
 
 
 def load_rules(path: Path) -> dict[str, dict]:
@@ -281,7 +290,19 @@ def load_rules(path: Path) -> dict[str, dict]:
             raise RuleError(
                 f"duplicate key {key!r} in block {current!r}: the later value would "
                 f"silently replace the earlier rule.")
-        if val in (">", "|", ">-", "|-", ""):
+        if key in BOOL_KEYS:
+            low = val.strip("'\"").strip().lower()
+            if low in _TRUE:
+                rules[current][key] = True
+            elif low in _FALSE:
+                rules[current][key] = False
+            else:
+                raise RuleError(
+                    f"{key!r} in block {current!r} must be a boolean "
+                    f"(true/false), got {val!r}. This flag lifts the cap that keeps "
+                    f"a taxon with no marker evidence out of confirmed_in_silico, so "
+                    f"an unrecognised value is refused rather than read as true.")
+        elif val in (">", "|", ">-", "|-", ""):
             pending_key = key
             fold = []
         else:

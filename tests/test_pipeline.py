@@ -101,6 +101,7 @@ def write_cov(path: Path, rows: list[str]) -> None:
 
 def score(tmp: Path, cov: Path, *, markers: Path | None = None,
           candidates: Path | None = None, missing: Path | None = None,
+          rules: Path | None = None,
           extra: list[str] | None = None) -> dict[str, dict]:
     """Run score_evidence.py and return findings keyed by sample."""
     out = tmp / f"findings_{cov.stem}.tsv"
@@ -108,7 +109,8 @@ def score(tmp: Path, cov: Path, *, markers: Path | None = None,
            "--watchlist", PACK / "watchlist.resolved.tsv",
            "--pack-yaml", PACK / "pack.yaml", "--out", out]
     if markers:
-        cmd += ["--marker-evidence", markers, "--marker-rules", PACK / "marker_rules.yaml"]
+        cmd += ["--marker-evidence", markers,
+                "--marker-rules", rules or (PACK / "marker_rules.yaml")]
     if candidates:
         cmd += ["--candidates", candidates]
     if missing:
@@ -1690,8 +1692,6 @@ def test_marker_block_required_to_confirm(tmp: Path) -> None:
     notifiable, with no block.
     """
     import json
-    rules = tmp / "rules_none.yaml"
-    rules.write_text("taxa:\n  Yersinia pestis:\n    no_markers_available: true\n")
     cov = tmp / "d17a.tsv"
     def perfect(sample, taxid, taxon):
         return cov_row(sample=sample, role="sample", taxid=taxid, taxon=taxon,
@@ -1713,6 +1713,56 @@ def test_marker_block_required_to_confirm(tmp: Path) -> None:
     record("d17a:the cap says why, and how to lift it",
            "no marker rule block" in got["reasons"]
            and "no_markers_available" in got["reasons"], got["reasons"][-160:])
+
+    # THE REMEDY THE CAP PRINTS HAS TO BE A REMEDY THAT WORKS.
+    #
+    # It did not. The message above told the operator to declare
+    # `no_markers_available: true`, and load_rules()'s allow-list did not contain that
+    # key, so following the instruction failed the whole run with
+    # "unknown rule key 'no_markers_available'". Nothing caught it because THIS test
+    # built a rules file to exercise the declaration and then never passed it to
+    # score() - the helper always used the shipped pack - and its assertion was
+    # satisfied by the word appearing in the CAP MESSAGE itself. A test can name the
+    # behaviour it means to pin and still pin nothing.
+    rules_ok = tmp / "rules_declared.yaml"
+    rules_ok.write_text('"Salmonella enterica":\n'
+                        "    no_markers_available: true\n")
+    got2 = score(tmp / "d17a_declared", cov, markers=_empty_markers(tmp),
+                 rules=rules_ok)["NOBLOCK"]
+    record("d17a:the declared-gap escape hatch parses at all",
+           got2["tier"] != "", "an unknown-key RuleError kills the run")
+    record("d17a:a declared gap lifts the cap",
+           got2["tier"] == "confirmed_in_silico", got2["tier"])
+    # Lifting the cap must not remove the disclosure: a declared gap and a
+    # marker-confirmed call would otherwise look identical on the page.
+    record("d17a:and the call still says the marker tier never ran",
+           "DECLARED UNAVAILABLE" in got2["reasons"]
+           and "alignment geometry alone" in got2["reasons"],
+           got2["reasons"][-200:])
+
+    # `bool("false")` IS TRUE, WHICH IS THE WHOLE REASON THIS IS PARSED STRICTLY.
+    # Every other value in this file is a string, so a flag read the same way would
+    # make `no_markers_available: false` grant exactly the permission it denies.
+    rules_no = tmp / "rules_declined.yaml"
+    rules_no.write_text('"Salmonella enterica":\n'
+                        "    no_markers_available: false\n")
+    got3 = score(tmp / "d17a_declined", cov, markers=_empty_markers(tmp),
+                 rules=rules_no)["NOBLOCK"]
+    record("d17a:`no_markers_available: false` does NOT lift the cap",
+           got3["tier"] == "supported", got3["tier"])
+
+    rules_bad = tmp / "rules_typo.yaml"
+    rules_bad.write_text('"Salmonella enterica":\n'
+                         "    no_markers_available: flase\n")
+    pbad = run([sys.executable, BIN / "score_evidence.py", "--coverage", cov,
+                "--watchlist", PACK / "watchlist.resolved.tsv",
+                "--pack-yaml", PACK / "pack.yaml",
+                "--marker-evidence", _empty_markers(tmp),
+                "--marker-rules", rules_bad,
+                "--out", tmp / "d17a_typo.tsv"])
+    record("d17a:a mistyped flag is refused, not read as permission",
+           pbad.returncode != 0 and "must be a boolean" in pbad.stderr,
+           pbad.stderr[-200:])
 
 
 def _empty_markers(tmp: Path) -> Path:

@@ -1254,6 +1254,22 @@ def main() -> int:
                 "diagnostic deletion. Add a block to marker_rules.yaml, or declare "
                 "`no_markers_available: true` there to state that none exist.")
 
+        # A DECLARED GAP LIFTS THE CAP BUT MUST NOT REMOVE THE DISCLOSURE.
+        # `no_markers_available: true` is the operator saying "there is no marker
+        # evidence to be had for this taxon", which is a legitimate answer and is why
+        # the cap above does not apply. What does not change is WHAT THE CALL RESTS
+        # ON: alignment geometry alone, with no veto, no vaccine check and no marker
+        # confirmation. Lifting the cap silently would make a declared gap and a
+        # fully marker-confirmed call look identical on the page, and they are not.
+        if (tier in ("confirmed_in_silico", "supported") and declared_no_markers):
+            reasons.append(
+                "MARKER TIER DECLARED UNAVAILABLE for this taxon "
+                "(`no_markers_available: true`), so the veto, vaccine and marker "
+                "confirmation checks did not run. This call rests on alignment "
+                "geometry alone; a vaccine or attenuated strain, and a near "
+                "neighbour carrying a diagnostic deletion, cannot be excluded by "
+                "that evidence.")
+
         # A ROW A CONTROL NEVER GOT TO VOTE ON IS NOT A ROW NO CONTROL TOUCHED.
         # Suppression lives in the final else of the tier chain, so a row below the read
         # floor or already taken by attributed_to_neighbour exits before the control is

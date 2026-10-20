@@ -15,7 +15,7 @@ Needs `samtools` for the coverage cases (skipped with a message if absent) and a
 for the screen cases (`BTF_TAXDUMP=/path/to/taxdump`, skipped otherwise). Everything else
 is fixture-driven.
 
-Current state: **234 passed, 0 failed, 2 skipped** (2026-10-19). The 2 skips are the
+Current state: **239 passed, 0 failed, 2 skipped** (2026-10-19). The 2 skips are the
 `coverage` checks that need `samtools` on PATH. The per-script `--self-test` suites run
 as single checks from here, so `selftest:build_marker_db` alone covers 60+ assertions,
 including D30's eleven on the protein query ladder.
@@ -27,6 +27,7 @@ including D30's eleven on the protein query ladder.
 | `selftest` | 5 | The self-tests inside `btf_yaml`, `marker_rules`, `evaluate_benchmark`, `build_marker_db`, `mask_pack_refs` |
 | `tier` | 9 | All six decision paths: true positive, conserved-repeat artifact → `attributed_to_neighbour`, below-floor lead, control-suppressed, control's own background, and a database gap surfacing as `no_reference` rather than a negative |
 | `marker` | 10 | **Identical** alignment evidence yielding four different tiers on marker state alone: both plasmids → confirmed; pXO2 confidently absent → held; pXO2 **untested** → held *and named as a database gap*; *B. cereus* cereulide present → veto. Plus BCG → `vaccine_strain`, and disclosure when a veto could not be evaluated |
+| `d17a` | 7 | A taxon with no marker rule block is capped at `supported`, and the escape hatch the cap prints actually works (D37 - it did not: `RULE_KEYS` never contained `no_markers_available`, and the test named for it wrote a rules file it never passed to the scorer). A declared gap lifts the cap, still discloses that the marker tier never ran, is NOT lifted by `false`, and refuses a mistyped value rather than reading it as permission |
 | `wright` | 6 | The Wright et al. composite: genuine call confirms; **96.2% identity held** (genus right, species wrong); 18% mapped fraction held; and a genuinely divergent CCHFV at 89.2% still confirming via the virus-specific floor |
 | `coverage` | 19 | Nine alignment metrics exact against a hand-built BAM with known flags, MAPQs, strands and duplicates — plus masking shrinking the breadth denominator and excluding masked-region reads while still reporting them |
 | `screen` | 17 | Multi-classifier parsing; a piled-up taxon flagged not dropped; HLL cardinality read from the clade rather than summed; unclassified fraction reported and flagged. Plus the four stage-1 coverage states (D33): an arm nobody asked for is `not_run` and never a failure, an **enabled** arm that produced nothing is `no_output`, an arm with no read ledger reports blank rather than `0`, a run where every arm died still writes its table, and a misspelled `--expected-arms` value is rejected rather than becoming an unenforced expectation. Plus D36: an arm that searched only the PACK answers a clean sample with an empty report, and that is the negative answer rather than a failure - while the same arm's *absent* file is still `ARM_PRODUCED_NOTHING` |
