@@ -1,7 +1,9 @@
-# Session handoff — 2026-09-29
+# Session handoff — last updated 2026-10-21
 
-Written because the session was ending with long builds in flight. Read this first
-on resume.
+Written because the session was ending with long builds in flight, and kept as the
+running handoff since. Read this first on resume. The dated entries below are in the
+order they were found, not reverse-chronological; the newest material is under
+**Real data**, **Still unresolved**, and the sylph-sketch section.
 
 ## Jobs running detached (they survive the session dying)
 
@@ -68,11 +70,11 @@ instead.
 | Artifact | State |
 |---|---|
 | `taxdump/2026-09-29/` | **pinned**, md5-verified, `PROVENANCE.txt` inside. 3,016,439 nodes |
-| `packs/human/refs/` | 89/89 targets, 359 genomes, 89 competitive bundles + 178 indexes, 43 GB. All bundles verified free of duplicated sequence |
-| `packs/human/refs/masked/` | complete — **20,040,144 bp** over 359 genomes (0.349%); vector 104,404 bp / 45 contigs, crossgroup 81,934 / 50, host 2,737 / 5. The two vacuous rows were re-masked 2026-10-04 and both shared-assembly pairs now agree and carry `SHARED_SEQUENCE` flags. Per-source byte totals in D5 were double-counted and are upper bounds, not a partition |
+| `packs/human/refs/` | 90/90 targets, 379 manifest rows / 375 with sequence, 90 competitive bundles + 180 indexes, 43 GB. All bundles verified free of duplicated sequence. The 4 rows without sequence are near neighbours that do not exist anywhere, carried with empty paths on purpose |
+| `packs/human/refs/masked/` | complete — **20,040,354 bp** over all 375 references with sequence (0.348%); vector 104,184 bp / 45 contigs, crossgroup 81,196 / 50, host 2,737 / 5. The two vacuous rows were re-masked 2026-10-04 and both shared-assembly pairs now agree and carry `SHARED_SEQUENCE` flags. Per-source byte totals in D5 were double-counted and are upper bounds, not a partition |
 | `host/human/` | T2T-CHM13v2.0 + sr and map-ont indexes, 17 GB |
-| `sylph/` | `human_pack_refs.syldb`, 176 MB, 359 genomes at c=200/k=31. Reproducible since 2026-10-05 via `scripts/build_sylph_db.sh` (5 s at 32 threads); it was hand-sketched before that, with no recorded command |
-| `packs/human/markers/` | 163 manifest rows, **143 built**, 34 profile HMMs. 16 can only be UNKNOWN (3 failed, 4 curation_required, 9 motif_todo) and 4 are built on fewer tiers than declared — see the vaccine/veto note below. D30 closed 11 of the 18 gaps D27 tracked |
+| `sylph/` | `human_pack_refs.syldb`, 176 MB, 359 genomes at c=200/k=31. Reproducible since 2026-10-05 via `scripts/build_sylph_db.sh` (5 s at 32 threads); it was hand-sketched before that, with no recorded command. **STALE as of 2026-10-21 — see below** |
+| `packs/human/markers/` | 166 manifest rows, **146 built**, 33 profile HMMs (rebuilt 2026-10-21, D41). 16 can only be UNKNOWN (3 failed, 4 curation_required, 9 motif_todo) and 4 are built on fewer tiers than declared — see the vaccine/veto note below. D30 closed 11 of the 18 gaps D27 tracked |
 | `kraken2/pluspf/` | **complete** 2026-10-02. `hash.k2d` 123.5 GB, `opts.k2d`, `taxo.k2d`, `seqid2taxid.map`, and `database{100,150,250}mers.kmer_distrib`. k=35, minimizer 31, full-sensitivity (no `--max-db-size`). Built against the pinned 2026-09-29 taxdump, md5-verified. Includes the 5,413 assemblies `kraken2-build` had silently dropped. `--clean` run 2026-10-03: 614 GB -> 233 GB. The remaining 125.5 GB is `database.kraken`, a Bracken BUILD intermediate - query-time Bracken reads only the `.kmer_distrib` files (measured: 0.6 s, 7.4 MB RSS). Keep it only to derive an extra read length without re-classifying the library |
 | `krakenuniq/` | not built. Opt-in by design (D2) |
 | `metabuli/refseq` | **built** 2026-10-03, 110 GB, NCBI-namespaced. The arm is now opt-in too (`--skip_metabuli` defaults true): measured, it changed zero findings on every scenario run, including the `divergent_*` pair meant to favour it. Kept, not removed, because its untested case — an agent absent from the index — cannot be simulated from a database. See D15 |
@@ -148,9 +150,45 @@ python3 scripts/mask_pack_refs.py --pack human \
         --btf-db /media/8tb/bioThreatFinder --dry-run    # read-only; exits 1 if incomplete
 ```
 
+## Outstanding DATA fix: the sylph sketch predates 16 references, including all of Filoviridae
+
+Found 2026-10-21 while reconciling the README against the built databases. `sylph/human_pack_refs.syldb`
+is dated **2026-09-29** and holds **359 genomes**. The refs manifest now has 379 rows, 375 of
+them with sequence, and **16 of those were downloaded after the sketch was built**:
+
+| added | taxid | what |
+|---|---|---|
+| 2026-10-14 | 11266 | all **twelve** `Filoviridae` group references (D24/D25) |
+| 2026-10-21 | 1639 | D42's second *L. monocytogenes* assembly |
+| 2026-10-21 | 1638 / 1640 / 1642 | three *Listeria* near neighbours |
+
+This is the familiar shape: not an error, a silent subtraction. sylph is **on by default**
+and it profiles the pack, so a reference absent from the sketch is a reference that arm can
+never raise — and `screen_summary.tsv` will still record the arm as `ok`, because it ran and
+produced a usable report. The Filoviridae entry is the costly one: its entire purpose (D25)
+is surfacing a divergent filovirus that no species-keyed row will catch, and it was measured
+recovering 3 of 3 replicates **on the Kraken2 arm**. The sylph arm has never been able to
+see it.
+
+Nothing downstream is wrong, and no published finding needs revisiting — the arm was simply
+blind to these taxa. Fix is one command, ~5 s:
+
+```bash
+export PATH=/home/bioinfo/miniconda3/envs/btf-refs/bin:$PATH
+bash scripts/build_sylph_db.sh --pack human --btf-db /media/8tb/bioThreatFinder --threads 32
+```
+
+**The general lesson, which is D45's lesson arriving a second time:** `build_pack_refs.py`
+now rebuilds a competitive bundle when its inputs changed rather than when it is missing,
+but the sylph sketch has no such check — it is a single file that exists, so nothing
+notices it is older than the references it claims to cover. A freshness check comparing the
+sketch's mtime against the refs manifest belongs in the builder, or in the run's pre-flight
+beside the masking-completeness check.
+
 ## A behaviour change to be aware of: unevaluable vaccine and veto checks now cap the tier
 
-Cross-checking all 58 rule sets against the built manifest: 8 of 9 `vaccine_if` rules and
+When this was found, cross-checking all 58 rule sets against the built manifest: 8 of 9
+`vaccine_if` rules and
 6 `veto_if` rules reference markers that can only ever be UNKNOWN. Under Kleene logic
 UNKNOWN in those two rule types means *no downgrade* — the unsafe direction — so a Sabin
 vaccine strain satisfied Enterovirus C's `confirm_requires` and reached
@@ -160,6 +198,15 @@ An unevaluable vaccine or veto check now holds the finding at `supported`. **Thi
 confirmations**, deliberately: "supported, vaccine status untestable" costs a follow-up,
 "confirmed wild-type poliovirus" costs an outbreak response. Building the 9 `motif_todo`
 and 4 `curation_required` markers is what restores those confirmations.
+
+**Re-measured 2026-10-21** against 59 rule sets and the rebuilt manifest, using
+`marker_rules.compile_rule` rather than a hand grep: **9 of 10 `vaccine_if`** and **4 of
+10 `veto_if`** rules still reference one of the 16 unevaluable markers. `veto_if` is down
+from 6 because D30 repaired `bthai_ara`; `vaccine_if` went 8 of 9 to 9 of 10 because a
+rule set was added, not because one regressed. `confirm_requires` (54 rules) and
+`support_requires` (31) are **fully backed** — zero unevaluable references. The four
+remaining vetoes are *F. tularensis* (`fnov_specific`), *Variola* (`vaccinia_specific`)
+and Nipah/Hendra (both `henipa_cedar`).
 
 ## Environment facts worth not rediscovering
 

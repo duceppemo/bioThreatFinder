@@ -39,12 +39,12 @@ cannot reproduce.
 ## Design: scenarios built to break the tool
 
 A benchmark that spikes targets into a clean background measures almost nothing —
-any tool looks good at 100 RPM of pure *B. anthracis*. The 31 scenarios in
+any tool looks good at 100 RPM of pure *B. anthracis*. The 32 scenarios in
 `benchmarks/scenarios/human_core.yaml` are weighted towards failure modes:
 
 | Kind | n | What it measures |
 |---|---|---|
-| `lod_series` | 12 | Sensitivity and LOD across genome sizes (30 kb virus → 23 Mb parasite), plus a 99.9%-host case |
+| `lod_series` | 13 | Sensitivity and LOD across genome sizes (30 kb virus → 23 Mb parasite), plus a 99.9%-host case and the fine grid that located D12's cliff at 176.6 RPM |
 | `specificity` | 9 | The near neighbours that actually cause false positives, with the target genuinely **absent** |
 | `marker_ablation` | 3 | Target chromosome **without** its virulence loci |
 | `vaccine` | 4 | BCG, vaccinia, Sabin, RB51 — must read as stand-down, not disease |
@@ -55,7 +55,7 @@ The `exclude_loci` mechanism is what makes the marker scenarios possible: it
 simulates *B. anthracis* chromosome with pXO1/pXO2 **removed**, so alignment
 evidence is overwhelming and the correct answer is still "not confirmed".
 
-28 expectations are machine-checkable, so `evaluate_benchmark.py` exits non-zero
+29 expectations are machine-checkable, so `evaluate_benchmark.py` exits non-zero
 on regression and can gate CI.
 
 ## Semantics, stated explicitly

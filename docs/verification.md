@@ -17,7 +17,7 @@ is fixture-driven.
 
 Current state: **322 passed, 0 failed, 0 skipped** (2026-10-21) with `samtools` on
 PATH and `BTF_TAXDUMP` set. The bare `python3 tests/test_pipeline.py` reports
-**279 passed, 3 skipped** - the `coverage` and `statecols` checks need `samtools`, and
+**303 passed, 3 skipped** - the `coverage` and `statecols` checks need `samtools`, and
 the `screen`/`leadjoin` writers need a taxdump. The per-script `--self-test` suites run
 as single checks from here, so `selftest:build_marker_db` alone covers 60+ assertions,
 including D30's eleven on the protein query ladder.
@@ -76,16 +76,18 @@ never reached the gate it was meant to exercise.
 
 One-offs against real data, not automated:
 
-- **Watchlist resolution** against a live taxdump: 89/89, while flagging 18 changed virus
-  ranks, 11 ICTV renames resolving via equivalent names, 4 malformed neighbour entries.
-- **Competitive bundles**: all 89 scanned for identical sequence under two taxid prefixes
+- **Watchlist resolution** against a live taxdump: 90/90 (89/89 when first run, before the
+  `Filoviridae` group entry), while flagging 18 changed virus ranks, 11 ICTV renames
+  resolving via equivalent names, 4 malformed neighbour entries.
+- **Competitive bundles**: all 90 scanned for identical sequence under two taxid prefixes
   — 1 found (*F. tularensis*/*F. novicida*), now 0. The check is built into
   `build_pack_refs.py` as a post-write step.
 - **Taxonomy drift**: the previously-default snapshot measured 201 days old, +288,764
   taxids behind current, 2,581 descendant nodes short inside watchlist clades.
-- **Masking**: 20,040,144 bp over 359 genomes (0.349%); 104.4 kb vector across 45 contigs.
-  As of 2026-10-16 all **371** pack references have a result: the twelve Filoviridae
-  group-entry files had never been masked (D34) and came back at 0 bp. The script now
+- **Masking**: 20,040,354 bp over 375 references (0.348%); 104.2 kb vector across 45
+  contigs. As of 2026-10-21 all **375** pack references that have sequence carry a result;
+  the twelve Filoviridae group-entry files had never been masked (D34, when the pack held
+  371) and came back at 0 bp. The script now
   reconciles the whole pack and exits non-zero when a reference has no result, so the
   count no longer has to be checked by hand.
 - **The reference pack's reach across each target species was measured without a

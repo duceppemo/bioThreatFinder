@@ -290,10 +290,20 @@ of its reference lost on a 10% count difference, and because the winning neighbo
 a watchlist taxon, NO finding anywhere carried its reads: the entire output for the
 *C. neoformans* library was two `attributed_to_neighbour` rows and one `screened_only`.
 
-`--contest-attribution` (default on) requires the target's own breadth and occupancy to
+`--contest-attribution` requires the target's own breadth and occupancy to
 pass before an attribution is contested at all, then uses the neighbour's coverage
 uniformity to separate a cross-mapping pedestal from a genuine sibling. The latter is the
 new `indistinguishable_complex` tier, which counts as a detection.
+
+**It was default-on when this section was written and is now default-off**
+(`contest_attribution = false`, `nextflow.config`). D20 found the uniformity filter that
+does the separating is itself abundance-driven — one ABSENT neighbour (*L. innocua*) read
+0.9676 at 14 reads and 0.3912 at 7.6 M reads, so the same absent organism looked
+"genuinely covered" when rare and "pedestal" when abundant, and D19's apparently empty gap
+was produced by the filter rather than found by it. The numbers in the table below were
+measured with it on; they do not describe the current default. Turning it back on waits on
+the recalibration, and the alternative on the table is to delete the split and let every
+contested row report `indistinguishable_complex`.
 
 | batch | before TP/FP | after TP/FP | of which are real errors |
 |---|---|---|---|
@@ -309,7 +319,38 @@ positive, and `lod_v4`'s declared expectation
 `lod_gram_negative/Yersinia pestis min_tier_at_rpm[100]` goes from FAIL to PASS: **D12 is
 closed**. See D19.
 
-The ONT arm has NOT been measured - it failed on a 4 h task limit and was not restarted.
+### The ONT arm is now measured — 2026-10-16, D35
+
+The earlier note here read "the ONT arm has NOT been measured - it failed on a 4 h task
+limit and was not restarted." It has since run: `zymo_ont` completed in 15 h 36 m / 425
+CPU-hours, the first ONT data this project has processed end to end. `MARKER_SEARCH_AA`
+alone took **7 h 20 m** on one sample, so the 4 h limit was short by nearly a factor of
+two and the raise to 24 h was the right size.
+
+**Specificity is clean; sensitivity is one of four.** 84 absent taxa produced four
+findings, all held at `attributed_to_neighbour`, with zero false confirmations.
+*L. monocytogenes* reached `supported`; the other three true positives were absorbed into
+`attributed_to_neighbour`.
+
+**Every ONT call is capped by the D10 identity floor and nothing else.** *Listeria* has
+breadth 0.95, 136,951 RPM, `neighbour_ratio` 9.7 and both confirmatory markers PRESENT;
+its only failed gate is `identity 0.8579 >= 0.9000 (ont/default)`. At that floor **no ONT
+sample can reach `confirmed_in_silico`**. Do not read this as grounds to lower it: the
+data is Nicholls 2019, which is R9.4.1, while D10's 0.90 was reasoned for R10.4.1 at
+~97-98%. The floor was not falsified — this benchmark cannot test it, and the ONT arm
+still has no data on the chemistry it is calibrated for.
+
+### Later re-scores on the same real data — D38 through D43
+
+Four results postdate the table above and are recorded in `docs/decisions.md` rather than
+repeated here:
+
+| | what changed | where |
+|---|---|---|
+| 2026-10-19 | `supported` collapses 43 → 5 on re-score; every surviving gate identified; `supported` PPV 0.600, a **floor** because no control was declared | D38 |
+| 2026-10-20 | declaring a proxy control: PPV 0.600 → 0.750, FP 2 → 1, no detection rate changed. **Decision still open** — the proxy is another organism's library, not a no-template control | D39 |
+| 2026-10-20 | first `confirmed_in_silico` on real data backed by curated markers (*S. enterica*, `invA`+`ttrC`+`ssaV`) | D40 |
+| 2026-10-21 | the *Listeria* identity shortfall resolved by a second reference, not by moving the floor: identity 0.9641 → 0.9947, 48% more reads mapping. Then measured across all 26 bacterial targets without a specimen: 17 need nothing, 9 do not span their own diversity | D42, D43 |
 
 ## Kraken2 memory mapping — verified 2026-10-03
 

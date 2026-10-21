@@ -42,7 +42,7 @@ python3 tests/test_pipeline.py     # 322 checks; 303 passed / 3 skipped without
 Boxes are named as they appear in the Nextflow trace. `[opt]` is off by default and
 `x candidate` marks the fan-out: the competitive alignment runs once per (sample x
 watchlist candidate), while the marker tier runs once per sample off the host-depleted
-reads (`main.nf:498`).
+reads (`main.nf:664`).
 Regenerate with `python3 scripts/make_workflow_svg.py`.
 
 The two things worth taking from it. Stage 1 is an **OR** — a single arm nominating a
@@ -85,7 +85,7 @@ rather than to the agent; that split is what `neighbour_ratio` measures. Nothing
     MINIMAP2_COMPETITIVE [per candidate]            2b. MARKER TIER
                                                     ▲ per sample,
                                                     │ not per candidate
-       clean reads (main.nf:506) ───────────────────┘
+       clean reads (main.nf:608) ───────────────────┘
     target + near neighbours in ONE index           MARKER_ALIGN_NT  (nucleotide)
                  │                                  MARKER_SEARCH_AA (protein)
                  │                                          │ hit reads
@@ -109,7 +109,7 @@ rather than to the agent; that split is what `neighbour_ratio` measures. Nothing
                      confirmed_in_silico · supported · screened_only
                      attributed_to_neighbour · suppressed_control
                      control_background · marker_veto · vaccine_strain
-                     no_reference
+                     group_lead · indistinguishable_complex · no_reference
                                       │
                                       ▼
                                  MAKE_REPORT
@@ -164,6 +164,8 @@ gate decided it. Nothing is a bare verdict.
 | `supported` | Real alignment evidence, below the confirmation bar |
 | `no_reference` | On the watchlist, raised by the screen, but no reference genome available — **a database gap, not a negative result** |
 | `suppressed_control` | Comparable level in a negative control; contamination until proven otherwise |
+| `indistinguishable_complex` | **One of a named pair is present and alignment cannot say which.** Both references cover well, so a one-sided attribution would be a confident wrong answer — *Shigella* within *E. coli*, *C. deneoformans* within *C. neoformans*. Reachable only with `--contest_attribution`, which **defaults off**: the uniformity filter that separates a cross-mapping pedestal from a genuine sibling turned out to be abundance-driven, so it is parked pending recalibration (D20) |
+| `group_lead` | A **group-rank** watchlist entry (family or genus) cleared its gates. A member of the group is present; which member is not a question this evidence can answer, so it is not a species call |
 | `attributed_to_neighbour` | Reads align better to a relative |
 | `control_background` | What the control itself contains (QC, not a finding) |
 | `screened_only` | Stage-1 lead that failed stage-2 — the expected fate of classifier noise |
@@ -351,11 +353,13 @@ fabrication risk in a file that gates a high-consequence call.
 `scripts/build_marker_db.py` resolves each row to real sequence and records the
 accession, source and retrieval date.
 
-Coverage: 163 markers, 58 rule sets over 89 watchlist taxa. **Every
-`high_consequence` taxon has a rule.** *B. mallei* deliberately has no
-`confirm_requires` — it is a clonal deletion derivative defined by ABSENT
-regions, which presence markers cannot express, so it correctly caps at
-`supported` rather than producing an unsupportable call.
+Coverage: 166 markers, 59 rule sets over 90 watchlist taxa. **Every
+`high_consequence` *species* has a rule.** The one `high_consequence` entry without
+one is `Filoviridae`, a deliberate group-rank row that is capped at `group_lead` and
+can never reach `confirmed_in_silico`, so a marker rule would have nothing to gate.
+*B. mallei* deliberately has no `confirm_requires` — it is a clonal deletion
+derivative defined by ABSENT regions, which presence markers cannot express, so it
+correctly caps at `supported` rather than producing an unsupportable call.
 
 ## Reference masking (the specificity lever)
 
@@ -414,19 +418,23 @@ genome being masked against something it legitimately resembles.
 
 ### What it actually found
 
-Measured over the built human pack — 359 genomes, 5.75 Gbp (recomputed 2026-10-04,
-after taxids 263/264/620/622 were re-masked):
+Measured over the built human pack — **375 genomes, 5.76 Gbp** (recomputed 2026-10-21;
+every reference that has sequence now carries a masking result, which D34 found was not
+true of twelve of them):
 
 | Source | Masked | Spread |
 |---|---|---|
-| low complexity | 19,864,159 bp | the bulk, as expected |
-| **vector** | **104,404 bp** | **45 contigs** |
-| crossgroup | 81,934 bp | 50 contigs (bacteria 7, fungus 12, parasite 31, virus 0) |
+| low complexity | 19,864,369 bp | the bulk, as expected |
+| **vector** | **104,184 bp** | **45 contigs** |
+| crossgroup | 81,196 bp | 50 contigs (bacteria 7, fungus 12, parasite 31, virus 0) |
 | host | 2,737 bp | 5 contigs |
-| **total** | **20,040,144 bp (0.349%)** | no genome tripped `OVER_MASKED` |
+| **total** | **20,040,354 bp (0.348%)** | no genome tripped `OVER_MASKED` |
 
-Read that honestly. 0.349% is nowhere near the headline 40–94% false-detection
-reduction from the literature, and it should not be: 281 of 363 references here are
+The per-source rows are **upper bounds, not a partition** — an interval masked for two
+reasons is counted under both, so they sum to slightly more than the total.
+
+Read that honestly. 0.348% is nowhere near the headline 40–94% false-detection
+reduction from the literature, and it should not be: 297 of 375 references here are
 RefSeq **reference-grade complete** assemblies, which are already well curated — the
 *Y. pestis* cross-group run correctly found **0 bp**.
 
@@ -494,8 +502,8 @@ This paid off on the first run: it caught 18 virus entries whose NCBI rank had
 changed, 11 taxa that ICTV has since renamed (resolved via equivalent names),
 and 4 malformed near-neighbour entries.
 
-It also expands each watchlist taxon to all its **descendants** — 89 seed taxa
-expand to ~128,000 taxonomy nodes. This is not decoration: Kraken2 assigns many
+It also expands each watchlist taxon to all its **descendants** — 90 seed taxa
+expand to ~134,500 taxonomy nodes. This is not decoration: Kraken2 assigns many
 reads to *internal* nodes, so matching only the species taxid misses most of the
 signal.
 
@@ -535,7 +543,7 @@ dangerous:
 ```bash
 # 0. Tool environments. kraken2 MUST be in its own env - see Requirements.
 mamba create -n btf-refs    -c conda-forge -c bioconda \
-      ncbi-datasets-cli minimap2 seqkit samtools mmseqs2 hmmer mafft
+      ncbi-datasets-cli minimap2 seqkit samtools mmseqs2 hmmer mafft sylph
 mamba create -n btf-kraken2 -c conda-forge -c bioconda kraken2=2.17.2 bracken
 
 # 1. Pin a taxonomy snapshot, then resolve the watchlist against it.
@@ -558,6 +566,9 @@ bash    scripts/fetch_host_genome.sh human --db-root /media/8tb --threads 24
 python3 scripts/build_pack_refs.py  --pack human --btf-db /media/8tb/bioThreatFinder --threads 24
 python3 scripts/mask_pack_refs.py   --pack human --btf-db /media/8tb/bioThreatFinder --threads 24
 python3 scripts/build_marker_db.py  --pack human --db-root /media/8tb --taxdump "$TAX" --threads 24
+# sylph is an ON-BY-DEFAULT arm and it sketches THIS PACK'S refs, not GTDB. Rebuild it
+# whenever build_pack_refs.py adds a reference, or the new refs are invisible to the arm.
+bash    scripts/build_sylph_db.sh   --pack human --btf-db /media/8tb/bioThreatFinder --threads 24
 conda activate btf-kraken2
 bash    scripts/build_kraken2_db.sh --db-root /media/8tb --taxdump "$TAX" --threads 40
 
@@ -587,13 +598,20 @@ bleed are the norm in low-biomass metagenomics, not the exception.
 ```
 results/
   watchlist/        resolved watchlist + resolution log
+  qc/               host_depletion.tsv — how much host got through
   screen/           per-sample stage-1 candidates + screen_summary.tsv
   confirm/          per-(sample,taxon) coverage metrics
   score_evidence/   findings.tsv  <- the machine-readable result
   report/           biothreatfinder_report.html  <- the human-readable one
+                    biothreatfinder_summary.tsv
   pavian/           stage-1 reports, converted for Pavian, + optional HTML
-  pipeline_info/    timeline, trace, DAG
+  pipeline_info/    timeline, trace, DAG, per-process versions
 ```
+
+Each process also publishes its own raw output under a directory named after it in
+lower case — `kraken2/`, `bracken/`, `sylph_profile/`, `minimap2_competitive/`,
+`marker_search_aa/` and so on. **Trimmed FASTQs are not published by default**: they
+still contain host sequence, so `--publish_reads` gates them.
 
 ### What stage 1 searched, and what it could not
 
@@ -721,8 +739,15 @@ Deliberately split across two volumes:
 
 | Root | Volume | Holds |
 |---|---|---|
-| `db_root` = `/media/36tb/db` | 36 TB spinning, 97% full | Shared, pre-existing, **read-only**: `taxdump`, sylph GTDB sketch, `nt` |
-| `btf_db` = `/media/8tb/bioThreatFinder` | 7.3 TB NVMe, 15% used | Project-owned: KrakenUniq, Metabuli, Kraken2 indexes, host genomes, pack refs and markers |
+| `db_root` = `/media/36tb/db` | 36 TB spinning, 97% full | Shared, pre-existing, **read-only**: `taxdump`, a sylph GTDB sketch, `nt` |
+| `btf_db` = `/media/8tb/bioThreatFinder` | 7.3 TB NVMe, 15% used | Project-owned: KrakenUniq, Metabuli, Kraken2 indexes, the sylph **pack** sketch, host genomes, pack refs and markers |
+
+The sylph arm uses `${btf_db}/sylph/<pack>_pack_refs.syldb`, sketched from the pack's own
+references — **not** the GTDB sketch on `db_root`. That is not interchangeable: sylph
+reports genome *filenames*, and `parse_screen.py` recovers a taxon by reading the taxid out
+of the pack's `<taxid>_<name>.fna.gz` naming. GTDB files are named by GTDB accession, so
+every lookup would miss and the arm would contribute nothing while the report still said
+"no sylph/ANI support".
 
 A Kraken2 index **cannot** be reused for KrakenUniq — KrakenUniq descends from
 Kraken 1 and uses its format, while Kraken2's hashed-minimizer structure is lossy
@@ -770,7 +795,7 @@ Design targets, set deliberately rather than by what happened to be installed:
 
 ## Benchmarking
 
-31 scenarios, 28 machine-checkable expectations, weighted deliberately towards
+32 scenarios, 29 machine-checkable expectations, weighted deliberately towards
 failure modes rather than easy positives — near neighbours with the target
 genuinely absent, target chromosomes stripped of their virulence plasmids,
 vaccine strains, index hopping, a 99.9%-host low-biomass case, and a plumbing positive
@@ -788,11 +813,13 @@ homology-based detection cannot see a wholly novel agent.
 
 ## Status
 
-Scaffold complete, databases built, **first measurements in** - a limit of detection, a
-calibrated pedestal model, and three findings serious enough to get their own decision
-entries (D12, D13, D14). Thresholds are still literature defaults, not measured.
+Scaffold complete, databases built, and **running on real sequencing data** — Illumina
+and ONT — as well as simulation. A limit of detection is measured, the tier ladder has
+been re-scored against known truth, and `confirmed_in_silico` has fired on a real
+library backed by curated markers (D40, D41). Thresholds are still literature defaults
+or reasoned guesses, not measured operating points.
 
-`tests/test_pipeline.py` holds 108 fixture-driven checks covering every decision path in
+`tests/test_pipeline.py` holds 322 fixture-driven checks covering every decision path in
 the tiering, marker-gating, confirmation-gate, coverage-metric and screen-parsing logic.
 It caught a real bug on its first run: a broken `elif` chain meant a BCG vaccine strain
 was being reported as `supported` — a possible TB detection — instead of `vaccine_strain`.
@@ -803,32 +830,51 @@ See `docs/verification.md`, which also lists what is **not** verified.
 | Artifact | State |
 |---|---|
 | Taxonomy snapshot | pinned + md5-verified, 3,016,439 nodes, `PROVENANCE.txt` |
-| Reference genomes | 89/89 targets, 359 genomes, 43 GB |
-| Competitive bundles | 89 + 178 minimap2 indexes, all verified free of duplicated sequence |
-| Reference masking | complete — 20.0 Mbp masked across 359 genomes |
+| Reference genomes | 90/90 targets, 379 manifest rows / **375 with sequence**, 43 GB. The 4 without are near-neighbour genomes that do not exist anywhere, recorded with empty paths so the weakened discrimination is visible |
+| Competitive bundles | 90 + 180 minimap2 indexes (`sr` and `map-ont` per bundle), all verified free of duplicated sequence |
+| Reference masking | complete — 20.0 Mbp masked across all 375 references |
 | Host genome | T2T-CHM13v2.0 + both presets, 17 GB |
-| Marker DB | 143 built / 4 partial / 9 motif_todo / 3 failed / 4 curation_required — 34 profile HMMs (D30) |
+| Marker DB | **146 built** / 4 partial / 9 motif_todo / 3 failed / 4 curation_required — 33 profile HMMs (rebuilt D41) |
+| sylph pack sketch | built 2026-09-29, **359 genomes — STALE.** 16 references added since are invisible to the arm, including the whole `Filoviridae` group entry. Rebuild with `scripts/build_sylph_db.sh` |
 | Kraken2 PlusPF | **built** 2026-10-02 - `hash.k2d` 123.5 GB, Bracken 100/150/250, `--clean` run (614 -> 233 GB) |
 | Metabuli | **built** 2026-10-04 - prebuilt `refseq_standard`, 110 GB, NCBI taxonomy verified, 62.5 GB peak RSS / 1 m 22 s per sample |
 | KrakenUniq | not built - opt-in by design (D2) |
 
 **What HAS happened:** simulated batches generated, the pipeline run end to end many
-times, and a limit of detection measured (1000 RPM for *Y. pestis* on Illumina; sylph alone
-and Kraken2+sylph give the same answer).
+times, a limit of detection measured (1000 RPM for *Y. pestis* on Illumina; sylph alone
+and Kraken2+sylph give the same answer), and **real sequencing data processed on both
+platforms** — ZymoBIOMICS D6300 EVEN and LOG plus all ten member organisms as
+single-organism Illumina libraries, and the same standard on ONT (D18, D35, D38). The
+real data has done what simulation could not: it refuted one threshold (D12's
+neighbour-credibility gate, now defaulted off), justified another change to the tier
+ladder, cut real-data false positives from 12 to 2, and produced the project's first
+`confirmed_in_silico` backed by curated markers (D40).
 
 **What has NOT:** no threshold is measured. Every number in `packs/*/pack.yaml` is still a
-literature default or a reasoned guess, and nothing has run on REAL sequencing data -
-`benchmarks/scenarios/real_mock_communities.yaml` is drafted and nothing downloaded.
+literature default or a reasoned guess. The ONT arm has never seen the chemistry it is
+calibrated for — the only ONT data is R9.4.1 and D10's identity floor was reasoned for
+R10.4.1, so **no ONT sample can currently reach `confirmed_in_silico` at all** and that
+floor has been neither confirmed nor falsified (D35). No real-data samplesheet declares a
+negative control; the one re-score that declared a proxy control is D39, and the decision
+is still open.
 
 ### Known gaps
 
 - **No threshold is measured yet.** An LoD exists, but every gate in `packs/*/pack.yaml`
-  is still a literature default or a reasoned guess. D12 names the measurement that would
-  set `min_neighbour_ratio` and predicts the cliff at 171-184 RPM; the finer-grid run that
-  would test it has not been done. See `docs/benchmarking.md` and `docs/validation.md`.
-- **Nothing has run on real sequencing data.** Everything measured so far is simulated, so
-  error profiles, adapters and chimeras are modelled rather than observed, and the pipeline
-  has never seen ONT reads at all.
+  is still a literature default or a reasoned guess. D12's predicted cliff at 171-184 RPM
+  was confirmed by the fine grid at **176.6 RPM**, and then real data refuted the remedy:
+  the neighbour-credibility check that was to make `min_neighbour_ratio` defensible is
+  **defaulted off**, because on the Zymo libraries it raised false positives 4 → 25 and
+  0 → 4 while rescuing none of the true positives it exists for (D18). See
+  `docs/benchmarking.md` and `docs/validation.md`.
+- **The ONT arm is uncalibrated for current chemistry.** Real ONT data has run end to end
+  (D35), but it is R9.4.1 and the D10 identity floor was reasoned for R10.4.1. Every ONT
+  call is capped by that one floor and nothing else, so the ceiling for an ONT sample is
+  `supported`. The floor was not falsified; that data cannot test it.
+- **The sylph pack sketch is stale.** It was built 2026-09-29 over 359 genomes; 16
+  references added since — the twelve `Filoviridae` group references and D42's second
+  *L. monocytogenes* assembly among them — are not in it, so an on-by-default arm cannot
+  raise them. Rebuild with `scripts/build_sylph_db.sh`.
 - ***F. tularensis* vs *F. novicida* cannot currently be discriminated.** Both resolved
   to the same assembly (`GCF_000833355.1`), so the duplicate was dropped from the
   competitive bundle. Needs a curated distinct *F. novicida* assembly. This is the
@@ -850,13 +896,19 @@ literature default or a reasoned guess, and nothing has run on REAL sequencing d
   a background panel, giving calibrated FDR instead of guessed cutoffs
 - No assembly tier. A contig spanning pPCP1 is far stronger evidence than 50
   scattered reads
-- Single reference genome per taxon; intraspecies diversity means breadth
-  understates a divergent strain. Multi-reference/pangenome bundles are the
-  accurate version
+- **Reference breadth per species is now measured, and mostly not closed.** Multiple
+  references per taxon exist — 74 taxids carry two or three, and D42 added a second
+  *L. monocytogenes* assembly after measuring identity 0.9641 → 0.9947 and 48% more reads
+  mapping — but D43 measured all 26 bacterial targets against 13,582 known assemblies and
+  found **9 species whose shipped reference does not span their own diversity**, asking for
+  32 further references. None were added; D43 is the measurement and the recommendation.
+  Pangenome bundles remain the accurate version of this
 - Animal and plant packs are directory stubs — no watchlist or host genomes
-- 31 of 89 watchlist taxa have no marker rule (all `notifiable`, none
-  `high_consequence`)
-- Several markers are flagged `curate_required` and cannot be automated:
+- 31 of 90 watchlist taxa have no marker rule, so `confirmed_in_silico` is unreachable
+  for them by construction: 28 `notifiable`, 2 `emerging`, and the `Filoviridae`
+  group-rank row, which is capped at `group_lead` anyway. As of 2026-10-20
+  *Orientia tsutsugamushi* is the only notifiable **bacterium** still without one
+- Several markers are flagged `curation_required` and cannot be automated:
   *B. mallei* absent regions, vaccinia-specific loci, *F. novicida* discriminating
   loci, *C. auris* clades
 - Influenza A segment-aware subtyping is out of scope and needs a dedicated

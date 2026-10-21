@@ -6,24 +6,32 @@
    `check_max()` config functions -> `resourceLimits`, no top-level `def` in
    config, no top-level `workflow.onComplete`, and process directives must precede
    `input:`. All migrated.
-2. **Create the tool env**
-   `mamba create -n biothreatfinder -c bioconda -c conda-forge kraken2 bracken minimap2 samtools seqkit fastp chopper sylph ncbi-datasets-cli`
-   `datasets`, `kraken2-build`, `bracken-build` and `seqkit` are all absent from this box.
-   The only `minimap2` is the one bundled with ont-dorado-server.
-3. **Build databases** — `scripts/fetch_host_genome.sh`, `build_pack_refs.py`, `build_kraken2_db.sh`.
-   Kraken2 PlusPF needs ~700 GiB transient against 1074 GiB free. Tight but passes.
-4. **Validate on known-positive data** before trusting any output. Mock communities
-   (ZymoBIOMICS) plus spiked dilution series to establish an actual limit of detection.
-   Until this is done the thresholds in `packs/*/pack.yaml` are reasoned guesses, not
-   measured operating points.
+2. ~~Create the tool env~~ DONE - and it had to become **two** envs, not one.
+   Installing kraken2 alongside mmseqs2/hmmer/mafft made the solver resolve
+   kraken2 2.0.8-beta (2019), which has no `--report-minimizer-data`. `btf-refs` holds
+   datasets/minimap2/seqkit/samtools/mmseqs2/hmmer/mafft/sylph; `btf-kraken2` holds
+   kraken2 2.17.2 and bracken. See docs/STATUS.md.
+3. ~~Build databases~~ DONE - taxonomy snapshot, pack refs (90 targets, 379 rows),
+   masking, markers, host genome, sylph pack sketch, Kraken2 PlusPF and Metabuli are all
+   built on NVMe. KrakenUniq is deliberately not built (D2). The one stale artifact is the
+   sylph sketch, built over 359 genomes before 16 references were added.
+4. **Validate on known-positive data** before trusting any output. *Partly done:*
+   ZymoBIOMICS D6300 (EVEN and LOG, Illumina and ONT) plus all ten member organisms have
+   run end to end, which refuted D12's neighbour gate and re-scored the tier ladder
+   (D18, D35, D38). Still missing: proficiency panels, characterised clinical specimens,
+   a declared no-template control, and ONT data on R10.4.1 chemistry. **No threshold in
+   `packs/*/pack.yaml` is a measured operating point yet.**
 
 ## Next feature, in priority order
 
 ### DONE - Marker-gene / plasmid module
-Implemented in v0.2.0: 163 markers, 58 rule sets, three-valued rule engine,
-three evidence tiers (dna/protein/hmm). Every high_consequence taxon has a rule.
+Implemented in v0.2.0: 166 markers, 59 rule sets, three-valued rule engine,
+three evidence tiers (dna/protein/hmm). Every high_consequence *species* has a rule;
+the only high_consequence row without one is the `Filoviridae` group entry, which is
+capped at `group_lead` and so has nothing for a rule to gate.
 See README for the design and validation. Remaining marker work:
-  * 31 notifiable taxa still have no rule
+  * 31 of 90 taxa still have no rule — 28 notifiable, 2 emerging, and Filoviridae.
+    *Orientia tsutsugamushi* is the last notifiable bacterium among them
   * curate_required markers: B. mallei absent regions, vaccinia-specific loci,
     F. novicida discriminating loci, C. auris clades
   * absence-region logic as a first-class marker class. B. mallei needs it, and
@@ -186,11 +194,13 @@ table stakes. Independently, Wright et al. 2026 traced an *H. pylori* false posi
 to **phage sequence inside the reference genome itself**.
 
 **DONE 2026-09/10.** `scripts/mask_pack_refs.py` is implemented, run and shipped:
-20,040,144 bp masked across all 359 pack genomes (0.349%), of which 104,404 bp is cloning
-vector in 45 contigs and 81,934 bp is cross-group sequence in 50. The decision is recorded
-as D5. **What is NOT done is the part D13 measured:** masking is detected at
+20,040,354 bp masked across all 375 pack references that have sequence (0.348%), of which
+104,184 bp is cloning vector in 45 contigs and 81,196 bp is cross-group sequence in 50.
+The decision is recorded as D5, and D34 is why the denominator is now the whole pack:
+twelve references had no masking result at all. **What is NOT done is the part D13
+measured:** masking is detected at
 `min_hit_len=200` / `min_identity=0.95` while reads map at 150 bp on shorter and less
-identical stretches, so it cannot see read-scale recruitment - only 2 of 359 genomes carry
+identical stretches, so it cannot see read-scale recruitment - only 2 of 375 genomes carry
 any host masking at all (2,737 bp), while the *T. gondii* reference absorbs ~5.4% of host
 reads. Read-scale masking parameters are an untried lever with a real sensitivity cost; see
 D13 before pulling it.
