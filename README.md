@@ -543,8 +543,11 @@ dangerous:
 ```bash
 # 0. Tool environments. kraken2 MUST be in its own env - see Requirements.
 mamba create -n btf-refs    -c conda-forge -c bioconda \
-      ncbi-datasets-cli minimap2 seqkit samtools mmseqs2 hmmer mafft sylph
+      ncbi-datasets-cli minimap2 seqkit samtools mmseqs2 hmmer mafft
 mamba create -n btf-kraken2 -c conda-forge -c bioconda kraken2=2.17.2 bracken
+# sylph gets its own env too: the sketch must be readable by the version that
+# queries it, and modules/local/detect.nf pins sylph=1.0.0.
+mamba create -n btf-sylph   -c conda-forge -c bioconda sylph=1.0.0
 
 # 1. Pin a taxonomy snapshot, then resolve the watchlist against it.
 #    resolve_watchlist.py refuses a snapshot older than 90 days with
@@ -568,6 +571,8 @@ python3 scripts/mask_pack_refs.py   --pack human --btf-db /media/8tb/bioThreatFi
 python3 scripts/build_marker_db.py  --pack human --db-root /media/8tb --taxdump "$TAX" --threads 24
 # sylph is an ON-BY-DEFAULT arm and it sketches THIS PACK'S refs, not GTDB. Rebuild it
 # whenever build_pack_refs.py adds a reference, or the new refs are invisible to the arm.
+# Takes ~6 s for 375 genomes; --force is required to overwrite an existing sketch.
+conda activate btf-sylph
 bash    scripts/build_sylph_db.sh   --pack human --btf-db /media/8tb/bioThreatFinder --threads 24
 conda activate btf-kraken2
 bash    scripts/build_kraken2_db.sh --db-root /media/8tb --taxdump "$TAX" --threads 40
@@ -835,7 +840,7 @@ See `docs/verification.md`, which also lists what is **not** verified.
 | Reference masking | complete — 20.0 Mbp masked across all 375 references |
 | Host genome | T2T-CHM13v2.0 + both presets, 17 GB |
 | Marker DB | **146 built** / 4 partial / 9 motif_todo / 3 failed / 4 curation_required — 33 profile HMMs (rebuilt D41) |
-| sylph pack sketch | built 2026-09-29, **359 genomes — STALE.** 16 references added since are invisible to the arm, including the whole `Filoviridae` group entry. Rebuild with `scripts/build_sylph_db.sh` |
+| sylph pack sketch | **rebuilt** 2026-10-21 — 375 genomes, 177 MB, c=200/k=31/min-spacing=30, `BTF_BUILD_MANIFEST.txt` beside it. The previous sketch was from 2026-09-29 and held 359, missing all twelve `Filoviridae` references |
 | Kraken2 PlusPF | **built** 2026-10-02 - `hash.k2d` 123.5 GB, Bracken 100/150/250, `--clean` run (614 -> 233 GB) |
 | Metabuli | **built** 2026-10-04 - prebuilt `refseq_standard`, 110 GB, NCBI taxonomy verified, 62.5 GB peak RSS / 1 m 22 s per sample |
 | KrakenUniq | not built - opt-in by design (D2) |
@@ -871,10 +876,12 @@ is still open.
   (D35), but it is R9.4.1 and the D10 identity floor was reasoned for R10.4.1. Every ONT
   call is capped by that one floor and nothing else, so the ceiling for an ONT sample is
   `supported`. The floor was not falsified; that data cannot test it.
-- **The sylph pack sketch is stale.** It was built 2026-09-29 over 359 genomes; 16
-  references added since — the twelve `Filoviridae` group references and D42's second
-  *L. monocytogenes* assembly among them — are not in it, so an on-by-default arm cannot
-  raise them. Rebuild with `scripts/build_sylph_db.sh`.
+- ~~The sylph pack sketch is stale.~~ **Rebuilt 2026-10-21**, 359 → 375 genomes, strictly
+  additive. The gap it closed is worth remembering: for 22 days an on-by-default arm could
+  not raise the twelve `Filoviridae` references, and nothing reported that, because the arm
+  ran and produced a usable report. **The sketch still has no freshness check** — nothing
+  compares it against the refs manifest, so this can recur the next time
+  `build_pack_refs.py` adds a reference.
 - ***F. tularensis* vs *F. novicida* cannot currently be discriminated.** Both resolved
   to the same assembly (`GCF_000833355.1`), so the duplicate was dropped from the
   competitive bundle. Needs a curated distinct *F. novicida* assembly. This is the

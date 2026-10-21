@@ -6,15 +6,18 @@
    `check_max()` config functions -> `resourceLimits`, no top-level `def` in
    config, no top-level `workflow.onComplete`, and process directives must precede
    `input:`. All migrated.
-2. ~~Create the tool env~~ DONE - and it had to become **two** envs, not one.
+2. ~~Create the tool env~~ DONE - and it had to become **three** envs, not one.
    Installing kraken2 alongside mmseqs2/hmmer/mafft made the solver resolve
    kraken2 2.0.8-beta (2019), which has no `--report-minimizer-data`. `btf-refs` holds
-   datasets/minimap2/seqkit/samtools/mmseqs2/hmmer/mafft/sylph; `btf-kraken2` holds
-   kraken2 2.17.2 and bracken. See docs/STATUS.md.
+   datasets/minimap2/seqkit/samtools/mmseqs2/hmmer/mafft; `btf-kraken2` holds
+   kraken2 2.17.2 and bracken; `btf-sylph` holds sylph 1.0.0, matching the pin in
+   `modules/local/detect.nf` because a sketch must be readable by the version that
+   queries it. See docs/STATUS.md.
 3. ~~Build databases~~ DONE - taxonomy snapshot, pack refs (90 targets, 379 rows),
-   masking, markers, host genome, sylph pack sketch, Kraken2 PlusPF and Metabuli are all
-   built on NVMe. KrakenUniq is deliberately not built (D2). The one stale artifact is the
-   sylph sketch, built over 359 genomes before 16 references were added.
+   masking, markers, host genome, sylph pack sketch (rebuilt 2026-10-21 over all 375
+   references), Kraken2 PlusPF and Metabuli are all built on NVMe. KrakenUniq is
+   deliberately not built (D2). What is NOT built is a freshness check: no artifact except
+   the competitive bundles notices when the references underneath it change.
 4. **Validate on known-positive data** before trusting any output. *Partly done:*
    ZymoBIOMICS D6300 (EVEN and LOG, Illumina and ONT) plus all ten member organisms have
    run end to end, which refuted D12's neighbour gate and re-scored the tier ladder

@@ -90,6 +90,16 @@ One-offs against real data, not automated:
   371) and came back at 0 bp. The script now
   reconciles the whole pack and exits non-zero when a reference has no result, so the
   count no longer has to be checked by hand.
+- **The sylph pack sketch was reconciled against the refs manifest** (2026-10-21) and was
+  **16 references short** — all twelve `11266_Filoviridae*` files and four *Listeria*,
+  added 2026-10-14 and 2026-10-21 against a sketch built 2026-09-29. sylph is on by
+  default, so for 22 days that arm could not raise the Filoviridae group entry whose whole
+  purpose is catching a divergent filovirus, and nothing said so: the arm ran, produced a
+  usable report, and `screen_summary.tsv` recorded it `ok`. Rebuilt and verified by
+  `sylph inspect` on both sketches and diffing the genome sets — 359 → 375, exactly the 16
+  expected files added, none removed, c/k/min-spacing 200/31/30 matching the query side.
+  **Not automated:** nothing compares the sketch against the manifest, so this is a hand
+  check that must be repeated whenever `build_pack_refs.py` adds a reference.
 - **The reference pack's reach across each target species was measured without a
   specimen** (2026-10-21, D43). 13,582 known assemblies of the 26 bacterial targets,
   every one downloaded, each measured against the masked reference the pipeline actually

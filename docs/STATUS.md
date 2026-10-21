@@ -73,7 +73,7 @@ instead.
 | `packs/human/refs/` | 90/90 targets, 379 manifest rows / 375 with sequence, 90 competitive bundles + 180 indexes, 43 GB. All bundles verified free of duplicated sequence. The 4 rows without sequence are near neighbours that do not exist anywhere, carried with empty paths on purpose |
 | `packs/human/refs/masked/` | complete — **20,040,354 bp** over all 375 references with sequence (0.348%); vector 104,184 bp / 45 contigs, crossgroup 81,196 / 50, host 2,737 / 5. The two vacuous rows were re-masked 2026-10-04 and both shared-assembly pairs now agree and carry `SHARED_SEQUENCE` flags. Per-source byte totals in D5 were double-counted and are upper bounds, not a partition |
 | `host/human/` | T2T-CHM13v2.0 + sr and map-ont indexes, 17 GB |
-| `sylph/` | `human_pack_refs.syldb`, 176 MB, 359 genomes at c=200/k=31. Reproducible since 2026-10-05 via `scripts/build_sylph_db.sh` (5 s at 32 threads); it was hand-sketched before that, with no recorded command. **STALE as of 2026-10-21 — see below** |
+| `sylph/` | `human_pack_refs.syldb`, 177 MB, **375 genomes** at c=200/k=31/min-spacing=30, rebuilt 2026-10-21 with sylph 1.0.0 and a `BTF_BUILD_MANIFEST.txt`. The 2026-09-29 hand-built sketch (359 genomes) is kept beside it as `human_pack_refs.bak-2026-09-29.syldb` — the `.syldb` suffix is deliberate, `sylph inspect` refuses any other extension. Reproducible since 2026-10-05 via `scripts/build_sylph_db.sh` (6 s at 32 threads) |
 | `packs/human/markers/` | 166 manifest rows, **146 built**, 33 profile HMMs (rebuilt 2026-10-21, D41). 16 can only be UNKNOWN (3 failed, 4 curation_required, 9 motif_todo) and 4 are built on fewer tiers than declared — see the vaccine/veto note below. D30 closed 11 of the 18 gaps D27 tracked |
 | `kraken2/pluspf/` | **complete** 2026-10-02. `hash.k2d` 123.5 GB, `opts.k2d`, `taxo.k2d`, `seqid2taxid.map`, and `database{100,150,250}mers.kmer_distrib`. k=35, minimizer 31, full-sensitivity (no `--max-db-size`). Built against the pinned 2026-09-29 taxdump, md5-verified. Includes the 5,413 assemblies `kraken2-build` had silently dropped. `--clean` run 2026-10-03: 614 GB -> 233 GB. The remaining 125.5 GB is `database.kraken`, a Bracken BUILD intermediate - query-time Bracken reads only the `.kmer_distrib` files (measured: 0.6 s, 7.4 MB RSS). Keep it only to derive an extra read length without re-classifying the library |
 | `krakenuniq/` | not built. Opt-in by design (D2) |
@@ -150,7 +150,7 @@ python3 scripts/mask_pack_refs.py --pack human \
         --btf-db /media/8tb/bioThreatFinder --dry-run    # read-only; exits 1 if incomplete
 ```
 
-## Outstanding DATA fix: the sylph sketch predates 16 references, including all of Filoviridae
+## DATA fix, closed same day: the sylph sketch predated 16 references, including all of Filoviridae
 
 Found 2026-10-21 while reconciling the README against the built databases. `sylph/human_pack_refs.syldb`
 is dated **2026-09-29** and holds **359 genomes**. The refs manifest now has 379 rows, 375 of
@@ -171,19 +171,42 @@ recovering 3 of 3 replicates **on the Kraken2 arm**. The sylph arm has never bee
 see it.
 
 Nothing downstream is wrong, and no published finding needs revisiting — the arm was simply
-blind to these taxa. Fix is one command, ~5 s:
+blind to these taxa.
+
+**Done 2026-10-21.** Rebuilt in 6 s at 32 threads. **sylph lives in its own env, not
+`btf-refs`** — that env has no sylph at all, and the version matters because the sketch
+must be readable by the version that queries it (`modules/local/detect.nf` pins
+`sylph=1.0.0`, and `btf-sylph` has exactly that):
 
 ```bash
-export PATH=/home/bioinfo/miniconda3/envs/btf-refs/bin:$PATH
-bash scripts/build_sylph_db.sh --pack human --btf-db /media/8tb/bioThreatFinder --threads 32
+export PATH=/home/bioinfo/miniconda3/envs/btf-sylph/bin:$PATH
+bash scripts/build_sylph_db.sh --pack human --btf-db /media/8tb/bioThreatFinder \
+     --threads 32 --force      # --force is required; the sketch already exists
 ```
+
+Verified by inspecting both sketches and diffing the genome sets, rather than by trusting
+the count the builder printed:
+
+| | old (2026-09-29) | new (2026-10-21) |
+|---|---|---|
+| genomes | 359 | **375** |
+| `11266_Filoviridae*` | **0** | **12** |
+| `1639_Listeria_monocytogenes*` | 1 | 2 |
+| genomes removed | — | **none** |
+| c / k / min-spacing | — | 200 / 31 / 30, matching `sylph profile`'s defaults |
+
+The change is strictly additive: exactly the 16 expected files appeared and nothing was
+dropped. The old sketch is kept as `human_pack_refs.bak-2026-09-29.syldb`; note that
+`sylph inspect` **refuses a file that does not end in `.syldb`**, so a backup named
+`.syldb.bak-<date>` cannot be read back and is useless as a rollback.
 
 **The general lesson, which is D45's lesson arriving a second time:** `build_pack_refs.py`
 now rebuilds a competitive bundle when its inputs changed rather than when it is missing,
 but the sylph sketch has no such check — it is a single file that exists, so nothing
-notices it is older than the references it claims to cover. A freshness check comparing the
-sketch's mtime against the refs manifest belongs in the builder, or in the run's pre-flight
-beside the masking-completeness check.
+notices it is older than the references it claims to cover. **This is still true after the
+rebuild**, so the same 22-day blindness can recur the next time a reference is added. A
+freshness check comparing the sketch against the refs manifest belongs in the builder, or
+in the run's pre-flight beside the masking-completeness check.
 
 ## A behaviour change to be aware of: unevaluable vaccine and veto checks now cap the tier
 
