@@ -3137,24 +3137,19 @@ def test_samplesheet_role_authority(tmp: Path) -> None:
 # rows come back correct, the assertion fails, and the list must be emptied. A pending
 # item cannot outlive the problem it describes.
 # (a) The builder's OWN matcher would not accept these gene tags for these markers -
-#     the reference is a different gene. Real defects; each needs a re-retrieval.
-GENE_TAG_WRONG_GENE = {
-    "nipah_L": "nt reference is 2130 bp of the Nipah P (phosphoprotein) CDS, not L. "
-               "gene_match_rank now refuses it; needs a marker-database rebuild.",
-}
+#     the reference is a different gene. EMPTY as of the 2026-10-21 rebuild: `nipah_L`
+#     was the only entry and no longer holds the wrong coding sequence.
+GENE_TAG_WRONG_GENE: dict = {}
 # (b) The matcher accepts the tag, but the DECLARED gene is not among the retrieved
 #     ones. Not all of these are defects, so each says which it is.
 GENE_TAG_NO_EXACT = {
-    "ypest_pmt1_caf1": "DEFECT: holds caf1A/caf1M/caf1R, the operon's accessory genes, "
-                       "and not caf1 - the F1 antigen itself. Exact matches now outrank "
-                       "prefix ones, so a rebuild fixes it.",
     "mers_ORF1a": "NOT a defect: ORF1a is the 5' portion of the ORF1ab polyprotein and "
                   "NCBI annotates the CDS as ORF1ab. Correct sequence, different name. "
                   "Permanent entry.",
 }
-# Entries that must be FIXED, as opposed to accepted. The staleness check below is run
-# over these so a pending item cannot outlive the defect it describes.
-GENE_TAG_MUST_FIX = set(GENE_TAG_WRONG_GENE) | {"ypest_pmt1_caf1"}
+# Entries that must be FIXED, as opposed to accepted. Empty: both original entries were
+# verified resolved against the rebuilt database on 2026-10-21.
+GENE_TAG_MUST_FIX: set = set()
 
 
 def test_marker_gene_identity(tmp: Path) -> None:

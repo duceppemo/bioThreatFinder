@@ -84,6 +84,12 @@ One-offs against real data, not automated:
   group-entry files had never been masked (D34) and came back at 0 bp. The script now
   reconciles the whole pack and exits non-zero when a reference has no result, so the
   count no longer has to be checked by hand.
+- **The marker database was rebuilt end to end** (2026-10-21, D41): 166 rows forced,
+  143 -> 146 `built`, zero status regressions, 33 profiles unchanged. Verified not from
+  the manifest alone but by realigning a real library against the rebuilt references,
+  deriving states from the production manifest and re-scoring - `confirmed_in_silico`
+  fires on the database the pipeline actually loads. The first attempt was ROLLED BACK:
+  a local `hmmbuild` that resolved but could not run degraded 33 markers to `partial`.
 - **Guards refuse correctly**: GTDB-namespaced Metabuli index rejected; wrong refs base
   rejected; 201-day taxdump rejected by both the resolver and the Kraken2 builder;
   kraken2 2.0.8-beta rejected for lacking `--report-minimizer-data`.

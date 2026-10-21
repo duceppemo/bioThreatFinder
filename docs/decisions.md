@@ -3986,3 +3986,96 @@ cannot outlive the problem it describes.
   that premise false — so the test went red, correctly. It now uses *Orientia
   tsutsugamushi*, as of 2026-10-20 the only notifiable bacterium left without a block.
   31 of 90 taxa still have none.
+
+## D41 — The marker database rebuild: a broken local library degraded a third of the catalogue, and the first attempt was rolled back
+
+D40 fixed the retrieval code but left the shipped marker database untouched, because
+realising the fix needs a full rebuild of all 166 rows and `--only-marker` cannot do it
+safely. This is that rebuild. It took two attempts, and the first one had to be undone.
+
+### `--force` was not optional
+
+Without it the resume path SKIPS any row whose status is `built` or `partial` when the
+files are present, the md5 matches and no catalogue column has drifted — which is
+exactly the state of the two markers the rebuild existed to fix. A plain re-run would
+have reported success and changed nothing. `--force` also bypasses the 13 GB Entrez
+response cache, so all 166 rows were re-fetched from NCBI.
+
+### The first attempt degraded 33 markers, and the cause was local
+
+It completed, exited non-zero, and the comparison against the pre-rebuild manifest read:
+
+| | before | after attempt 1 |
+|---|---|---|
+| `built` | 143 | **113** |
+| `partial` | 4 | **37** |
+| improvements | — | **0** |
+
+Every one of the 33 regressions had the same cause, and it had nothing to do with NCBI
+or with the retrieved sequences: `hmmbuild` exited 127 with
+`libgsl.so.25: cannot open shared object file`. The profile step failed for every marker
+declaring an HMM tier, and a marker missing a declared tier is recorded `partial`. The
+sequences were fine; the profiles simply never got built.
+
+**The database was restored from the backup taken before the run** — 143 built, 33
+profiles, 163 rows, verified against the saved manifest. The regressed copy was kept
+rather than deleted, so the failure can be inspected instead of reconstructed.
+
+Two process lessons, both mine. The PATH was assembled by searching for the first
+executable of each name, which found an `hmmbuild` that resolves but cannot run — so
+the pre-flight check reported it as present. **Resolving a tool is not the same as
+running it**, and the dry run printed the path without ever invoking it. And the second
+attempt was launched after validating the replacement on a single profile marker in a
+scratch `--db-root` first, which is what the first attempt should have done.
+
+### The second attempt is clean
+
+| | baseline | rebuilt |
+|---|---|---|
+| `built` | 143 | **146** |
+| `partial` | 4 | 4 |
+| `failed` | 3 | 3 |
+| `motif_todo` | 9 | 9 |
+| `curation_required` | 4 | 4 |
+| profiles (`has_hmm`) | 33 | 33 |
+| status regressions | — | **0** |
+
+The +3 are D40's Salmonella markers, which until now existed only in a scratch
+database. Zero profile failures. Every other category identical to baseline.
+
+### Verified against the production database rather than a scratch copy
+
+The real library was realigned against the rebuilt `markers.nt.fna`, states were derived
+from the production manifest, and the run was re-scored: all three Salmonella markers
+PRESENT at breadth 1.000 and identity 0.985–0.989, and the finding reaches
+`confirmed_in_silico` on `marker rule satisfied: salm_invA and salm_ttrC and salm_ssaV`.
+D40's verification used a three-marker scratch database; this one uses the database the
+pipeline will actually load.
+
+### Both pending gene-tag defects are resolved, and one of them not as predicted
+
+`ypest_pmt1_caf1` now holds the gene it declares, 513 bp, where it had held only the
+operon's accessory genes.
+
+`nipah_L` was predicted to stay broken and did not. It no longer holds the mismatched
+coding sequence: with the corrected matcher nothing matched at the CDS level, so it fell
+back to the whole-record route — and that route is intended, since
+`NT_MAX_DIRECT_LEN = 50_000`. Compared against its five sibling markers, it now has the
+same strategy, the same coverage floor, the same evidence tiers and the same retrieval
+route. It is consistent with the pack's design instead of being the one outlier holding
+a different gene, so the defect D40 identified is gone.
+
+The self-retiring pending list did its job: it went red the moment the rebuild made both
+entries stale, and each was checked against the rebuilt database before being removed
+rather than deleted because the test complained. `GENE_TAG_MUST_FIX` is now empty.
+
+### Still open, and NOT introduced here
+
+16 markers that declare a gene hold a whole viral genome or segment as their nucleotide
+reference, because the whole-record route accepts anything under 50 kb. Their coverage
+floors are 0.50, so for those rows the nucleotide tier asks "is half of this genome
+covered" rather than "is this gene present", with the protein and profile tiers carrying
+the specificity. That is pre-existing, unchanged by this rebuild, and a question about
+marker semantics rather than a bug to fix quietly. Recorded rather than touched.
+
+Suite **286 passed, 0 failed**.

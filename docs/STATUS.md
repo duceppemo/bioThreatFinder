@@ -317,17 +317,29 @@ has no data on the chemistry it is calibrated for. See **D35**.
   marker exists and is the WRONG answer for a taxon with well-known targets. As of
   2026-10-20 *Orientia tsutsugamushi* is the only NOTIFIABLE BACTERIUM left without a
   block. See **D37**, **D40**.
-- **The shipped marker database holds the wrong gene for two markers, and the rebuild
-  that fixes them has not been run** (D40). `nipah_L`'s nucleotide reference is 2130 bp
-  of the Nipah **P** (phosphoprotein) CDS, not L - a one-letter CDS name was allowed to
-  claim the alias "polymerase" - and `ypest_pmt1_caf1` holds caf1A/caf1M/caf1R and not
-  caf1 itself, because nothing preferred the gene actually declared. **Both sit in a
-  `confirm_requires`** (Nipah henipavirus, BSL-4; *Y. pestis*, select agent). The code
-  is fixed and the invariant is now a test with a self-retiring pending list, but
-  realising it needs a FULL rebuild of all 166 markers - `--only-marker` cannot do it
-  safely, because `concat_files()` rewrites `markers.nt.fna` from the manifest rows
-  while the index builders skip when their output exists. That rebuild rewrites the
-  operational marker database and has not been started. See **D40**.
+- ~~The shipped marker database holds the wrong gene for two markers.~~ **Rebuilt
+  2026-10-21 (D41):** 143 -> 146 `built`, zero status regressions, 33 profiles
+  unchanged, and the three Salmonella markers now in the operational database rather
+  than a scratch copy. Verified by realigning the real library against the rebuilt
+  references and re-scoring: `confirmed_in_silico` fires on the production database.
+  `ypest_pmt1_caf1` now holds the gene it declares. `nipah_L` no longer holds the wrong
+  coding sequence - it fell back to the whole-record route, which is intended, and now
+  matches its five sibling markers in strategy, coverage floor, evidence tiers and
+  route. Both pending gene-tag entries were verified and removed; `GENE_TAG_MUST_FIX`
+  is empty.
+  - The FIRST attempt had to be rolled back: a local `hmmbuild` that resolved but could
+    not run (missing shared library) failed the profile step for every marker declaring
+    an HMM tier, taking `built` 143 -> 113 and `partial` 4 -> 37. Nothing to do with
+    NCBI or the retrieved sequences. Restored from backup, replacement validated on one
+    marker in a scratch `--db-root`, then rerun. Resolving a tool is not the same as
+    running it. See **D41**.
+- **16 markers that declare a gene hold a whole viral genome or segment as their
+  nucleotide reference**, because the whole-record retrieval route accepts anything
+  under `NT_MAX_DIRECT_LEN = 50_000`. Their `min_coverage` is 0.50, so for those rows the
+  nucleotide tier asks "is half of this genome covered" rather than "is this gene
+  present", and the protein and profile tiers carry the specificity. PRE-EXISTING and
+  unchanged by the D41 rebuild. This is a question about what those markers should mean,
+  not a bug to fix quietly, and it is recorded rather than touched. See **D41**.
 
 - ~~Metabuli: keep as a recall arm or drop?~~ **Decided 2026-10-05: kept, defaulted OFF.**
   The bake-off ran on both the identity-matched LoD batch and the `divergent_*` pair, and
