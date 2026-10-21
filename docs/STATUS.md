@@ -293,12 +293,17 @@ has no data on the chemistry it is calibrated for. See **D35**.
     reported as a `supported` *L. monocytogenes* detection at 355.5 RPM. The sheet now
     drives `role` on every row, in both directions, and a declared control absent from
     the read ledger is not credited. See **D39**.
-- **The 0.98 illumina `min_read_identity` floor now binds on real data too.** A real
-  *L. monocytogenes* isolate at 620,881 RPM and 95% window occupancy reads 0.9643 -
-  strain divergence from the pack reference, not sequencing error. NOT lowered: 0.98
-  is a species-discrimination floor and relaxing it weakens *E. coli*/*Shigella* and
-  *F. tularensis*/*F. novicida*. The remedy is a better reference or a per-taxon
-  override. Mirror of D35's ONT finding, different cause. See **D38**.
+- ~~The 0.98 illumina `min_read_identity` floor now binds on real data too.~~
+  **Resolved 2026-10-21 by a second reference, not by moving the floor (D42).** The
+  isolate reading 0.9643 was being compared against the only assembly the pack carried
+  for it, from the other lineage. With a second assembly added: identity **0.9641 ->
+  0.9947**, best-reference breadth **0.877 -> 0.982**, and **48% more reads map at all**.
+  The floor stays at 0.98 and no per-taxon override exists. `--max-per-taxon` is 1 for
+  bacteria and 3 for viruses by default, and the help text already gave the reason -
+  intra-species diversity losing reads from a divergent strain - so this is the existing
+  design extended to a bacterium on the strength of a measurement. Which other bacteria
+  deserve a second reference is now a question answerable the same way, and is
+  unanswered. See **D38**, **D42**.
 
 - ~~*Salmonella* needs a real marker block, not a declaration.~~ **Done 2026-10-20
   (D40):** `salm_invA` + `salm_ttrC` + `salm_ssaV`, and *S. enterica* in the

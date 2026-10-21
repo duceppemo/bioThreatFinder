@@ -15,9 +15,9 @@ Needs `samtools` for the coverage cases (skipped with a message if absent) and a
 for the screen cases (`BTF_TAXDUMP=/path/to/taxdump`, skipped otherwise). Everything else
 is fixture-driven.
 
-Current state: **286 passed, 0 failed, 0 skipped** (2026-10-20) with `samtools` on
+Current state: **297 passed, 0 failed, 0 skipped** (2026-10-21) with `samtools` on
 PATH and `BTF_TAXDUMP` set. The bare `python3 tests/test_pipeline.py` reports
-**267 passed, 3 skipped** - the `coverage` and `statecols` checks need `samtools`, and
+**278 passed, 3 skipped** - the `coverage` and `statecols` checks need `samtools`, and
 the `screen`/`leadjoin` writers need a taxdump. The per-script `--self-test` suites run
 as single checks from here, so `selftest:build_marker_db` alone covers 60+ assertions,
 including D30's eleven on the protein query ladder.
@@ -46,6 +46,8 @@ including D30's eleven on the protein query ladder.
 | `markergene` | 12 | A marker's sequences must be THE GENE THE CATALOGUE NAMES, and three shipped markers were not (D40). The nucleotide and protein tiers are retrieved by separate ladders, so they can land on different genes while the manifest says `built` and marker_evidence treats the marker as fully testable - `min_coverage` then being a fraction of the wrong reference. The matcher no longer lets a one-letter CDS name claim a word alias (`[gene=P]` claimed `nipah_L` because *"polymerase".startswith("p")*, so the L-polymerase marker's nt reference is 2130 bp of the Nipah P gene, in a BSL-4 agent's `confirm_requires`), an exact gene match now outranks an operon-partner one (`ypest_pmt1_caf1` holds caf1A/M/R and not caf1), and the permissiveness that is deliberate - `capBCADE` for `capB`, `ORF1ab` for `ORF1a`, `pag` for `pagA` - still works. Plus the invariant across all 115 checkable references, with a SELF-RETIRING pending list: the test also asserts each pending defect is still real, so a rebuild forces the entry out |
 | `salm` | 4 | The Salmonella block is species confirmation, not pathotype (D40). All three loci present confirms and the finding names the rule; dropping `ssaV` does NOT confirm, because invA and ttrC are both genus-level and S. bongori carries both; and an UNTESTED `ssaV` holds it just as firmly as an absent one. The fixture carries a read ledger on purpose - without it the alignment-length floor falls back to a flat 100 bp and a 2x101 library's 99 bp mean fails the very gate D37 found, so the test would have passed for the wrong reason |
 | `statecols` | 3 | The states file's columns must not depend on which marker sorts first (D40). `marker_evidence.py` took its header from `results[0]`, and a record only carries `nt_depth`, `nt_expected_breadth`, `nt_n_seqs` and `nt_best_ref` if it reached the nucleotide measurement block - so a catalogue whose first row is UNKNOWN produced a header without them and `extrasaction="ignore"` dropped them from every row, silently, including rows that had measured them. `nt_expected_breadth` is the input to the depth gate, the rule that stops a false ABSENT |
+| `mref` | 8 | Breadth dilution follows from having SEVERAL references, not from rank (D42). A species with two single-sequence assemblies is judged on the one its reads are actually on, and the substitution changes the TIER rather than only printing a note. A single-reference taxon gets no note at all. A DRAFT assembly blocks the substitution instead of letting one contig stand for a genome, and says the row may be under-called. With no refs manifest the question is left unasked |
+| `refs` | 3 | Invariants over the shipped reference pack, all three violated on 2026-10-21 and each verified to fail against a reproduction of the broken state (D42): a `(taxid, accession)` pair appears ONCE; a taxon's row count equals its distinct accession count - `--max-per-taxon N` deduped candidates by FILENAME, so it re-downloaded accessions already held and credited a taxon with N references while holding one genome N times; and no competitive bundle is older than the genomes it is built from, because the FASTA and indexes are skipped whenever the output merely exists, leaving the manifest saying two references and the aligner using one |
 
 ## It has already caught a real bug
 
@@ -84,6 +86,14 @@ One-offs against real data, not automated:
   group-entry files had never been masked (D34) and came back at 0 bp. The script now
   reconciles the whole pack and exits non-zero when a reference has no result, so the
   count no longer has to be checked by hand.
+- **A second reference for one species was measured, not assumed** (2026-10-21, D42).
+  Same reads against a one- and a two-reference bundle: `mean_identity` **0.9641 ->
+  0.9947**, `best_reference_breadth` **0.877 -> 0.982**, and **6.2 M more reads map at
+  all, a 48% gain** - they could not previously align to the wrong-lineage genome. The
+  0.9641 control reproduces the production run's 0.9643, which is what makes the
+  comparison valid. The 0.98 species-discrimination floor was NOT lowered and no
+  per-taxon override was added. Raw breadth falls 0.877 -> 0.544 because the denominator
+  now spans both genomes, which is what the `mref` substitution exists to handle.
 - **The marker database was rebuilt end to end** (2026-10-21, D41): 166 rows forced,
   143 -> 146 `built`, zero status regressions, 33 profiles unchanged. Verified not from
   the manifest alone but by realigning a real library against the rebuilt references,

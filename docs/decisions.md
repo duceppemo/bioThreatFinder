@@ -4079,3 +4079,110 @@ the specificity. That is pre-existing, unchanged by this rebuild, and a question
 marker semantics rather than a bug to fix quietly. Recorded rather than touched.
 
 Suite **286 passed, 0 failed**.
+
+## D42 — A second reference for one species: identity 0.9641 → 0.9947, 48% more reads recovered, and the floor stays at 0.98
+
+D38 measured a genuine *L. monocytogenes* isolate at identity 0.9643 against the 0.98
+Illumina floor and refused to lower it, because 0.98 is a species-discrimination floor
+protecting pairs the pipeline must keep apart. The remedy named there was "a better
+reference or a per-taxon override". The question asked here was whether a species can
+carry more than one reference. It can, the pack already does it for viruses, and it
+turns out to be the right answer.
+
+### The pack already encodes this reasoning - for viruses only
+
+`build_pack_refs.py` takes `--max-per-taxon` (default **1**) and
+`--max-per-taxon-virus` (default **3**), and the help text gives the rationale:
+*"Viruses need more: intra-species diversity is high enough that one RefSeq genome can
+lose reads from a divergent strain."* 74 of the pack's taxids carry two or three
+references, every one of them a virus; two notifiable viruses carry three target
+assemblies each. **No bacterium carried more than one.** The Listeria measurement is
+evidence that the same reasoning applies to some bacteria, so this is the existing
+design extended, not a new mechanism.
+
+### The measurement, same reads both ways
+
+The isolate library aligned against the one-reference bundle and against the
+two-reference bundle, same tool, same MAPQ, `coverage_stats.py` for both:
+
+| metric | 1 reference | 2 references |
+|---|---|---|
+| `mean_identity` | 0.9641 | **0.9947** |
+| `best_reference_breadth` | 0.8768 | **0.9822** |
+| `best_reference_occupancy` | 0.9525 | **0.9914** |
+| reads mapped | 12,826,145 | **19,011,128** |
+| raw `breadth` | 0.8768 | 0.5444 (diluted) |
+| raw `window_occupancy` | 0.9525 | 0.7436 (diluted) |
+
+The one-reference figure of 0.9641 reproduces the production run's 0.9643, which is the
+control that makes the comparison valid: the production run aligned only the ~1.46 M
+screen-assigned reads while this used the whole library, and identity is unchanged by
+that difference.
+
+**Three things improved, not one.** Identity clears the floor by a wide margin. The best
+reference is *better* covered, 0.877 → 0.982, because the correct-lineage genome is
+covered end to end rather than patchily. And **6.2 million more reads map at all, a 48%
+gain** - they previously could not align well enough to the wrong lineage. That is
+recovered sensitivity, not a threshold workaround. The reads overwhelmingly prefer the
+newly added assembly, so the isolate genuinely is the lineage the pack lacked.
+
+**The 0.98 floor is untouched.** No per-taxon override was added, and none is needed.
+
+### Dilution is a property of having several references, not of rank
+
+`breadth` and `window_occupancy` are covered-over-SUMMED across every reference filed
+under a taxid, so the second genome halves both - visible above as 0.877 → 0.544.
+`coverage_stats.py` already emitted `best_reference_breadth` and
+`best_reference_occupancy` on **every** row for exactly this, but `score_evidence.py`
+substituted them for supra-specific entries only. Correct as far as it went, and wrong
+about why: the dilution follows from having more than one reference, whatever the rank.
+
+The substitution now applies to any multi-reference taxon, with one condition.
+`best_reference_*` is measured per BAM reference, i.e. **per contig** - so for a draft
+assembly the "best reference" is the best-covered contig, and substituting it would let
+a well-covered 40 kb contig stand in for a 5 Mb genome. It is exact only when every
+assembly under the taxid is a single sequence, which `load_ref_bundles()` answers from
+the manifest's `n_contigs` without re-running coverage. When that fails the diluted
+numbers are kept and the row says it may be UNDER-called - under-calling is the safe
+direction, but a reader must not have to work out why the floors were applied to a
+denominator including genomes the sample never had.
+
+### Two bugs, both the shape this project keeps finding
+
+**`--max-per-taxon N` could not produce N distinct assemblies.** The candidate dedupe
+compared **filenames**: a reused genome sits under the plain `<taxid>_<name>.fna.gz`
+while an extra is written as `<taxid>_<name>.<accession>.fna.gz`, so re-selecting the
+accession already on disk produced a different filename, passed the check, and was
+downloaded again. Measured: four taxa ended with two manifest rows naming **one**
+accession and two byte-identical copies of one genome, while the summary reported
+*"targets fully built: 1 / 1"* and *"genomes on disk: 8"*. The flag was unusable for any
+taxon that already had one reference - which is every taxon in a built pack. Now deduped
+on accession, and the rerun fetched a genuinely distinct assembly.
+
+**Adding a reference did not invalidate the competitive bundle.** The FASTA and its
+minimap2 indexes are skipped whenever the output merely *exists*, so the manifest said
+two references while the aligner still used one - a disagreement invisible from either
+side. Existence is not freshness. Rebuilt explicitly here; the general fix is a
+staleness check against the inputs, and it is not done.
+
+### What is now pinned
+
+Three invariants over the shipped pack, each verified to FAIL against a reproduction of
+the broken state: a `(taxid, accession)` pair appears once; a taxon's row count equals
+its distinct accession count; and no competitive bundle is older than the genomes it is
+built from. Plus eight checks on the geometry substitution, six of which fail against
+the pre-change scorer.
+
+The masking invariant from D34 did its job unprompted: the suite went red with *"4
+unmasked"* the moment the new references landed, and stayed red until they were masked.
+375 references, all with a masking result.
+
+Suite **297 passed, 0 failed**.
+
+### Not done
+
+The three near-neighbour taxa in that bundle also gained a second assembly, because
+`--max-per-taxon` applies to neighbours too. That improves competitive absorption and
+costs nothing measured here, but it was a side effect rather than a decision. No other
+bacterium was touched: the question of which bacteria deserve a second reference is now
+answerable by measurement, and has been answered for one.

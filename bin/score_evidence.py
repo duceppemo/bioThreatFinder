@@ -448,6 +448,45 @@ def target_covers_its_reference(breadth: float, min_breadth: float,
     return breadth >= min_breadth and occupancy >= min_occupancy
 
 
+def load_ref_bundles(manifest) -> dict:
+    """taxid -> (n_assemblies, n_contigs) from the pack's reference manifest.
+
+    WHY BOTH NUMBERS. `breadth` and `window_occupancy` are covered-over-SUMMED across
+    every reference filed under a taxid, so a taxid carrying several assemblies has both
+    diluted by the ones the sample does not contain. coverage_stats.py already emits
+    `best_reference_breadth` / `best_reference_occupancy` for exactly this, and
+    score_evidence used them for supra-specific entries only - correct as far as it went,
+    but the dilution is a property of having MORE THAN ONE REFERENCE, not of rank. 74 of
+    the pack's 241 taxids carry two or three, every one of them a virus, and the shipped
+    design uses it for multiple strains of ONE species (Monkeypox and Variola each have
+    three target assemblies).
+
+    The second number is the safety condition. `best_reference_*` is computed per BAM
+    reference sequence, i.e. PER CONTIG - so for a draft assembly the "best reference" is
+    the best-covered contig, not the best-covered genome, and substituting it would let a
+    well-covered 40 kb contig stand in for a 5 Mb genome. The two coincide only when
+    every assembly under the taxid is a single sequence. n_contigs == n_assemblies is that
+    test, and it is answered from the manifest without re-running coverage.
+    """
+    out: dict = {}
+    if not manifest or manifest.name == "NO_FILE" or not manifest.exists():
+        return out
+    try:
+        for row in read_tsv(manifest):
+            tx = (row.get("taxid") or "").strip()
+            if not tx:
+                continue
+            n_asm, n_ctg = out.get(tx, (0, 0))
+            try:
+                ctg = int((row.get("n_contigs") or "1").strip() or 1)
+            except ValueError:
+                ctg = 1
+            out[tx] = (n_asm + 1, n_ctg + max(ctg, 1))
+    except Exception:
+        return {}
+    return out
+
+
 def load_ref_names(manifest) -> dict:
     """taxid -> (name, role) from the pack's reference manifest.
 
@@ -585,6 +624,7 @@ def main() -> int:
     # taxid -> (name, role). Used ONLY to name an attributed-to neighbour in prose;
     # no gate reads it, so a missing manifest degrades the wording and nothing else.
     ref_names = load_ref_names(args.refs_manifest)
+    ref_bundles = load_ref_bundles(args.refs_manifest)
 
     # sample -> mean read length, from the stats the pipeline already computes.
     read_len_of: dict = {}
@@ -848,6 +888,15 @@ def main() -> int:
         group_rank = (meta.get("resolved_rank") or "").strip().lower() in SUPRA_SPECIFIC_RANKS
         best_ref_breadth = as_float(row.get("best_reference_breadth"), -1.0)
         best_ref_occ = as_float(row.get("best_reference_occupancy"), -1.0)
+        # THE DILUTION IS A PROPERTY OF HAVING SEVERAL REFERENCES, NOT OF RANK. A species
+        # carrying two assemblies has breadth and occupancy halved by the one the sample
+        # does not contain, exactly as a group bundle does, and until now only the
+        # supra-specific entries were rescued. Substituting is EXACT only when every
+        # assembly under the taxid is a single sequence, because `best_reference_*` is
+        # measured per BAM reference, i.e. per contig - see load_ref_bundles().
+        n_asm, n_ctg = ref_bundles.get(taxid, (0, 0))
+        multi_ref = n_asm > 1
+        per_asm_exact = multi_ref and n_ctg == n_asm
         group_geometry_note = ""
         if group_rank and best_ref_breadth >= 0:
             # Recorded, because the published row keeps the MEASURED bundle numbers
@@ -865,6 +914,30 @@ def main() -> int:
             breadth = best_ref_breadth
             if best_ref_occ >= 0:
                 occupancy = best_ref_occ
+        elif per_asm_exact and best_ref_breadth >= 0:
+            group_geometry_note = (
+                f"MULTI-REFERENCE TAXON: {n_asm} single-sequence assemblies are filed "
+                f"under this taxid, so the row's breadth {breadth:.4f} is the covered "
+                f"assembly's share of all of them. Judged instead on its best single "
+                f"reference {row.get('best_reference') or '?'} (breadth "
+                f"{best_ref_breadth:.4f}, occupancy "
+                f"{best_ref_occ if best_ref_occ >= 0 else float('nan'):.4f}).")
+            breadth = best_ref_breadth
+            if best_ref_occ >= 0:
+                occupancy = best_ref_occ
+        elif multi_ref:
+            # FAILS SAFE, AND SAYS SO. At least one assembly under this taxid has more
+            # than one sequence, so `best_reference_*` is a per-CONTIG figure and cannot
+            # stand for a genome. The diluted numbers are kept - under-calling is the
+            # safe direction - but a reader must not have to work out why the floors were
+            # applied to a denominator that includes genomes the sample never had.
+            group_geometry_note = (
+                f"MULTI-REFERENCE TAXON, GEOMETRY NOT RE-MEASURED: {n_asm} assemblies "
+                f"totalling {n_ctg} sequences are filed under this taxid, so breadth "
+                f"{breadth:.4f} and occupancy {occupancy:.4f} are diluted across "
+                f"references the sample may not contain. They were NOT replaced by the "
+                f"best single reference, because with a multi-sequence assembly that "
+                f"figure is one contig and not one genome. This row may be UNDER-called.")
         depth_cv = as_float(row.get("depth_cv"))
         identity = as_float(row.get("mean_identity"))
         nb_ratio = as_float(row.get("neighbour_ratio"), math.inf)

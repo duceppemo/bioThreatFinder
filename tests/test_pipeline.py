@@ -3415,6 +3415,204 @@ def test_marker_state_columns(tmp: Path) -> None:
 
 
 
+def tier_rank_local(tier: str) -> int:
+    """Rank a tier for test comparisons, without importing the scorer's table."""
+    order = ["no_reference", "screened_only", "attributed_to_neighbour",
+             "indistinguishable_complex", "suppressed_control", "control_background",
+             "marker_veto", "group_lead", "vaccine_strain", "supported",
+             "confirmed_in_silico"]
+    try:
+        return order.index((tier or "").strip())
+    except ValueError:
+        return -1
+
+
+def test_multi_reference_geometry(tmp: Path) -> None:
+    """Breadth dilution is a property of having several references, not of rank.
+
+    D42. `breadth` and `window_occupancy` are covered-over-SUMMED across every reference
+    filed under a taxid, so a taxon carrying two assemblies has both halved by the one
+    the sample does not contain. coverage_stats.py already emits
+    `best_reference_breadth` / `best_reference_occupancy` on every row for exactly this,
+    but score_evidence substituted them for supra-specific entries ONLY - so a species
+    with two references was judged on a denominator including a genome it never had.
+
+    The substitution is EXACT only when every assembly under the taxid is a single
+    sequence, because `best_reference_*` is measured per BAM reference, i.e. per contig.
+    With a draft assembly it is the best-covered contig, which must not stand in for a
+    genome - so that case keeps the diluted numbers and says it may be under-called.
+    """
+    def refs(path: Path, rows: list[tuple[str, str, int]]) -> Path:
+        path.write_text(
+            "taxid\tname\tgroup\trole\taccession\tassembly_level\t"
+            "genome_size\tn_contigs\tpath\n"
+            + "".join(f"{tx}\tTestus {tx}\tbacteria\ttarget\t{acc}\tcomplete\t"
+                      f"3000000\t{nctg}\t/x/{acc}.fna\n" for tx, acc, nctg in rows))
+        return path
+
+    # One row, two assemblies' worth of reference: the sample contains one of them, so
+    # the summed denominator halves both statistics. The fixture leans on OCCUPANCY, not
+    # breadth: a watchlist row's own `min_breadth` overrides `--threshold min_breadth`
+    # (0.01 for this taxon), so a breadth floor cannot be set from here, whereas
+    # `--min-occupancy` is a plain CLI floor. Diluted occupancy 0.476 fails a 0.60 floor;
+    # 0.952 on the assembly actually covered clears it. So the substitution has to change
+    # the TIER, not merely print a note.
+    def row(sample: str) -> str:
+        return cov_row(sample=sample, role="sample", platform="illumina", taxid="1639",
+                       taxon="Listeria monocytogenes", group="bacteria",
+                       reference_bp=5800000, unique_reads=80000,
+                       reads_per_million=8000.0, breadth=0.4400,
+                       mean_depth=40.0, depth_cv=0.40, window_bp=1000,
+                       windows_expected=5800, windows_occupied=2761,
+                       window_occupancy=0.4760, mean_identity=0.9900,
+                       mean_alignment_length=99, best_reference_breadth=0.8800,
+                       best_reference_occupancy=0.9520,
+                       best_reference="taxid|1639|NC_003210.1",
+                       best_neighbour_taxid="1642", best_neighbour_reads=20,
+                       neighbour_ratio="4000.0", screen_assigned_reads=80000,
+                       mapped_fraction_of_assigned="0.9900",
+                       total_reads_screened=10000000, mapq_min=10)
+
+    stats = tmp / "mref_stats.tsv"
+    stats.write_text("file\tavg_len\tsample\trole\tplatform\n"
+                     "/x/S.fq.gz\t101.0\tS\tsample\tillumina\n")
+
+    def judge(tag, manifest_rows):
+        cov = tmp / f"mref_{tag}.tsv"
+        write_cov(cov, [row("S")])
+        return score(tmp / f"d_{tag}", cov, markers=_empty_markers(tmp),
+                     extra=["--refs-manifest", str(refs(tmp / f"m_{tag}.tsv", manifest_rows)),
+                            "--read-stats", str(stats), "--min-occupancy", "0.60"])
+
+    # (a) TWO single-sequence assemblies: the substitution is exact, so the row is
+    #     judged on the assembly it is actually on and clears the floor.
+    got = judge("two", [("1639", "GCF_000196035.1", 1), ("1639", "GCF_000008285.1", 1)])
+    r = got.get(("S", "Listeria monocytogenes"), {})
+    record("mref:a species with two single-sequence references is judged on the best one",
+           "MULTI-REFERENCE TAXON:" in r.get("reasons", ""), r.get("reasons", "")[:150])
+    record("mref:and the rescued row names the reference and both figures",
+           "NC_003210.1" in r.get("reasons", "") and "0.8800" in r.get("reasons", ""),
+           r.get("reasons", "")[:200])
+    rescued_tier = r.get("tier")
+    record("mref:the substitution changes the TIER, not just the prose",
+           r.get("tier") not in ("screened_only", "no_reference"),
+           f"got {r.get('tier')} - diluted occupancy 0.476 would fail the 0.60 floor")
+
+    # (b) ONE assembly: nothing to dilute, so no note at all. This is the case that must
+    #     not change - 167 of the pack's taxids are single-reference.
+    got = judge("one", [("1639", "GCF_000196035.1", 1)])
+    r = got.get(("S", "Listeria monocytogenes"), {})
+    record("mref:a single-reference taxon gets no geometry note",
+           "MULTI-REFERENCE TAXON" not in r.get("reasons", ""), r.get("reasons", "")[:150])
+
+    # (c) TWO assemblies, one of them a draft: best_reference_* is a per-CONTIG figure,
+    #     so substituting it would let one contig speak for a genome. Keep the diluted
+    #     numbers and disclose it.
+    got = judge("draft", [("1639", "GCF_000196035.1", 1), ("1639", "GCA_900000000.1", 58)])
+    r = got.get(("S", "Listeria monocytogenes"), {})
+    record("mref:a draft assembly blocks the substitution rather than risking a contig",
+           "GEOMETRY NOT RE-MEASURED" in r.get("reasons", ""), r.get("reasons", "")[:150])
+    record("mref:and the under-call is disclosed, not silent",
+           "UNDER-called" in r.get("reasons", ""), r.get("reasons", "")[:200])
+    record("mref:the blocked row really is held lower than the rescued one",
+           tier_rank_local(r.get("tier")) < tier_rank_local(rescued_tier),
+           f"blocked={r.get('tier')} vs rescued={rescued_tier}")
+
+    # (d) No manifest: the question cannot be asked, so it must not be answered. This is
+    #     the pre-D42 behaviour and every run without --refs-manifest depends on it.
+    cov = tmp / "mref_nomanifest.tsv"
+    write_cov(cov, [row("S")])
+    got = score(tmp / "d_nomanifest", cov, markers=_empty_markers(tmp),
+                extra=["--read-stats", str(stats), "--threshold", "min_breadth=0.50"])
+    r = got.get(("S", "Listeria monocytogenes"), {})
+    record("mref:without a refs manifest no geometry claim is made either way",
+           "MULTI-REFERENCE TAXON" not in r.get("reasons", ""), r.get("reasons", "")[:150])
+
+
+
+def test_refs_manifest_integrity(tmp: Path) -> None:
+    """Two invariants over the shipped reference pack, both violated on 2026-10-21.
+
+    D42. (a) A (taxid, accession) pair must appear ONCE. `--max-per-taxon N` deduped
+    candidates by FILENAME, and a reused genome sits under the plain
+    <taxid>_<name>.fna.gz while an extra is written as
+    <taxid>_<name>.<accession>.fna.gz - so re-selecting the accession already on disk
+    produced a different filename, passed the check, and was downloaded again. Running
+    `--only-taxid 1639 --max-per-taxon 2` gave four taxa two manifest rows naming ONE
+    accession and two byte-identical copies of one genome, while the summary reported
+    "targets fully built: 1 / 1" and "genomes on disk: 8". N distinct assemblies were
+    unobtainable for any taxon that already had one, i.e. every taxon in a built pack.
+
+    (b) A competitive bundle must not be OLDER than the genomes it is built from. The
+    FASTA and its minimap2 indexes are skipped whenever the file merely exists, so
+    adding a reference left the manifest saying two and the aligner using one - a
+    disagreement invisible from either side alone. Existence is not freshness.
+    """
+    refs = Path(os.environ.get("BTF_REFS_DIR",
+                               "/media/8tb/bioThreatFinder/packs/human/refs"))
+    man = refs / "manifest.tsv"
+    if not man.is_file():
+        skip("refs:every (taxid, accession) pair appears once",
+             f"no reference pack at {refs} (set BTF_REFS_DIR)")
+        return
+
+    rows = [r for r in csv.DictReader(man.open(), delimiter="\t")]
+    pairs: dict = {}
+    for r in rows:
+        key = ((r.get("taxid") or "").strip(), (r.get("accession") or "").strip())
+        pairs[key] = pairs.get(key, 0) + 1
+    dupes = sorted(k for k, n in pairs.items() if n > 1)
+    record("refs:every (taxid, accession) pair appears once",
+           not dupes, f"{len(rows)} rows; duplicated: {dupes[:6]}")
+
+    # Distinct accessions, not just distinct rows: a taxon credited with N references
+    # must hold N DIFFERENT assemblies, which is the thing the filename dedupe lost.
+    per_taxid: dict = {}
+    for r in rows:
+        tx = (r.get("taxid") or "").strip()
+        per_taxid.setdefault(tx, set()).add((r.get("accession") or "").strip())
+    multi = {t: a for t, a in per_taxid.items() if len(a) > 1}
+    counts: dict = {}
+    for r in rows:
+        tx = (r.get("taxid") or "").strip()
+        counts[tx] = counts.get(tx, 0) + 1
+    mismatch = sorted(t for t in per_taxid
+                      if counts.get(t, 0) != len(per_taxid[t]))
+    record("refs:a taxon's row count equals its distinct accession count",
+           not mismatch,
+           f"{len(multi)} multi-reference taxa; rows != distinct accessions for: "
+           f"{mismatch[:6]}")
+
+    # (b) freshness of the competitive bundle against its own target genomes.
+    comp = refs / "competitive"
+    if not comp.is_dir():
+        skip("refs:no competitive bundle is older than its genomes",
+             "no competitive/ directory")
+        return
+    stale = []
+    for tx, _accs in sorted(per_taxid.items()):
+        bundle = comp / f"{tx}.fna.gz"
+        if not bundle.is_file():
+            continue
+        bt = bundle.stat().st_mtime
+        for r in rows:
+            if (r.get("taxid") or "").strip() != tx:
+                continue
+            gp = (r.get("path") or "").strip()
+            if not gp:
+                continue
+            g = Path(gp)
+            # A one-second slack: the bundle is written straight after the genome it
+            # was just given, and identical mtimes are not staleness.
+            if g.is_file() and g.stat().st_mtime > bt + 1:
+                stale.append(f"{tx}:{g.name}")
+                break
+    record("refs:no competitive bundle is older than its genomes",
+           not stale,
+           f"bundle predates a genome it should contain: {stale[:6]}")
+
+
+
 CASES = {
     "selftests": test_selftests,
     "tiering": test_tiering,
@@ -3450,6 +3648,8 @@ CASES = {
     "markergene": test_marker_gene_identity,
     "salm": test_salmonella_block,
     "statecols": test_marker_state_columns,
+    "mref": test_multi_reference_geometry,
+    "refs": test_refs_manifest_integrity,
 }
 
 

@@ -1000,6 +1000,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
         # Reuse anything the previous run already fetched for this taxid.
         got: List[Path] = []
+        # ACCESSIONS ALREADY HELD FOR THIS TAXON, not filenames. `already` below is a
+        # set of file NAMES, and a reused genome sits under the plain
+        # <taxid>_<name>.fna.gz while an extra is written as
+        # <taxid>_<name>.<accession>.fna.gz - so re-selecting the accession already on
+        # disk produced a DIFFERENT name, passed the check, and was downloaded a second
+        # time. Measured 2026-10-21 with `--only-taxid 1639 --max-per-taxon 2`: all four
+        # taxa in that bundle ended up with two manifest rows naming ONE accession and
+        # two byte-identical copies of one genome, while the summary reported "targets
+        # fully built: 1 / 1" and "genomes on disk: 8". `--max-per-taxon N` could not
+        # produce N distinct assemblies for any taxon that already had one, which is
+        # every taxon in a built pack.
+        taken_acc: set = set()
         if not args.force:
             for (mtid, macc), row in prior.items():
                 if mtid != str(tid) or not row.get("path"):
@@ -1012,6 +1024,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     continue
                 LOG.info("  skip (already present, md5 OK): %s", p.name)
                 got.append(p)
+                acc_held = (row.get("accession") or "").strip()
+                if acc_held:
+                    taken_acc.add(acc_held)
                 manifest_rows.append({**row, "role": "target" if role == "target" else row.get("role", role)})
                 if len(got) >= want:
                     break
@@ -1037,6 +1052,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             for cand in cands:
                 if len(got) >= want:
                     break
+                # The accession test comes FIRST, because the filename test below cannot
+                # see a genome reused under the plain name. See taken_acc above.
+                if cand.accession and cand.accession in taken_acc:
+                    LOG.info("  skip (accession already held for this taxon): %s",
+                             cand.accession)
+                    continue
                 # The primary genome keeps the plain <taxid>_<name>.fna.gz name
                 # promised by pack.yaml; extras are disambiguated by accession.
                 if not got:
@@ -1066,6 +1087,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     if not ok:
                         LOG.warning("  taxid %s: could not download %s", tid, cand.accession)
                         continue
+                if cand.accession:
+                    taken_acc.add(cand.accession)
                 try:
                     size, contigs = fasta_stats(dest)
                 except OSError as exc:
