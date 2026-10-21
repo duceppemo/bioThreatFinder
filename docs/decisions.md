@@ -3805,3 +3805,184 @@ against the pre-fix scorer first: **8 fail, 4 pass**, and the 4 that pass are th
 regression guards that must hold in both directions — no-samplesheet runs, the spotless
 control, and the no-ledger benefit of the doubt. A test that passes against the bug it
 names is the D37 defect, so the check is now part of adding one.
+
+## D40 — The Salmonella marker block: a real `confirmed_in_silico` on real data, and three ways the marker database was holding the wrong gene
+
+D37 established that the binding constraint on the top tier was no longer a threshold
+but **curation**: the alignment gates are reachable on real 2×101 Illumina data, and
+*S. enterica* in its own library passes all six. What held it at `supported` was D17a's
+cap — 32 of 90 watchlist taxa had no `marker_rules.yaml` block. D37 deliberately did
+**not** commit a `no_markers_available: true` declaration for *Salmonella*, because the
+organism has well-known targets and the declaration would have been false biology.
+
+This is that block, curated rather than declared.
+
+### The block confirms SPECIES IDENTITY, which makes it the opposite of its neighbours
+
+```yaml
+"Salmonella enterica":
+    confirm_requires: salm_invA and salm_ttrC and salm_ssaV
+    support_requires: any_of(salm_invA, salm_ttrC, salm_ssaV)
+```
+
+*E. coli* gates confirmation on virulence loci because species presence is commensal
+and uninformative. *V. cholerae* gates on `ctxAB` because non-toxigenic *V. cholerae* is
+not notifiable cholera. **Neither is true here.** Any *S. enterica* in a food or clinical
+specimen is actionable, so gating on a virulence or serovar gene would suppress a
+correct and reportable call. Species identity *is* the actionable unit for the detection
+decision, even though the serovar drives the public-health response.
+
+| marker | locus | what it is | level |
+|---|---|---|---|
+| `salm_invA` | SPI-1 | T3SS component; the canonical Salmonella target since Rahn 1992 | **genus** |
+| `salm_ttrC` | ttrRSBCA | tetrathionate respiration, centisome 30; Malorny's 2004 real-time PCR target | **genus** |
+| `salm_ssaV` | SPI-2 | SPI-2 T3SS apparatus | **species** |
+
+The point of the third row: **invA and ttrC are both genus-level** — *S. bongori*
+carries both — so neither alone, nor the pair, says *S. enterica*. `ssaV` supplies the
+species call, because *S. bongori* lacks the SPI-2 T3SS (Fookes 2011; SPI-2 was acquired
+by a lineage that already had SPI-1). `ttrC` and `ssaV` both sit in the centisome-30
+region and so are **not independent loci**; `invA` at SPI-1 is the independent second
+location, giving two chromosomal sites across three markers. That distinction is in the
+rationale rather than claimed away.
+
+All three are required, so any one untested holds the finding at `supported` under
+three-valued logic — the safe direction, deliberately. `support_requires` is `any_of`
+because invA-negative *Salmonella* are documented (99.6% inclusivity over 364 strains),
+so one absent marker is weak evidence against the organism.
+
+**No `veto_if`, and not invented** — the same discipline as *Y. pestis*. The watchlist
+declares *E. coli* (562) and *Citrobacter freundii* (546) as the near neighbours, and all
+three markers are absent from both, so the confirm set already discriminates against
+everything the watchlist names. The one organism it must exclude is *S. bongori*, and
+that is done by **requiring** `ssaV` rather than by vetoing on something *S. bongori*
+carries.
+
+### Two things the literature check changed
+
+Written from memory, then checked, and the checks moved the text:
+
+- **The ttr assay is not an ISO method.** ISO 6579 is the *culture* reference method
+  that Malorny's PCR was validated against. The catalogue note says exactly that now.
+- **`tviB`/`viaB` was considered as a typhoidal marker and REJECTED.** SPI-7/viaB also
+  occurs in Vi-positive Paratyphi C and some Dublin, and Vi-negative Typhi are
+  documented in endemic regions — so the line would read as "typhoid" to an analyst
+  while being neither necessary nor sufficient. Serovar stays out of scope, as the
+  watchlist note already asks: *"Serovar is the actionable unit, not species. Hand off
+  to a dedicated serovar caller."* A marker that misleads is worse than an absent one.
+
+### The result: `confirmed_in_silico` on real data, on curated evidence
+
+Built the three markers from NCBI (3 built, 0 failed, 0 retrieval errors), aligned the
+real `ERR2935848` library against them with the pipeline's own `MARKER_ALIGN_NT`
+command, derived states with `marker_evidence.py`, and re-scored:
+
+```
+salm_invA  PRESENT  breadth 1.000 >= 0.8, id 0.987 >= 0.95, 12728 reads, 605x
+salm_ttrC  PRESENT  breadth 1.000 >= 0.8, id 0.985 >= 0.95,  5101 reads, 475x
+salm_ssaV  PRESENT  breadth 1.000 >= 0.8, id 0.989 >= 0.95, 10479 reads, 499x
+
+tier: confirmed_in_silico
+  - all confirmation gates passed: breadth 0.9137 >= 0.0100; occupancy 0.9378 >= 0.1500;
+    identity 0.9870 >= 0.9800 (illumina/default); depth_cv 0.42 <= 2.50;
+    mean_alignment_length 99 >= 61 (illumina 60% of 101 bp read); mapped_fraction 1.000 >= 0.50
+  - marker rule satisfied: salm_invA and salm_ttrC and salm_ssaV
+  - NO NEGATIVE CONTROL IN RUN - contamination cannot be excluded
+  - CAVEAT: KrakenUniq not run, so no distinct-k-mer evidence was available
+```
+
+**Exactly one row moved** across all 82 findings: this one, `supported` →
+`confirmed_in_silico`. The call still discloses the missing control and the missing
+KrakenUniq arm, which is the behaviour that makes the tier worth having.
+
+D37 reached this tier once before, on a **scratch** `no_markers_available` declaration
+that was never committed. This is the first time on curated marker evidence.
+
+### Three ways the marker database was holding the wrong gene
+
+The verification kept disagreeing with itself, and each disagreement was a bug.
+
+**1. `salm_ttrC`'s own aliases fetched a different gene.** The row listed the operon
+partners `ttrA;ttrB;ttrRSBCA` as aliases. CDS extraction matches any wanted name, so the
+nucleotide tier returned **3 × 3063 bp of `[gene=ttrA]`** while the protein tier
+correctly fetched **340 aa of ttrC** — one marker, two tiers, two different genes, and
+`min_coverage 0.80` measured against the wrong reference. Fixed by removing the aliases:
+the rebuild returns 3 × 1023 bp of `[gene=ttrC]`, and 1023 = 340 × 3 + 3, so the tiers
+now agree. A descriptive alias would have been unsafe too — a CDS named `tet` would
+claim "tetrathionate reductase subunit C" — so the row carries none.
+
+**2. `gene_name_matches` let a one-letter CDS name claim a word alias.** The matcher
+accepted `w.startswith(g)` with no length condition. Measured against `HEAD`:
+
+```
+True   [gene=P] claims ['L', 'polymerase']
+True   [gene=E] claims ['E2', 'TC-83']
+```
+
+`"polymerase".startswith("p")`. So **`nipah_L`'s nucleotide reference is 2130 bp of the
+Nipah P (phosphoprotein) CDS**, `CAD92360.1`, while its protein tier holds 8 × 2244 aa
+of the real L polymerase. `nipah_L` is in `confirm_requires` for Nipah henipavirus, a
+BSL-4 agent. Six markers share the L/polymerase shape — `cchf_L`, `marburg_L`,
+`lassa_L`, `junin_L`, `rvfv_L`, `nipah_L` — and `nipah_L` is the one that took the CDS
+route, so it is the one that was hit. The direction that was *intended* to be permissive
+— a CDS name that EXTENDS a wanted name, `capBCADE` for `capB`, `ORF1ab` for `ORF1a` —
+is untouched; the reverse now requires three characters, so `pag` for `pagA` still
+works and a single letter cannot.
+
+**3. Nothing preferred the gene actually asked for.** `ypest_pmt1_caf1` declares `caf1`,
+the F1 capsular antigen, and its nucleotide reference holds **caf1A, caf1M and caf1R —
+the operon's accessory genes — and not caf1**, because each is a legitimate prefix match
+and nothing ranked them. It is in *Y. pestis*'s `confirm_requires`. `gene_match_rank`
+now returns a rank and CDS extraction keeps only the best one present, so an exact match
+wins and the permissiveness survives as a fallback.
+
+### A fourth, in the consumer: the states file's columns depended on sort order
+
+`marker_evidence.py` took its header from `results[0]`. A record only carries
+`nt_depth`, `nt_expected_breadth`, `nt_n_seqs` and `nt_best_ref` if it reached the
+nucleotide measurement block, so a catalogue whose first row is UNKNOWN produced a
+header without them — and `extrasaction="ignore"` then dropped those four from **every**
+row, including the ones that had measured them, with no error. Observed directly here: a
+three-marker database put `banth_pxo1_pagA` (UNKNOWN) first and the states file lost all
+four columns while the three PRESENT rows had depths of 474–605×.
+
+`nt_expected_breadth` is the input to the depth gate — the rule that marker absence is
+only called when depth could have shown it. The column that exists to stop a false
+ABSENT could vanish silently. Fieldnames now come from the union of every record. Some
+keys were already pre-initialised against exactly this, with a comment saying so; that
+fix was per-column and could not cover a block adding four at once.
+
+### The invariant that found two of these, now a test
+
+Declared gene versus the `[gene=]` tag on the retrieved CDS, across the whole shipped
+marker database, in two strengths:
+
+- **no built reference is a gene the matcher would reject** — judged by the builder's
+  own `gene_match_rank`, so the invariant asks the same question the retriever asked.
+  `ORF1ab` for a wanted `ORF1a` passes; the Nipah `P` does not.
+- **every built reference contains the gene actually declared** — exact match on the
+  gene *or* a declared alias. `wbeT` for `wbeO1` and `MP` for `M` are right answers and
+  pass; what this catches is a marker holding only its operon's other genes.
+
+115 of the 166 catalogue rows have a CDS gene tag to check (31 took the whole-record
+route and have none; 17 have no nucleotide file). Two entries are pending, each with its
+cause, and the list is **self-retiring**: the test also asserts that every pending defect
+is *still real*, so a rebuild makes it fail and forces the entry out. A pending item
+cannot outlive the problem it describes.
+
+### What was NOT done
+
+- **The production marker database was not rebuilt.** `nipah_L` and `ypest_pmt1_caf1`
+  are still wrong on disk; the code that produced them is fixed, and realising that
+  needs a full rebuild of all 166 markers. `--only-marker` cannot do it safely —
+  `concat_files()` rewrites `markers.nt.fna` from the manifest rows while the index
+  builders skip when their output exists, which is the hazard recorded on
+  `md5_or_none()` and the reason `bmand_18S` once came back ABSENT rather than UNKNOWN.
+  Everything above was built into a scratch `--db-root`.
+- **No samplesheet or benchmark file was changed**, so D39's control decision is still
+  open and this run still carries "NO NEGATIVE CONTROL IN RUN".
+- **`d17a` was repointed, not relaxed.** It asserted the no-block cap using
+  *Salmonella* as "a taxon which really has no block", and curating *Salmonella* made
+  that premise false — so the test went red, correctly. It now uses *Orientia
+  tsutsugamushi*, as of 2026-10-20 the only notifiable bacterium left without a block.
+  31 of 90 taxa still have none.

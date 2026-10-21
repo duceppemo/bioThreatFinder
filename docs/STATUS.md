@@ -300,16 +300,34 @@ has no data on the chemistry it is calibrated for. See **D35**.
   *F. tularensis*/*F. novicida*. The remedy is a better reference or a per-taxon
   override. Mirror of D35's ONT finding, different cause. See **D38**.
 
-- **32 of 90 watchlist taxa have no `marker_rules.yaml` block, so `confirmed_in_silico`
-  is unreachable for them by construction** (D17a's cap, which is correct). Measured
-  2026-10-19: the alignment gates ARE now reachable on real 2x101 Illumina data -
-  *S. enterica* in its own library passes all six, including the
-  `mean_alignment_length 99 >= 61` that was `99 >= 100` on Oct 7 - so the binding
-  constraint on the top tier is no longer a threshold but curation. The escape hatch
-  `no_markers_available: true` now parses (D37; it never did), but it is a statement
-  that no marker exists and is therefore the WRONG answer for taxa that have
-  well-known targets. *Salmonella* (*invA*, *ttrRSBCA*) needs a real block, not a
-  declaration. See **D37**.
+- ~~*Salmonella* needs a real marker block, not a declaration.~~ **Done 2026-10-20
+  (D40):** `salm_invA` + `salm_ttrC` + `salm_ssaV`, and *S. enterica* in the
+  `ERR2935848` library is now the project's **first `confirmed_in_silico` on real data
+  backed by curated markers** (markers at breadth 1.000, identity 0.985-0.989,
+  475-605x; exactly one row moved of 82). invA and ttrC are both GENUS-level - S.
+  bongori carries both - so the species call rests on ssaV, the SPI-2 T3SS that S.
+  bongori lacks. Serovar stays out of scope per the watchlist note, and `tviB`/`viaB`
+  was considered as a typhoidal proxy and rejected (also in Paratyphi C and some
+  Dublin; Vi-negative Typhi exist).
+- **31 of 90 watchlist taxa still have no `marker_rules.yaml` block, so
+  `confirmed_in_silico` is unreachable for them by construction** (D17a's cap, which is
+  correct). The binding constraint on the top tier is curation, not a threshold: the
+  alignment gates are reachable on real 2x101 Illumina data (D37). The escape hatch
+  `no_markers_available: true` parses (D37; it never did), but it is a statement that no
+  marker exists and is the WRONG answer for a taxon with well-known targets. As of
+  2026-10-20 *Orientia tsutsugamushi* is the only NOTIFIABLE BACTERIUM left without a
+  block. See **D37**, **D40**.
+- **The shipped marker database holds the wrong gene for two markers, and the rebuild
+  that fixes them has not been run** (D40). `nipah_L`'s nucleotide reference is 2130 bp
+  of the Nipah **P** (phosphoprotein) CDS, not L - a one-letter CDS name was allowed to
+  claim the alias "polymerase" - and `ypest_pmt1_caf1` holds caf1A/caf1M/caf1R and not
+  caf1 itself, because nothing preferred the gene actually declared. **Both sit in a
+  `confirm_requires`** (Nipah henipavirus, BSL-4; *Y. pestis*, select agent). The code
+  is fixed and the invariant is now a test with a self-retiring pending list, but
+  realising it needs a FULL rebuild of all 166 markers - `--only-marker` cannot do it
+  safely, because `concat_files()` rewrites `markers.nt.fna` from the manifest rows
+  while the index builders skip when their output exists. That rebuild rewrites the
+  operational marker database and has not been started. See **D40**.
 
 - ~~Metabuli: keep as a recall arm or drop?~~ **Decided 2026-10-05: kept, defaulted OFF.**
   The bake-off ran on both the identity-matched LoD batch and the `divergent_*` pair, and

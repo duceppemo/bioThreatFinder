@@ -1267,24 +1267,64 @@ def dedup_str(items: Iterable[str]) -> List[str]:
     return out
 
 
-def gene_name_matches(cds_gene: str, wanted: Sequence[str]) -> bool:
-    """Case-insensitive match of a CDS [gene=] value against gene + aliases.
+# Minimum characters a CDS gene name must have before it may claim a LONGER wanted
+# name as a prefix. See gene_match_rank().
+MIN_PREFIX_CLAIM = 3
 
-    Deliberately permissive at the prefix level ('capB' matches 'capBCADE'
-    operon annotations, 'stx2' matches 'stx2A'), because NCBI annotation of the
-    same locus varies between submitters. The cost of a loose match here is a
+
+def gene_match_rank(cds_gene: str, wanted: Sequence[str]) -> Optional[int]:
+    """How well a CDS [gene=] value matches gene + aliases. Lower is better.
+
+        0  exact, case-insensitive
+        1  the CDS name EXTENDS a wanted name  ('capBCADE' for a wanted 'capB')
+        2  the CDS name is a PREFIX of a wanted name  ('pag' for a wanted 'pagA')
+        None  no match
+
+    Rank 1 is the permissiveness this function was written for and it is kept:
+    NCBI annotation of one locus varies between submitters, so 'capB' must match
+    'capBCADE' and 'stx2' must match 'stx2A'. The cost of a loose match there is a
     slightly larger marker set; the cost of a strict one is an empty one.
+
+    RANK 2 IS WHERE IT WENT WRONG. The old code accepted `w.startswith(g)` with no
+    length condition, so a one-character CDS gene name could claim any alias that
+    merely begins with that letter - and this pack pairs single-letter viral gene
+    names with word aliases throughout. Measured on the shipped marker database
+    2026-10-20: `nipah_L` declares gene `L` with alias `polymerase`, and the Nipah
+    **P** (phosphoprotein) CDS matched it because "polymerase".startswith("p"). The
+    nucleotide reference for the L-polymerase marker was therefore 2130 bp of P, while
+    the protein tier held the real 2244 aa L - two tiers, two different genes, and
+    min_coverage measured against the wrong one. nipah_L sits in Nipah's
+    confirm_requires. Six markers share the L/polymerase shape (cchf_L, marburg_L,
+    lassa_L, junin_L, rvfv_L, nipah_L); nipah_L is the one that took the CDS route and
+    so the one that was hit. MIN_PREFIX_CLAIM makes a genuine truncation ('pag', 'inv')
+    still match while a single letter cannot.
+
+    Returning a RANK rather than a bool also lets the caller prefer an exact hit over a
+    prefix one, which is the other half of the problem: `ypest_pmt1_caf1` declares
+    `caf1` and its nucleotide reference holds caf1A, caf1M and caf1R - the operon's
+    accessory genes - and not caf1 itself, because every one of them is a legitimate
+    rank-1 match and nothing preferred the gene actually asked for.
     """
     g = (cds_gene or "").strip().lower()
     if not g:
-        return False
+        return None
+    best: Optional[int] = None
     for w in wanted:
         w = (w or "").strip().lower()
         if not w:
             continue
-        if g == w or g.startswith(w) or w.startswith(g):
-            return True
-    return False
+        if g == w:
+            return 0
+        if g.startswith(w):
+            best = 1 if best is None else min(best, 1)
+        elif w.startswith(g) and len(g) >= MIN_PREFIX_CLAIM:
+            best = 2 if best is None else min(best, 2)
+    return best
+
+
+def gene_name_matches(cds_gene: str, wanted: Sequence[str]) -> bool:
+    """Whether a CDS [gene=] value matches gene + aliases at all."""
+    return gene_match_rank(cds_gene, wanted) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -1440,15 +1480,28 @@ def fetch_nucleotide(ez: Entrez, row: dict,
         # there is no gene symbol to match a CDS against.
         if strategy != "named_region" and wanted_names:
             cds_text = ez.efetch("nuccore", probe, "fasta_cds_na")
+            ranked: List[Tuple[int, SeqRecord]] = []
             for rec in parse_fasta(cds_text):
                 n_cds_seen += 1
-                if not gene_name_matches(rec.gene, wanted_names):
+                rank = gene_match_rank(rec.gene, wanted_names)
+                if rank is None:
                     continue
                 if not record_has_subtype(rec, subtypes):
                     n_wrong_subtype += 1
                     continue
                 if NT_MIN_LEN <= len(rec) <= NT_MAX_DIRECT_LEN:
-                    records.append(rec)
+                    ranked.append((rank, rec))
+            # AN EXACT GENE-NAME MATCH WINS OVER A PREFIX ONE. Without this, every
+            # member of an operon is an equally good answer to a query for one of its
+            # genes, and which ones survive is decided by the later sort and truncation
+            # to `want`. That is how ypest_pmt1_caf1 - the F1 capsular antigen marker in
+            # Y. pestis's confirm_requires - ended up holding caf1A, caf1M and caf1R and
+            # not caf1. The permissiveness is still there as a FALLBACK: when no CDS
+            # names the gene exactly, the prefix matches are all that is on offer and
+            # they are still used.
+            if ranked:
+                best_rank = min(r for r, _ in ranked)
+                records = [rec for r, rec in ranked if r == best_rank]
 
         # Route 2 - whole record, only if it is locus-sized.
         if not records:

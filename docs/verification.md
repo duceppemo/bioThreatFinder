@@ -15,8 +15,10 @@ Needs `samtools` for the coverage cases (skipped with a message if absent) and a
 for the screen cases (`BTF_TAXDUMP=/path/to/taxdump`, skipped otherwise). Everything else
 is fixture-driven.
 
-Current state: **251 passed, 0 failed, 2 skipped** (2026-10-20). The 2 skips are the
-`coverage` checks that need `samtools` on PATH. The per-script `--self-test` suites run
+Current state: **286 passed, 0 failed, 0 skipped** (2026-10-20) with `samtools` on
+PATH and `BTF_TAXDUMP` set. The bare `python3 tests/test_pipeline.py` reports
+**267 passed, 3 skipped** - the `coverage` and `statecols` checks need `samtools`, and
+the `screen`/`leadjoin` writers need a taxdump. The per-script `--self-test` suites run
 as single checks from here, so `selftest:build_marker_db` alone covers 60+ assertions,
 including D30's eleven on the protein query ladder.
 
@@ -41,6 +43,9 @@ including D30's eleven on the protein query ladder.
 | `workflow` | 6 | Every script the workflow invokes is in `bin/` and executable; no shared placeholder for optional inputs; stage 2 does not re-filter on assigned reads |
 | `report` | 13 | **The first coverage `make_report.py` has ever had** - which is part of why an entire input could go missing from it unnoticed (D33). A stage-1 arm that was enabled and produced nothing is bannered above the findings, not buried; the unclassified fraction reaches the page; bracken's by-design exit carries no alarm; and a report rendered without a screen summary omits the section rather than drawing an empty one that reads as all-clear. D36 added the run-level view that pays for that suppression: an arm empty on EVERY sample it searched is bannered as a database problem, because an empty or truncated database loads without error and is silent per-sample |
 | `ssrole` | 12 | The samplesheet declares which samples are controls, so it DRIVES the subtraction and not merely the count (D39). A sheet-declared control suppresses even when the pipeline's own rows call it a sample - the re-score shape, where declaring a control used to assert *"all clean"* on every finding while reporting that control as a `supported` detection. The sheet is authority in both directions, a declared control that never ran is not credited as a clean one, and with no read ledger to tell a spotless NTC from an absent one the question is left unasked |
+| `markergene` | 12 | A marker's sequences must be THE GENE THE CATALOGUE NAMES, and three shipped markers were not (D40). The nucleotide and protein tiers are retrieved by separate ladders, so they can land on different genes while the manifest says `built` and marker_evidence treats the marker as fully testable - `min_coverage` then being a fraction of the wrong reference. The matcher no longer lets a one-letter CDS name claim a word alias (`[gene=P]` claimed `nipah_L` because *"polymerase".startswith("p")*, so the L-polymerase marker's nt reference is 2130 bp of the Nipah P gene, in a BSL-4 agent's `confirm_requires`), an exact gene match now outranks an operon-partner one (`ypest_pmt1_caf1` holds caf1A/M/R and not caf1), and the permissiveness that is deliberate - `capBCADE` for `capB`, `ORF1ab` for `ORF1a`, `pag` for `pagA` - still works. Plus the invariant across all 115 checkable references, with a SELF-RETIRING pending list: the test also asserts each pending defect is still real, so a rebuild forces the entry out |
+| `salm` | 4 | The Salmonella block is species confirmation, not pathotype (D40). All three loci present confirms and the finding names the rule; dropping `ssaV` does NOT confirm, because invA and ttrC are both genus-level and S. bongori carries both; and an UNTESTED `ssaV` holds it just as firmly as an absent one. The fixture carries a read ledger on purpose - without it the alignment-length floor falls back to a flat 100 bp and a 2x101 library's 99 bp mean fails the very gate D37 found, so the test would have passed for the wrong reason |
+| `statecols` | 3 | The states file's columns must not depend on which marker sorts first (D40). `marker_evidence.py` took its header from `results[0]`, and a record only carries `nt_depth`, `nt_expected_breadth`, `nt_n_seqs` and `nt_best_ref` if it reached the nucleotide measurement block - so a catalogue whose first row is UNKNOWN produced a header without them and `extrasaction="ignore"` dropped them from every row, silently, including rows that had measured them. `nt_expected_breadth` is the input to the depth gate, the rule that stops a false ABSENT |
 
 ## It has already caught a real bug
 
@@ -104,6 +109,15 @@ One-offs against real data, not automated:
   figures are a FLOOR, not a measurement, because **no real-data samplesheet declares
   a negative control** - so two `supported` calls that are almost certainly library
   cross-contamination cannot be told from false positives. See D37, D38.
+- **`confirmed_in_silico` HAS now fired on real data, on curated marker evidence**
+  (D40, 2026-10-20). *S. enterica* in the `ERR2935848` isolate library passes all six
+  alignment gates and all three markers of a real `marker_rules.yaml` block -
+  `salm_invA` + `salm_ttrC` + `salm_ssaV` at breadth 1.000, identity 0.985-0.989 and
+  475-605x depth. Exactly one row moved across all 82 findings. D37 reached this tier
+  once before on a SCRATCH `no_markers_available` declaration that was never committed;
+  this is the first time on curated evidence. The call still discloses the missing
+  negative control and the missing KrakenUniq arm. NOT a measurement of accuracy: it is
+  one organism in its own isolate library, and 31 of 90 taxa still have no block.
 - **What ONE declared control is worth has now been measured** (D39, 2026-10-20), on
   the same 11 libraries and the same alignment evidence: `supported` PPV **0.600 ->
   0.750**, false positives **2 -> 1**, false confirmations 0, and **every per-scenario

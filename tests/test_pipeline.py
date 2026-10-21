@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -1684,12 +1685,19 @@ def test_gate_reachability(tmp: Path) -> None:
 def test_marker_block_required_to_confirm(tmp: Path) -> None:
     """A taxon with no marker rule block cannot reach confirmed_in_silico (D17a).
 
-    31 of 89 watchlist entries have no block - 29 of them notifiable. For those the
-    veto/vaccine/confirm logic never executes, so the finding used to be stamped
-    confirmed on alignment geometry alone with an EMPTY marker_verdict and no caveat.
-    Dormant only while nothing could reach the top tier; the very first real-data
-    confirmation unblocked by the reachability fix above is Salmonella enterica,
-    notifiable, with no block.
+    31 of 90 watchlist entries have no block. For those the veto/vaccine/confirm logic
+    never executes, so the finding used to be stamped confirmed on alignment geometry
+    alone with an EMPTY marker_verdict and no caveat. Dormant only while nothing could
+    reach the top tier; the first real-data confirmation unblocked by the reachability
+    fix above was Salmonella enterica, notifiable, which had no block.
+
+    IT HAS ONE NOW (D40), which is why this test no longer uses it: invA + ttrC + ssaV
+    are real curated markers and the real zymo_rl100 library confirms on them. The
+    stand-in is Orientia tsutsugamushi - notifiable, bacterial, and as of 2026-10-20 the
+    only notifiable bacterium left with no block, so if it ever gains one this test
+    fails loudly rather than quietly asserting the cap on a taxon that is no longer
+    capped. That is exactly how this check surfaced: it was written around Salmonella
+    and went red the moment Salmonella was curated.
     """
     import json
     cov = tmp / "d17a.tsv"
@@ -1705,8 +1713,8 @@ def test_marker_block_required_to_confirm(tmp: Path) -> None:
                        screen_assigned_reads=950000,
                        mapped_fraction_of_assigned="0.9500",
                        total_reads_screened=5000000, mapq_min=10)
-    # 28901 = Salmonella enterica, which really has no block in the shipped pack.
-    write_cov(cov, [perfect("NOBLOCK", "28901", "Salmonella enterica")])
+    # 784 = Orientia tsutsugamushi, which really has no block in the shipped pack.
+    write_cov(cov, [perfect("NOBLOCK", "784", "Orientia tsutsugamushi")])
     got = score(tmp / "d17a", cov, markers=_empty_markers(tmp))["NOBLOCK"]
     record("d17a:no marker block caps a perfect finding at supported",
            got["tier"] == "supported", got["tier"])
@@ -1725,7 +1733,7 @@ def test_marker_block_required_to_confirm(tmp: Path) -> None:
     # satisfied by the word appearing in the CAP MESSAGE itself. A test can name the
     # behaviour it means to pin and still pin nothing.
     rules_ok = tmp / "rules_declared.yaml"
-    rules_ok.write_text('"Salmonella enterica":\n'
+    rules_ok.write_text('"Orientia tsutsugamushi":\n'
                         "    no_markers_available: true\n")
     got2 = score(tmp / "d17a_declared", cov, markers=_empty_markers(tmp),
                  rules=rules_ok)["NOBLOCK"]
@@ -1744,7 +1752,7 @@ def test_marker_block_required_to_confirm(tmp: Path) -> None:
     # Every other value in this file is a string, so a flag read the same way would
     # make `no_markers_available: false` grant exactly the permission it denies.
     rules_no = tmp / "rules_declined.yaml"
-    rules_no.write_text('"Salmonella enterica":\n'
+    rules_no.write_text('"Orientia tsutsugamushi":\n'
                         "    no_markers_available: false\n")
     got3 = score(tmp / "d17a_declined", cov, markers=_empty_markers(tmp),
                  rules=rules_no)["NOBLOCK"]
@@ -1752,7 +1760,7 @@ def test_marker_block_required_to_confirm(tmp: Path) -> None:
            got3["tier"] == "supported", got3["tier"])
 
     rules_bad = tmp / "rules_typo.yaml"
-    rules_bad.write_text('"Salmonella enterica":\n'
+    rules_bad.write_text('"Orientia tsutsugamushi":\n'
                          "    no_markers_available: flase\n")
     pbad = run([sys.executable, BIN / "score_evidence.py", "--coverage", cov,
                 "--watchlist", PACK / "watchlist.resolved.tsv",
@@ -3119,6 +3127,299 @@ def test_samplesheet_role_authority(tmp: Path) -> None:
 
 
 
+# Markers whose built nucleotide reference is a DIFFERENT GENE from the one the
+# catalogue declares. Each is a real defect in the shipped marker database, each needs
+# a re-retrieval, and each is listed here with its cause so that the invariant below can
+# guard against NEW ones without going red on the known two. D40.
+#
+# This list is self-retiring, not an allowlist that rots: the test asserts that every
+# entry STILL mismatches. Rebuild the marker database with the fixed matcher and these
+# rows come back correct, the assertion fails, and the list must be emptied. A pending
+# item cannot outlive the problem it describes.
+# (a) The builder's OWN matcher would not accept these gene tags for these markers -
+#     the reference is a different gene. Real defects; each needs a re-retrieval.
+GENE_TAG_WRONG_GENE = {
+    "nipah_L": "nt reference is 2130 bp of the Nipah P (phosphoprotein) CDS, not L. "
+               "gene_match_rank now refuses it; needs a marker-database rebuild.",
+}
+# (b) The matcher accepts the tag, but the DECLARED gene is not among the retrieved
+#     ones. Not all of these are defects, so each says which it is.
+GENE_TAG_NO_EXACT = {
+    "ypest_pmt1_caf1": "DEFECT: holds caf1A/caf1M/caf1R, the operon's accessory genes, "
+                       "and not caf1 - the F1 antigen itself. Exact matches now outrank "
+                       "prefix ones, so a rebuild fixes it.",
+    "mers_ORF1a": "NOT a defect: ORF1a is the 5' portion of the ORF1ab polyprotein and "
+                  "NCBI annotates the CDS as ORF1ab. Correct sequence, different name. "
+                  "Permanent entry.",
+}
+# Entries that must be FIXED, as opposed to accepted. The staleness check below is run
+# over these so a pending item cannot outlive the defect it describes.
+GENE_TAG_MUST_FIX = set(GENE_TAG_WRONG_GENE) | {"ypest_pmt1_caf1"}
+
+
+def test_marker_gene_identity(tmp: Path) -> None:
+    """A marker's sequences must be the GENE THE CATALOGUE NAMES.
+
+    D40. Nothing checked this, and three of the shipped markers failed it. The
+    nucleotide and protein tiers are retrieved by separate ladders, so they can land on
+    different genes while the manifest reports `status=built, nt=3, aa=3` and
+    marker_evidence.py treats the marker as fully testable. `min_coverage` is then a
+    fraction of the wrong reference.
+
+    Found while adding the Salmonella block: `salm_ttrC` listed its operon partners
+    ttrA/ttrB as aliases, and CDS extraction returned 3x3063 bp of ttrA as the
+    nucleotide reference while the protein tier correctly fetched 340 aa of ttrC.
+    """
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        from build_marker_db import gene_match_rank as rank, gene_name_matches as matches
+    except Exception as exc:
+        record("markergene:build_marker_db importable", False, str(exc))
+        return
+
+    # ---- the collision that put the Nipah P gene in the L marker ----
+    record("markergene:a single-letter CDS name cannot claim a word alias",
+           not matches("P", ["L", "polymerase"]),
+           "Nipah P matched the L marker because 'polymerase'.startswith('p')")
+    record("markergene:nor claim a two-character one",
+           not matches("E", ["E2", "TC-83"]), "")
+    record("markergene:the gene it really is still matches",
+           rank("L", ["L", "polymerase"]) == 0, f"rank={rank('L', ['L', 'polymerase'])}")
+
+    # ---- the permissiveness that is there ON PURPOSE must survive ----
+    record("markergene:an operon annotation still matches its member",
+           rank("capBCADE", ["capB"]) == 1, f"rank={rank('capBCADE', ['capB'])}")
+    record("markergene:case-insensitive prefix still matches",
+           matches("STX2A", ["stx2"]), "")
+    record("markergene:ORF1ab still answers for ORF1a",
+           matches("ORF1ab", ["ORF1a", "upE"]), "")
+    record("markergene:a genuine truncation of three characters still matches",
+           rank("pag", ["pagA"]) == 2 and rank("inv", ["invA"]) == 2,
+           f"pag={rank('pag', ['pagA'])}, inv={rank('inv', ['invA'])}")
+    record("markergene:an unrelated gene is still refused",
+           not matches("recA", ["capB"]), "")
+
+    # ---- exact beats prefix, which is what caf1 needed ----
+    record("markergene:an exact gene match outranks an operon-partner match",
+           rank("caf1", ["caf1", "F1 capsular antigen"])
+           < rank("caf1A", ["caf1", "F1 capsular antigen"]),
+           "caf1 must win over caf1A, or the operon decides which genes a marker holds")
+
+    # ---- the invariant, against the marker database that actually shipped ----
+    db = Path(os.environ.get("BTF_MARKER_DB",
+                             "/media/8tb/bioThreatFinder/packs/human/markers"))
+    man = db / "markers.manifest.tsv"
+    if not man.is_file():
+        skip("markergene:built references name the declared gene",
+             f"no marker database at {db} (set BTF_MARKER_DB)")
+        return
+
+    cat: dict = {}
+    for line in (PACK / "markers.tsv").read_text().splitlines():
+        if line.startswith("#") or line.startswith("marker_id") or not line.strip():
+            continue
+        f = line.split("\t")
+        if len(f) > 3:
+            cat[f[0]] = (f[2], f[3])
+
+    wrong_gene: dict = {}
+    no_exact: dict = {}
+    checked = 0
+    with man.open() as fh:
+        for r in csv.DictReader(fh, delimiter="\t"):
+            mid = r["marker_id"]
+            fna = db / "nt" / f"{mid}.fna"
+            if not fna.is_file():
+                continue
+            genes = sorted(set(re.findall(r"\[gene=([^\]]+)\]", fna.read_text())))
+            if not genes:
+                continue          # Route 2 took the whole record; no CDS gene to check.
+            checked += 1
+            declared, aliases = cat.get(mid, (r.get("gene", ""), ""))
+            wanted = [declared] + [a for a in aliases.split(";") if a.strip()]
+            # (a) JUDGED BY THE BUILDER'S OWN MATCHER, not by set membership. Asking a
+            #     different question here than the retriever asked would make the
+            #     invariant disagree with the code it is meant to constrain: 'ORF1ab'
+            #     is a legitimate rank-1 answer for a wanted 'ORF1a' and must pass,
+            #     while the Nipah 'P' CDS is no answer at all for 'L' and must not.
+            if not any(rank(g, wanted) is not None for g in genes):
+                wrong_gene[mid] = genes
+            # (b) Weaker, and separate: NOTHING retrieved is an exact match to the
+            #     gene or to any of its declared aliases - every sequence got in on a
+            #     prefix. An alias exists precisely so a differently-annotated gene is
+            #     found, so `wbeT` for a declared `wbeO1` and `MP` for `M` are right
+            #     answers and must pass; what this catches is a marker that holds only
+            #     its operon's OTHER genes, which is ypest_pmt1_caf1.
+            elif not any(rank(g, wanted) == 0 for g in genes):
+                no_exact[mid] = genes
+
+    unexpected = {k: v for k, v in wrong_gene.items() if k not in GENE_TAG_WRONG_GENE}
+    record("markergene:no built reference is a gene the matcher would reject",
+           not unexpected,
+           f"{checked} checked; UNEXPECTED: "
+           + "; ".join(f"{k} holds {v}" for k, v in unexpected.items()))
+
+    unexpected2 = {k: v for k, v in no_exact.items() if k not in GENE_TAG_NO_EXACT}
+    record("markergene:every built reference contains the gene actually declared",
+           not unexpected2,
+           f"{checked} checked; UNEXPECTED: "
+           + "; ".join(f"{k} holds {v}" for k, v in unexpected2.items()))
+
+    # A pending defect must not outlive the problem it records: once the marker
+    # database is rebuilt these come back correct, this fails, and the entry goes.
+    seen_bad = set(wrong_gene) | set(no_exact)
+    stale = sorted(GENE_TAG_MUST_FIX - seen_bad)
+    record("markergene:every gene-tag defect still pending is still real",
+           not stale,
+           f"fixed now - remove from the pending lists: {stale}")
+
+
+def test_salmonella_block(tmp: Path) -> None:
+    """D40. The Salmonella block is species confirmation, and needs all three loci.
+
+    invA and ttrC are GENUS-level - S. bongori carries both - so the species call rests
+    on ssaV, the SPI-2 T3SS that S. bongori lacks. Dropping any one of the three must
+    hold the finding at `supported` rather than confirming it, and an UNTESTED marker
+    must hold it just as firmly as an absent one.
+    """
+    def salmonella(sample: str) -> str:
+        # Alignment evidence taken from the real zymo_rl100 isolate library, which
+        # passes every alignment gate on its own (D37). Only the markers vary.
+        return cov_row(sample=sample, role="sample", platform="illumina", taxid="28901",
+                       taxon="Salmonella enterica", group="bacteria",
+                       reference_bp=5009666, unique_reads=24057383,
+                       reads_per_million=925901.0, breadth=0.9137,
+                       mean_depth=480.42, depth_cv=0.4181, window_bp=1000,
+                       windows_expected=5009, windows_occupied=4697,
+                       window_occupancy=0.9378, mean_identity=0.9870,
+                       mean_alignment_length=99,
+                       best_neighbour_taxid="562", best_neighbour_reads=1000,
+                       neighbour_ratio="100.0", screen_assigned_reads=24057383,
+                       mapped_fraction_of_assigned="1.0000",
+                       total_reads_screened=25983000, mapq_min=10)
+
+    cov = tmp / "salm.tsv"
+    write_cov(cov, [salmonella(s) for s in ("ALL3", "NO_SSAV", "SSAV_UNTESTED")])
+    mk = tmp / "salm_markers.tsv"
+    mk.write_text("sample\tmarker_id\tstate\n" + "".join([
+        "ALL3\tsalm_invA\tPRESENT\n", "ALL3\tsalm_ttrC\tPRESENT\n",
+        "ALL3\tsalm_ssaV\tPRESENT\n",
+        # Confidently not found: S. bongori would look like this.
+        "NO_SSAV\tsalm_invA\tPRESENT\n", "NO_SSAV\tsalm_ttrC\tPRESENT\n",
+        "NO_SSAV\tsalm_ssaV\tABSENT\n",
+        # ssaV OMITTED FROM THE FILE, not ABSENT in value - never searched.
+        "SSAV_UNTESTED\tsalm_invA\tPRESENT\n", "SSAV_UNTESTED\tsalm_ttrC\tPRESENT\n",
+    ]))
+    # THE READ LEDGER IS PART OF THE FIXTURE, not decoration. Without it the
+    # alignment-length floor falls back to a flat 100 bp and a 2x101 library's 99 bp
+    # mean fails it - which is exactly the gate D37 found holding this organism back,
+    # and the real run cleared it only because seqkit_stats told the scorer the reads
+    # were 101 bp (floor = 60% of 101 = 61). A fixture without it would assert the
+    # marker block against the wrong gate and pass for the wrong reason.
+    stats = tmp / "salm_stats.tsv"
+    stats.write_text("file\tavg_len\tsample\trole\tplatform\n" + "".join(
+        f"/x/{s}.fq.gz\t101.0\t{s}\tsample\tillumina\n"
+        for s in ("ALL3", "NO_SSAV", "SSAV_UNTESTED")))
+    got = score(tmp, cov, markers=mk, extra=["--read-stats", str(stats)])
+
+    all3 = got.get(("ALL3", "Salmonella enterica"), {})
+    record("salm:all three loci present confirms",
+           all3.get("tier") == "confirmed_in_silico", f"got {all3.get('tier')}")
+    record("salm:and the finding names the rule it satisfied",
+           "salm_invA and salm_ttrC and salm_ssaV" in all3.get("reasons", ""),
+           all3.get("reasons", "")[:160])
+
+    nossav = got.get(("NO_SSAV", "Salmonella enterica"), {})
+    record("salm:genus markers without the species marker do NOT confirm",
+           nossav.get("tier") != "confirmed_in_silico",
+           f"got {nossav.get('tier')} - invA and ttrC are both present in S. bongori")
+
+    untested = got.get(("SSAV_UNTESTED", "Salmonella enterica"), {})
+    record("salm:an UNTESTED species marker holds it just as firmly",
+           untested.get("tier") != "confirmed_in_silico",
+           f"got {untested.get('tier')}")
+
+
+
+def test_marker_state_columns(tmp: Path) -> None:
+    """The states file's columns must not depend on which marker sorts first.
+
+    D40. `marker_evidence.py` took its header from `results[0]`. A record only carries
+    `nt_depth`, `nt_expected_breadth`, `nt_n_seqs` and `nt_best_ref` if it reached the
+    nucleotide measurement block, so a catalogue whose FIRST row is UNKNOWN - never
+    built, no input for its tier - produced a header without them, and
+    `extrasaction="ignore"` then dropped those four from every other row WITHOUT error,
+    including rows that had measured them.
+
+    `nt_expected_breadth` is the input to the depth gate, the rule that marker absence
+    is only called when depth could have shown it. So the column that exists to stop a
+    false ABSENT could vanish silently - the exact failure this file is written to
+    prevent. Observed 2026-10-20 while verifying the Salmonella block against a
+    three-marker database.
+    """
+    if not shutil.which("samtools"):
+        skip("statecols:late columns survive an UNKNOWN first row", "samtools not on PATH")
+        return
+
+    ref = "marker|zz_built|ACC1|[gene=zz]"
+    sam = tmp / "mc.sam"
+    sam.write_text(
+        "@HD\tVN:1.6\tSO:unsorted\n"
+        f"@SQ\tSN:{ref}\tLN:60\n"
+        + "".join(f"r{i}\t0\t{ref}\t1\t60\t60M\t*\t0\t0\t{'A' * 60}\t"
+                  f"{'I' * 60}\tNM:i:0\n" for i in range(6)))
+    bam = tmp / "mc.bam"
+    if run(["samtools", "sort", "-o", bam, sam]).returncode != 0:
+        skip("statecols:late columns survive an UNKNOWN first row", "samtools sort failed")
+        return
+    run(["samtools", "index", bam])
+
+    # aa_unbuilt sorts FIRST and is absent from the manifest, so it returns at gate 1
+    # and never acquires the four nt_* keys. zz_built comes second and does.
+    cat = tmp / "mc_catalogue.tsv"
+    cat.write_text(
+        "marker_id\ttaxon\tgene\taliases\tmarker_class\tevidence_type\tlocus\t"
+        "min_coverage\tmin_identity\tcopy_expectation\tquery_strategy\tsource_db\tnotes\n"
+        "aa_unbuilt\tTestus unbuiltus\taa\t-\trequired\tdna\tchromosome\t"
+        "0.50\t0.90\tsingle\tgene_in_organism\ttest\tnever built on purpose\n"
+        "zz_built\tTestus builtus\tzz\t-\trequired\tdna\tchromosome\t"
+        "0.50\t0.90\tsingle\tgene_in_organism\ttest\tbuilt, and measured\n")
+    man = tmp / "mc_manifest.tsv"
+    man.write_text(
+        "marker_id\ttaxon\tgene\tmarker_class\tevidence_type\tquery_strategy\t"
+        "status\tn_nt_seqs\tn_aa_seqs\thas_hmm\n"
+        "zz_built\tTestus builtus\tzz\trequired\tdna\tgene_in_organism\tbuilt\t1\t0\tno\n")
+
+    out = tmp / "mc_states.tsv"
+    proc = run([sys.executable, BIN / "marker_evidence.py", "--markers", cat,
+                "--manifest", man, "--sample", "S1", "--nt-bam", bam,
+                "--platform", "illumina", "--out", out])
+    if not out.exists():
+        record("statecols:late columns survive an UNKNOWN first row", False,
+               proc.stderr[-300:])
+        return
+
+    with out.open() as fh:
+        rdr = csv.DictReader(fh, delimiter="\t")
+        cols = list(rdr.fieldnames or [])
+        rows = {r["marker_id"]: r for r in rdr}
+
+    late = ["nt_depth", "nt_expected_breadth", "nt_n_seqs", "nt_best_ref"]
+    record("statecols:late columns survive an UNKNOWN first row",
+           all(c in cols for c in late),
+           f"missing {[c for c in late if c not in cols]} - header came from "
+           f"{cols[1] if len(cols) > 1 else '?'}")
+    built = rows.get("zz_built", {})
+    record("statecols:and the measured row actually carries them",
+           built.get("state") == "PRESENT" and (built.get("nt_expected_breadth") or ""),
+           f"state={built.get('state')}, "
+           f"nt_expected_breadth={built.get('nt_expected_breadth')!r}")
+    record("statecols:the unbuilt row is UNKNOWN and simply blank there",
+           rows.get("aa_unbuilt", {}).get("state") == "UNKNOWN",
+           f"got {rows.get('aa_unbuilt', {}).get('state')}")
+
+
+
 CASES = {
     "selftests": test_selftests,
     "tiering": test_tiering,
@@ -3151,6 +3452,9 @@ CASES = {
     "leadcap": test_supra_specific_entries_are_leads,
     "leadjoin": test_lead_join_seam,
     "ssrole": test_samplesheet_role_authority,
+    "markergene": test_marker_gene_identity,
+    "salm": test_salmonella_block,
+    "statecols": test_marker_state_columns,
 }
 
 

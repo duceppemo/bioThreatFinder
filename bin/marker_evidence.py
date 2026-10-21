@@ -875,7 +875,28 @@ def main() -> int:
         counts[rec["state"]] += 1
         results.append(rec)
 
-    cols = list(results[0]) if results else ["sample", "marker_id", "state", "reason"]
+    # FIELDNAMES FROM THE UNION OF EVERY RECORD, not from results[0]. The keys on a
+    # record depend on how far it got: a row that returns at gate 1 never reaches the
+    # nt measurement block, so it carries no `nt_depth`, `nt_expected_breadth`,
+    # `nt_n_seqs` or `nt_best_ref`. Taking the header from the FIRST record alone meant
+    # the whole file's schema was decided by whichever catalogue row happened to sort
+    # first, and `extrasaction="ignore"` then dropped those four columns from every
+    # other row WITHOUT error. Measured 2026-10-20: a states file whose first marker was
+    # UNKNOWN lost all four, including on the PRESENT rows that had measured them.
+    # nt_expected_breadth is the input to the depth gate - the rule that marker absence
+    # is only called when depth could have shown it - so the column that exists to stop
+    # a false ABSENT can disappear silently, which is the failure this file is built to
+    # prevent. Some keys are pre-initialised above for this very reason; that fix was
+    # per-column and could not cover a block that adds four at once.
+    cols: list[str] = []
+    _seen: set[str] = set()
+    for _r in results:
+        for _k in _r:
+            if _k not in _seen:
+                _seen.add(_k)
+                cols.append(_k)
+    if not cols:
+        cols = ["sample", "marker_id", "state", "reason"]
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=cols, delimiter="\t", extrasaction="ignore")

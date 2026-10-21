@@ -107,6 +107,48 @@
       metagenomes is unreliable. ipaH is multi-copy and cannot stand alone;
       corroboration by a single-copy plasmid or toxin locus is required.
 
+"Salmonella enterica":
+    confirm_requires: salm_invA and salm_ttrC and salm_ssaV
+    support_requires: any_of(salm_invA, salm_ttrC, salm_ssaV)
+    # NO veto_if, and deliberately not invented - same discipline as Y. pestis above.
+    # The watchlist declares two near neighbours for taxid 28901: E. coli (562) and
+    # Citrobacter freundii (546). All three markers here are absent from both, so the
+    # confirm set already discriminates against everything the watchlist names, and a
+    # veto would have nothing to do. The one organism the set must exclude is the other
+    # Salmonella species, S. bongori, and that is done by REQUIRING salm_ssaV rather
+    # than by vetoing on something S. bongori carries.
+    #
+    # THIS BLOCK CONFIRMS SPECIES IDENTITY, NOT A PATHOTYPE - which makes it the
+    # opposite of its two neighbours in this file. E. coli gates on virulence loci
+    # because species presence is commensal and uninformative; V. cholerae gates on
+    # ctxAB because non-toxigenic V. cholerae is not notifiable cholera. Neither is
+    # true here: ANY S. enterica in a food or clinical specimen is actionable, so
+    # gating confirmation on a virulence or serovar gene would suppress a correct and
+    # reportable call. Species identity IS the actionable unit for the detection
+    # decision, even though the serovar drives the public-health response.
+    #
+    # SEROVAR IS OUT OF SCOPE ON PURPOSE. The watchlist note for this taxon says so:
+    # "Serovar is the actionable unit, not species. Hand off to a dedicated serovar
+    # caller (sylph salmonella db is already on this box)." A viaB/tviB row was
+    # considered as a typhoidal proxy and REJECTED: SPI-7/viaB also occurs in
+    # Vi-positive Paratyphi C and some Dublin, and Vi-negative Typhi are documented in
+    # endemic regions, so the line would read as "typhoid" to an analyst while being
+    # neither necessary nor sufficient for it. A marker that misleads is worse than an
+    # absent one - D36's finding, applied before shipping rather than after.
+    rationale: >
+      Any S. enterica is actionable, so confirmation gates on species identity rather
+      than on a virulence locus. invA and ttrC are the two internationally used
+      Salmonella targets but both are GENUS-level - S. bongori carries both - so
+      neither alone, nor the pair, says S. enterica. ssaV supplies the species call:
+      S. bongori lacks the SPI-2 T3SS. ttrC and ssaV both sit in the centisome-30
+      region and so are NOT independent loci; invA at SPI-1 is the independent second
+      location, giving two chromosomal sites across three markers. All three are
+      required to confirm, which means any one of them untested holds the finding at
+      supported under three-valued logic - the safe direction, and deliberate.
+      support_requires is any_of because invA-negative Salmonella are documented
+      (99.6% inclusivity over 364 strains), so a single absent marker is weak evidence
+      against the organism.
+
 "Corynebacterium diphtheriae":
     confirm_requires: any_of(cdiph_dtxR, cdiph_rpoB) and cdiph_tox
     support_requires: any_of(cdiph_dtxR, cdiph_rpoB)
