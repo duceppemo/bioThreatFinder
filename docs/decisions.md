@@ -3675,3 +3675,133 @@ directory so the regeneration is not invisible to anyone reading the results lat
 
 `-resume` was deliberately not used: changing `bin/` re-hashes the tasks and would
 have redone ~11 h of `MARKER_SEARCH_AA` to fix a banner.
+
+## D39 — Declaring a negative control made the report assert the control was clean while reporting that same control as a detection
+
+D38 closed by naming the one cheap change left: *"no real-data samplesheet declares a
+negative control, so `supported` PPV of 0.600 is a floor, not a measurement."* Doing
+exactly that, on the inputs of a finished run, produced a report that was worse than
+the one with no control at all.
+
+### The divergence
+
+`score_evidence.py` asked "which samples are controls" in two places that answered
+differently:
+
+| consumer | source of `role` | what it decides |
+|---|---|---|
+| `control_rpm` | the `role` column on coverage rows | whether anything is **actually subtracted** |
+| `n_controls` | coverage rows, candidate rows **and `--samplesheet`** | the QC sentence on every finding |
+
+Inside a pipeline run the two agree, because both descend from the same Nextflow
+`meta` — `main.nf:297` parses `role`, `detect.nf` passes `--role` to the scorer, and
+the value is written onto every output row. They diverge on the **re-score path**:
+published coverage TSVs from a finished run, plus a samplesheet. That is not an exotic
+invocation — it is how `zymo_rl100_rescore`, `zymo_rl150_rescore` and the D36 report
+regeneration were all produced, and it is the only way to add a control declaration to
+a run without paying for it again.
+
+Declaring a control that way set `n_controls` to 1, which silenced *"NO NEGATIVE
+CONTROL IN RUN — contamination cannot be excluded"*, and left `control_rpm` empty,
+which selected the branch written for the opposite case:
+
+```
+1 negative control(s) in run, all clean - no taxon raised in
+any control, so no control subtraction applied
+```
+
+Measured on `zymo_rl100` with the yeast library declared a control: that sentence went
+onto **all 82 findings**, the tier column came back **byte-identical** to the run with
+no control at all, and the same file reported the declared control as a `supported`
+*Listeria monocytogenes* detection at **355.54 RPM** — one of **14** watchlist taxa it
+carries. Two statements in one report, one asserting that no taxon was raised in any
+control and the other naming a notifiable organism in it at an actionable tier.
+
+The missing-control case says *"contamination cannot be excluded."* This said
+**excluded**, on the strength of evidence it had never read. The branch at fault was
+itself written to fix a false alarm — a spotless NTC reading as a missing one — which
+is the recurring shape here: the fix for a warning that fires too often becomes a
+claim that is false in a case nobody enumerated.
+
+### The samplesheet is the operator's declaration, so it now drives the subtraction
+
+`--samplesheet` is read **first** and relabels the `role` on every candidate and
+coverage row whose sample it names, before `control_rpm` is built. It is authority in
+both directions, because a stale `control` role on a re-scored row would otherwise
+impose a floor the operator never asked for. Every relabelling is reported on stderr
+rather than applied silently, and a sample promoted to control is named individually:
+28 rows across 1 sample, on the run above.
+
+### A declared control that never ran must not be credited
+
+"No rows anywhere" is the signature of a spotless NTC **and** of a sample the run never
+processed — a sheet left over from another batch, a row whose reads failed QC, a name
+that never matched what the pipeline emitted. Candidate and coverage rows cannot tell
+those apart, which is why the **read ledger** decides it: a control that was sequenced
+and analysed has a `seqkit_stats` row even when it nominates nothing. A declared
+control missing from the ledger *and* from every row is not counted, and is named on
+stderr. Without `--read-stats` there is no ledger, so the question is left unasked
+rather than answered wrongly, and the spotless case keeps its credit.
+
+### What the control was then worth
+
+With the subtraction actually running, on the same 11 libraries and the same alignment
+evidence:
+
+| | no control | yeast declared control |
+|---|---|---|
+| `supported` | 5 | 4 |
+| `supported` PPV | 0.600 | **0.750** |
+| false positives | 2 | **1** |
+| false confirmations | 0 | 0 |
+| `suppressed_control` | — | 3 calls, **0** truth-present |
+| detection rate, every scenario | unchanged | unchanged |
+
+**Nothing true was lost.** All three suppressed rows were truth-absent, and every
+per-scenario detection rate is identical — the control removed a false positive and
+cost no sensitivity on this data.
+
+The one surviving false positive is *L. monocytogenes* in the *B. subtilis* library,
+and it survives on a margin: **1816.73 / 355.54 = 5.11×** against the 5.0× requirement.
+The finding discloses it in words — *"control present at 355.54 RPM, sample 1816.73 RPM
+(5.1x)"* — and it also carries *"marker rule satisfied: lmono_hly and lmono_prfA"*.
+Listeria's own virulence markers, in a *Bacillus subtilis* library. That is not
+spurious mapping; it is **real Listeria DNA**, and the contamination hypothesis from
+D38 is now quantitatively supported rather than merely plausible. A single control
+turns 9% of the specificity error into a disclosed 5.11× margin.
+
+### What was NOT changed
+
+No real samplesheet in the repo was edited. The yeast library is **not** a
+no-template control — it is another organism's library from the same sequencing run,
+and declaring it one is a benchmark-design decision with a real cost: it imposes a
+run-wide floor at 5× whatever hopped into it, which on different data would suppress a
+genuine low-level positive. The measurement above is the evidence for making that
+call, not the call itself. `benchmarks/scenarios/real_mock_communities.yaml` would need
+the control declared alongside it.
+
+### Confirmed on a second real dataset, with the operator's own control
+
+`fsln/case_1/samplesheet_ctrl.csv` declares `case_1-2` a control and has sat beside
+`samplesheet.csv` since 2026-10-15 — but `runs/fsln_case_1` was scored with the plain
+sheet, so **control subtraction had never run on real data at all**, and that run's
+published report carries *"NO NEGATIVE CONTROL IN RUN"* on every finding while a
+control declaration sat next to its inputs. Re-scoring with the operator's sheet:
+
+```
+case_1-1 | Corynebacterium diphtheriae   screened_only -> suppressed_control
+case_1-1 | Toxoplasma gondii             screened_only -> suppressed_control
+case_1-2 | Corynebacterium diphtheriae   screened_only -> control_background
+case_1-2 | Toxoplasma gondii             screened_only -> control_background
+```
+
+The one actionable call — *Candida auris* at 29,705.9 RPM — is **unchanged**. The
+control removed two low-level leads and left the real finding alone, which is what a
+control is for. `runs/fsln_case_1` and `runs/fsln_case_3` were NOT regenerated: they
+are case data and re-publishing their reports is not a documentation change.
+
+Suite at **251 passed, 0 failed, 2 skipped**. The twelve new `ssrole` checks were run
+against the pre-fix scorer first: **8 fail, 4 pass**, and the 4 that pass are the
+regression guards that must hold in both directions — no-samplesheet runs, the spotless
+control, and the no-ledger benefit of the doubt. A test that passes against the bug it
+names is the D37 defect, so the check is now part of adding one.

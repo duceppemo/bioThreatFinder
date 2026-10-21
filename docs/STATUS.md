@@ -268,13 +268,31 @@ has no data on the chemistry it is calibrated for. See **D35**.
 
 ## Still unresolved
 
-- **No real-data samplesheet declares a negative control.** `runs/zymo_rl100_rescore`
-  put two *L. monocytogenes* `supported` calls in the *B. subtilis* and
-  *S. cerevisiae* isolate libraries at identity 0.9615/0.9646 against 0.9643 in
-  Listeria's own library - almost certainly real contaminant DNA (index hopping),
-  graded as false positives because nothing can tell the two apart without a control.
-  `supported` PPV of 0.600 is therefore a FLOOR. Adding a `role=control` row to the
-  real samplesheets is the highest-value cheap change available. See **D38**.
+- **No real-data samplesheet declares a negative control, and the value of declaring
+  one is now measured.** `runs/zymo_rl100_rescore` put two *L. monocytogenes*
+  `supported` calls in the *B. subtilis* and *S. cerevisiae* isolate libraries at
+  identity 0.9615/0.9646 against 0.9643 in Listeria's own library - almost certainly
+  real contaminant DNA (index hopping), graded as false positives because nothing can
+  tell the two apart without a control. `supported` PPV of 0.600 is therefore a FLOOR.
+  Re-scoring with the yeast library declared a control (D39, 2026-10-20): PPV **0.600
+  -> 0.750**, false positives **2 -> 1**, **no** per-scenario detection rate changed,
+  and all 3 suppressed rows truth-absent - so the control cost nothing in sensitivity
+  here. The surviving false positive clears the margin at **5.11x** against 5.0x while
+  carrying Listeria's own `hly` and `prfA`: contaminating DNA, now quantitatively
+  supported rather than inferred. **The decision is still open**, because the yeast
+  library is another organism's library from the same run rather than a no-template
+  control, and declaring it one imposes a run-wide 5x floor that on other data would
+  suppress a genuine low-level positive. No samplesheet in the repo was edited;
+  `benchmarks/scenarios/real_mock_communities.yaml` would need the control declared
+  alongside one. See **D38**, **D39**.
+  - Reaching that measurement required fixing the scorer first: `--samplesheet`
+    declared controls for the QC sentence while `control_rpm` read `role` only off the
+    pipeline's own rows, so declaring a control on the **re-score path** silenced
+    *"NO NEGATIVE CONTROL IN RUN"*, subtracted nothing, and put *"1 negative control(s)
+    in run, all clean"* on all 82 findings of a run whose declared control was itself
+    reported as a `supported` *L. monocytogenes* detection at 355.5 RPM. The sheet now
+    drives `role` on every row, in both directions, and a declared control absent from
+    the read ledger is not credited. See **D39**.
 - **The 0.98 illumina `min_read_identity` floor now binds on real data too.** A real
   *L. monocytogenes* isolate at 620,881 RPM and 95% window occupancy reads 0.9643 -
   strain divergence from the pack reference, not sequencing error. NOT lowered: 0.98

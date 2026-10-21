@@ -2981,6 +2981,144 @@ def test_report_screen_coverage(tmp: Path) -> None:
 
 
 
+def test_samplesheet_role_authority(tmp: Path) -> None:
+    """The samplesheet declares which samples are controls, so it must DRIVE subtraction.
+
+    D39. `control_rpm` - the dict that actually suppresses anything - was built only from
+    the `role` field on the pipeline's own output rows, while `n_controls`, which decides
+    the QC sentence an analyst reads first, also honoured --samplesheet. Inside one run
+    those agree, because both descend from the same Nextflow `meta`. They diverge on the
+    RE-SCORE path this project uses routinely: published coverage TSVs plus a corrected
+    sheet. Declaring a control that way silenced "NO NEGATIVE CONTROL IN RUN" and left
+    control_rpm empty, selecting the "controls all clean" branch - so every finding
+    asserted no taxon had been raised in any control. On zymo_rl100 that sentence went
+    onto all 82 findings while the same file reported the declared control as a
+    `supported` L. monocytogenes detection at 355.5 RPM.
+
+    Each world gets its own coverage file: run-global `control_rpm` is poisoned by mixing
+    worlds, which is the fixture trap recorded on test_control_subtraction_audit.
+    """
+    shape = dict(taxid="1639", taxon="Listeria monocytogenes", group="bacteria",
+                 reference_bp=2900000, reference_contigs=1, breadth=0.9100,
+                 mean_depth=12.0, depth_cv=0.40, window_bp=1000, windows_expected=2900,
+                 windows_occupied=2700, window_occupancy=0.9310, mean_identity=0.9900,
+                 mean_alignment_length=95, neighbour_ratio="inf",
+                 mapped_fraction_of_assigned="0.9900", total_reads_screened=1000000,
+                 mapq_min=10)
+
+    def sheet(path: Path, rows: list[tuple[str, str]]) -> Path:
+        path.write_text("sample,platform,fastq_1,fastq_2,role\n" + "".join(
+            f"{s},illumina,/x/{s}_1.fq.gz,/x/{s}_2.fq.gz,{r}\n" for s, r in rows))
+        return path
+
+    def stats(path: Path, samples: list[str]) -> Path:
+        path.write_text("file\tavg_len\tsample\trole\tplatform\n" + "".join(
+            f"/x/{s}.fq.gz\t101.0\t{s}\tsample\tillumina\n" for s in samples))
+        return path
+
+    def world(name, cov_rows, *, ss=None, rs=None):
+        cov = tmp / f"ssrole_{name}.tsv"
+        write_cov(cov, cov_rows)
+        out = tmp / f"ssrole_{name}_out.tsv"
+        cmd = [sys.executable, BIN / "score_evidence.py", "--coverage", cov,
+               "--watchlist", PACK / "watchlist.resolved.tsv",
+               "--pack-yaml", PACK / "pack.yaml", "--control-ratio", "5.0",
+               "--out", out]
+        if ss:
+            cmd += ["--samplesheet", ss]
+        if rs:
+            cmd += ["--read-stats", rs]
+        proc = run(cmd)
+        with out.open() as fh:
+            rows = {r["sample"]: r for r in csv.DictReader(fh, delimiter="\t")}
+        return rows, proc.stderr
+
+    def rows_for(ntc_role):
+        return [
+            cov_row(sample="NTC", role=ntc_role, unique_reads=1000,
+                    reads_per_million=100.0, screen_assigned_reads=1005, **shape),
+            cov_row(sample="SPECIMEN", role="sample", unique_reads=2000,
+                    reads_per_million=200.0, screen_assigned_reads=2005, **shape),
+        ]
+
+    # (a) THE BUG. The rows say NTC is an ordinary sample - the shape of every re-score -
+    #     while the sheet declares it a control. 200 RPM < 5 x 100, so the specimen row
+    #     must be suppressed, and the NTC's own 100 RPM must become QC rather than a
+    #     finding about a specimen.
+    ss = sheet(tmp / "ssrole_a.csv", [("NTC", "control"), ("SPECIMEN", "sample")])
+    rs = stats(tmp / "ssrole_a_stats.tsv", ["NTC", "SPECIMEN"])
+    rows, err = world("declared", rows_for("sample"), ss=ss, rs=rs)
+    spec = rows.get("SPECIMEN", {})
+    record("ssrole:a sheet-declared control subtracts even when the rows say otherwise",
+           spec.get("tier") == "suppressed_control", f"got {spec.get('tier')}")
+    record("ssrole:the declared control's own row is QC, not a finding",
+           rows.get("NTC", {}).get("tier") == "control_background",
+           f"got {rows.get('NTC', {}).get('tier')}")
+    record("ssrole:and NOTHING claims the control was clean",
+           "all clean" not in spec.get("reasons", ""), spec.get("reasons", "")[:160])
+    record("ssrole:the relabelling is reported, not silent",
+           "samplesheet roles applied" in err and "is a CONTROL per the samplesheet" in err,
+           err[-300:])
+
+    # (b) The sheet is authority in BOTH directions. A row labelled control that the sheet
+    #     calls an ordinary sample must not impose a floor on the run - otherwise a stale
+    #     role on a re-scored row silently suppresses real findings.
+    ss = sheet(tmp / "ssrole_b.csv", [("NTC", "sample"), ("SPECIMEN", "sample")])
+    rs = stats(tmp / "ssrole_b_stats.tsv", ["NTC", "SPECIMEN"])
+    rows, err = world("demoted", rows_for("control"), ss=ss, rs=rs)
+    record("ssrole:a sheet-demoted control stops subtracting",
+           rows.get("SPECIMEN", {}).get("tier") != "suppressed_control",
+           f"got {rows.get('SPECIMEN', {}).get('tier')}")
+    record("ssrole:and the run is then correctly reported as having no control",
+           "NO NEGATIVE CONTROL IN RUN" in rows.get("SPECIMEN", {}).get("reasons", ""),
+           rows.get("SPECIMEN", {}).get("reasons", "")[:160])
+
+    # (c) No sheet at all: the pre-D39 behaviour must be untouched, since that is how
+    #     every in-pipeline run scores.
+    rows, err = world("nosheet", rows_for("control"))
+    record("ssrole:with no sheet the row roles still decide, unchanged",
+           rows.get("SPECIMEN", {}).get("tier") == "suppressed_control",
+           f"got {rows.get('SPECIMEN', {}).get('tier')}")
+
+    # (d) THE GOOD CASE THIS MUST NOT BREAK. A spotless NTC produces no coverage rows at
+    #     all. It ran - it has a read ledger entry - so it is a clean control and the
+    #     finding must say so instead of "contamination cannot be excluded".
+    ss = sheet(tmp / "ssrole_d.csv", [("NTC", "control"), ("SPECIMEN", "sample")])
+    rs = stats(tmp / "ssrole_d_stats.tsv", ["NTC", "SPECIMEN"])
+    rows, err = world("spotless", [rows_for("sample")[1]], ss=ss, rs=rs)
+    spec = rows.get("SPECIMEN", {})
+    record("ssrole:a spotless declared control is still credited as clean",
+           "negative control(s) in run, all clean" in spec.get("reasons", ""),
+           spec.get("reasons", "")[:160])
+    record("ssrole:and a clean control does not read as a missing one",
+           "NO NEGATIVE CONTROL IN RUN" not in spec.get("reasons", ""), "")
+
+    # (e) THE PHANTOM. Same empty-handed signature as (d), but the control is absent from
+    #     the read ledger too - a sheet left over from another batch, or a name that never
+    #     matched what the pipeline emitted. It never ran, so it excludes nothing, and
+    #     crediting it would hand the analyst the strongest claim on the weakest evidence.
+    ss = sheet(tmp / "ssrole_e.csv", [("NTC", "control"), ("SPECIMEN", "sample")])
+    rs = stats(tmp / "ssrole_e_stats.tsv", ["SPECIMEN"])
+    rows, err = world("phantom", [rows_for("sample")[1]], ss=ss, rs=rs)
+    spec = rows.get("SPECIMEN", {})
+    record("ssrole:a declared control that never ran is NOT credited",
+           "NO NEGATIVE CONTROL IN RUN" in spec.get("reasons", ""),
+           spec.get("reasons", "")[:160])
+    record("ssrole:and it is named on stderr rather than dropped quietly",
+           "declares 'NTC' a negative control" in err and "never ran" in err,
+           err[-300:])
+
+    # (f) Without a read ledger there is nothing to distinguish (d) from (e), so the
+    #     question must be left unasked - the spotless case keeps its credit.
+    ss = sheet(tmp / "ssrole_f.csv", [("NTC", "control"), ("SPECIMEN", "sample")])
+    rows, err = world("noledger", [rows_for("sample")[1]], ss=ss)
+    record("ssrole:with no read ledger a declared control is given the benefit of doubt",
+           "negative control(s) in run, all clean"
+           in rows.get("SPECIMEN", {}).get("reasons", ""),
+           rows.get("SPECIMEN", {}).get("reasons", "")[:160])
+
+
+
 CASES = {
     "selftests": test_selftests,
     "tiering": test_tiering,
@@ -3012,6 +3150,7 @@ CASES = {
     "defaults": test_scorer_defaults_match_shipped_config,
     "leadcap": test_supra_specific_entries_are_leads,
     "leadjoin": test_lead_join_seam,
+    "ssrole": test_samplesheet_role_authority,
 }
 
 

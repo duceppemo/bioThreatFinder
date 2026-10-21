@@ -653,6 +653,45 @@ def main() -> int:
     if not watch:
         sys.exit(f"ERROR: no entries read from watchlist {args.watchlist}")
 
+    # THE SAMPLESHEET IS THE OPERATOR'S DECLARATION, AND IT MUST DRIVE THE SUBTRACTION
+    # rather than only the count. This block used to read the sheet at its END and consult
+    # it for `control_samples` ALONE, while `control_rpm` - the dict that actually
+    # suppresses anything - was built from the `role` field carried on the pipeline's own
+    # output rows. Inside a single run those two always agree, because both descend from
+    # the same Nextflow `meta`. They do NOT agree when the rows and the sheet come from
+    # different places, which is precisely the re-score path this project uses routinely:
+    # published coverage TSVs from a finished run, plus a corrected samplesheet. Declaring
+    # a control that way set n_controls to 1, which silenced "NO NEGATIVE CONTROL IN RUN",
+    # and left control_rpm empty, which selected the "controls all clean" branch - so every
+    # finding asserted that no taxon had been raised in any control. Measured on zymo_rl100
+    # (2026-10-20): declaring the yeast library a control put that sentence on all 82
+    # findings, while the same file reported that same library as a `supported`
+    # L. monocytogenes detection at 355.5 RPM, one of 14 watchlist taxa it carries. The
+    # missing-control case at least says "contamination cannot be excluded"; this said
+    # "excluded" on the strength of evidence it had never looked at.
+    declared_roles: dict[str, str] = {}
+    if args.samplesheet and args.samplesheet.exists():
+        with args.samplesheet.open(newline="") as fh:
+            for r in csv.DictReader(fh):
+                sid = (r.get("sample") or "").strip()
+                if sid:
+                    declared_roles[sid] = (
+                        (r.get("role") or "").strip().lower() or "sample")
+
+    # (sample, role the row carried, role the sheet declares) for every row relabelled.
+    recoded: list[tuple[str, str, str]] = []
+
+    def reconcile(row: dict) -> dict:
+        """Give a row the role its sample is declared to have."""
+        sid = (row.get("sample") or "").strip()
+        want = declared_roles.get(sid)
+        if want is not None:
+            have = (row.get("role") or "").strip().lower()
+            if have != want:
+                recoded.append((sid, have, want))
+                row["role"] = want
+        return row
+
     # Stage-1 support, for concordance reporting.
     screen: dict[tuple[str, str], dict] = {}
     # Control samples seen ANYWHERE, stage 1 included. n_controls used to be counted from
@@ -664,6 +703,7 @@ def main() -> int:
     control_samples: set[str] = set()
     for path in args.candidates:
         for row in read_tsv(path):
+            reconcile(row)
             key = (row.get("sample", ""), row.get("taxid", ""))
             screen[key] = row
             if row.get("role") == "control" and row.get("sample"):
@@ -671,7 +711,7 @@ def main() -> int:
 
     coverage: list[dict] = []
     for path in args.coverage:
-        coverage.extend(read_tsv(path))
+        coverage.extend(reconcile(row) for row in read_tsv(path))
 
     # Highest control signal per taxon, used to subtract run-wide contamination.
     control_rpm: dict[str, float] = defaultdict(float)
@@ -695,12 +735,41 @@ def main() -> int:
     # be excluded" on every finding of the cleanest possible run. An earlier fix moved the
     # count from coverage rows to candidate rows, which only widened it from "control
     # reached stage 2" to "control reached stage 1" and left the spotless case broken.
-    if args.samplesheet and args.samplesheet.exists():
-        with args.samplesheet.open(newline="") as fh:
-            for r in csv.DictReader(fh):
-                if (r.get("role") or "").strip().lower() == "control" and r.get("sample"):
-                    control_samples.add(r["sample"].strip())
+    declared_controls = {s for s, role in declared_roles.items() if role == "control"}
+    control_samples |= declared_controls
+
+    # A DECLARED CONTROL THAT NEVER RAN MUST NOT BE CREDITED AS A CLEAN ONE. "No rows
+    # anywhere" is the signature of the spotless NTC described just above AND of a sample
+    # the run never processed - a sheet left over from another batch, a row whose reads
+    # failed QC, a name that does not match what the pipeline emitted. Those two are
+    # indistinguishable from candidate and coverage rows alone, which is why the read
+    # ledger decides it: a control that was sequenced and analysed has a seqkit row even
+    # when it nominates nothing. Without --read-stats there is no ledger to consult, so
+    # the question is left unasked rather than answered wrongly.
+    phantom_controls: set[str] = set()
+    if read_len_of:
+        seen_rows = {(r.get("sample") or "").strip() for r in coverage}
+        seen_rows |= {s for s, _tx in screen}
+        phantom_controls = {s for s in declared_controls
+                            if s not in read_len_of and s not in seen_rows}
+        control_samples -= phantom_controls
+        for s in sorted(phantom_controls):
+            sys.stderr.write(
+                f"[score] WARNING: the samplesheet declares {s!r} a negative control, but "
+                f"the run produced no reads, no stage-1 rows and no coverage for it. NOT "
+                f"counted as a control - one that never ran excludes nothing.\n")
+
     n_controls = len(control_samples)
+
+    if recoded:
+        n_samp = len({s for s, _h, _w in recoded})
+        sys.stderr.write(
+            f"[score] samplesheet roles applied to pipeline rows: {len(recoded)} row(s) "
+            f"across {n_samp} sample(s) relabelled to match the sheet\n")
+        for s in sorted({s for s, _h, w in recoded if w == "control"}):
+            sys.stderr.write(
+                f"[score]   {s!r} is a CONTROL per the samplesheet while its own rows said "
+                f"otherwise - without this, subtraction would not have run for it\n")
 
     # CONTROL SUBTRACTION HAS BEEN INVISIBLE. Across the six published batches it moved
     # 108 rows, and the only record of any of it was prose inside the `reasons` column -

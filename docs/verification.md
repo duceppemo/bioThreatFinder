@@ -15,7 +15,7 @@ Needs `samtools` for the coverage cases (skipped with a message if absent) and a
 for the screen cases (`BTF_TAXDUMP=/path/to/taxdump`, skipped otherwise). Everything else
 is fixture-driven.
 
-Current state: **239 passed, 0 failed, 2 skipped** (2026-10-19). The 2 skips are the
+Current state: **251 passed, 0 failed, 2 skipped** (2026-10-20). The 2 skips are the
 `coverage` checks that need `samtools` on PATH. The per-script `--self-test` suites run
 as single checks from here, so `selftest:build_marker_db` alone covers 60+ assertions,
 including D30's eleven on the protein query ladder.
@@ -40,6 +40,7 @@ including D30's eleven on the protein query ladder.
 | `shared_assembly` | 7 | Taxa sharing one NCBI assembly carry identical masking numbers across all eight columns, and neither is the vacuous `genome_bp=0` row. Each partner now also NAMES the other in `SHARED_SEQUENCE` (D34 - the flag is derived from the manifest's `accession`, so it no longer depends on how the script was invoked). Plus the two invariants whose violation was invisible: **every pack reference has a masking result**, and no reference is lost to taxid-keyed bookkeeping - this test itself read the manifest into `{taxid: row}` and so discarded eleven of taxid 11266's twelve rows |
 | `workflow` | 6 | Every script the workflow invokes is in `bin/` and executable; no shared placeholder for optional inputs; stage 2 does not re-filter on assigned reads |
 | `report` | 13 | **The first coverage `make_report.py` has ever had** - which is part of why an entire input could go missing from it unnoticed (D33). A stage-1 arm that was enabled and produced nothing is bannered above the findings, not buried; the unclassified fraction reaches the page; bracken's by-design exit carries no alarm; and a report rendered without a screen summary omits the section rather than drawing an empty one that reads as all-clear. D36 added the run-level view that pays for that suppression: an arm empty on EVERY sample it searched is bannered as a database problem, because an empty or truncated database loads without error and is silent per-sample |
+| `ssrole` | 12 | The samplesheet declares which samples are controls, so it DRIVES the subtraction and not merely the count (D39). A sheet-declared control suppresses even when the pipeline's own rows call it a sample - the re-score shape, where declaring a control used to assert *"all clean"* on every finding while reporting that control as a `supported` detection. The sheet is authority in both directions, a declared control that never ran is not credited as a clean one, and with no read ledger to tell a spotless NTC from an absent one the question is left unasked |
 
 ## It has already caught a real bug
 
@@ -103,6 +104,20 @@ One-offs against real data, not automated:
   figures are a FLOOR, not a measurement, because **no real-data samplesheet declares
   a negative control** - so two `supported` calls that are almost certainly library
   cross-contamination cannot be told from false positives. See D37, D38.
+- **What ONE declared control is worth has now been measured** (D39, 2026-10-20), on
+  the same 11 libraries and the same alignment evidence: `supported` PPV **0.600 ->
+  0.750**, false positives **2 -> 1**, false confirmations 0, and **every per-scenario
+  detection rate unchanged** - all 3 suppressed rows were truth-absent, so the control
+  cost no sensitivity on this data. The remaining false positive is Listeria in the
+  B. subtilis library, surviving on a **5.11x** margin against the 5.0x requirement
+  while carrying Listeria's own `hly` and `prfA` markers: real contaminating DNA, not
+  spurious mapping. This is a MEASUREMENT OF THE INPUTS, not of a committed change -
+  the yeast library is another organism's library from the same run, not a no-template
+  control, and no samplesheet in the repo was edited. Getting here first required
+  fixing the scorer: declaring a control on the re-score path silenced the
+  missing-control warning and subtracted nothing, putting *"1 negative control(s) in
+  run, all clean"* on all 82 findings of a run whose declared control was itself
+  reported as a `supported` L. monocytogenes detection at 355.5 RPM.
 - **The pipeline HAS run end to end, repeatedly** - `plumbing_001`, `plumbing_v2`,
   `lod_v1`, `lod_v2_kraken2`, `mmap_test`, `hostqc_test`, `metabuli_smoke`,
   `lod_v3_threearm`, `lod_v4`, the `divergent_v1` bake-off and (in progress) `d12fine` all
