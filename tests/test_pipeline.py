@@ -145,6 +145,8 @@ def test_selftests(tmp: Path) -> None:
           "--scenarios", "x", "--manifest", "x", "--findings", "x", "--out-dir", "x"]),
         ("selftest:build_marker_db", [sys.executable, SCRIPTS / "build_marker_db.py", "--self-test"]),
         ("selftest:mask_pack_refs", [sys.executable, SCRIPTS / "mask_pack_refs.py", "--self-test"]),
+        ("selftest:measure_reference_span",
+         [sys.executable, SCRIPTS / "measure_reference_span.py", "--self-test"]),
     ]:
         p = run(cmd)
         record(name, p.returncode == 0, p.stderr.strip().splitlines()[-1] if p.returncode else "")

@@ -15,9 +15,9 @@ Needs `samtools` for the coverage cases (skipped with a message if absent) and a
 for the screen cases (`BTF_TAXDUMP=/path/to/taxdump`, skipped otherwise). Everything else
 is fixture-driven.
 
-Current state: **297 passed, 0 failed, 0 skipped** (2026-10-21) with `samtools` on
+Current state: **298 passed, 0 failed, 0 skipped** (2026-10-21) with `samtools` on
 PATH and `BTF_TAXDUMP` set. The bare `python3 tests/test_pipeline.py` reports
-**278 passed, 3 skipped** - the `coverage` and `statecols` checks need `samtools`, and
+**279 passed, 3 skipped** - the `coverage` and `statecols` checks need `samtools`, and
 the `screen`/`leadjoin` writers need a taxdump. The per-script `--self-test` suites run
 as single checks from here, so `selftest:build_marker_db` alone covers 60+ assertions,
 including D30's eleven on the protein query ladder.
@@ -26,7 +26,7 @@ including D30's eleven on the protein query ladder.
 
 | Group | Checks | The behaviour being pinned down |
 |---|---|---|
-| `selftest` | 5 | The self-tests inside `btf_yaml`, `marker_rules`, `evaluate_benchmark`, `build_marker_db`, `mask_pack_refs` |
+| `selftest` | 6 | The self-tests inside `btf_yaml`, `marker_rules`, `evaluate_benchmark`, `build_marker_db`, `mask_pack_refs`, `measure_reference_span`. The last covers the four ways D43's measurement could print a confident table instead of an error: the plain shipped filename may be claimed only by a taxid's FIRST reference, the cover is seeded and prefers single-sequence assemblies on ties, a near-zero shared-hash count is counted as unmeasurable rather than reported as a precise low ANI, and every external binary is RUN before use (D41) |
 | `tier` | 9 | All six decision paths: true positive, conserved-repeat artifact → `attributed_to_neighbour`, below-floor lead, control-suppressed, control's own background, and a database gap surfacing as `no_reference` rather than a negative |
 | `marker` | 10 | **Identical** alignment evidence yielding four different tiers on marker state alone: both plasmids → confirmed; pXO2 confidently absent → held; pXO2 **untested** → held *and named as a database gap*; *B. cereus* cereulide present → veto. Plus BCG → `vaccine_strain`, and disclosure when a veto could not be evaluated |
 | `d17a` | 7 | A taxon with no marker rule block is capped at `supported`, and the escape hatch the cap prints actually works (D37 - it did not: `RULE_KEYS` never contained `no_markers_available`, and the test named for it wrote a rules file it never passed to the scorer). A declared gap lifts the cap, still discloses that the marker tier never ran, is NOT lifted by `false`, and refuses a mistyped value rather than reading it as permission |
@@ -86,6 +86,17 @@ One-offs against real data, not automated:
   group-entry files had never been masked (D34) and came back at 0 bp. The script now
   reconciles the whole pack and exits non-zero when a reference has no result, so the
   count no longer has to be checked by hand.
+- **The reference pack's reach across each target species was measured without a
+  specimen** (2026-10-21, D43). 13,582 known assemblies of the 26 bacterial targets,
+  every one downloaded, each measured against the masked reference the pipeline actually
+  aligns to. 17 of 26 species already span their own diversity on one reference; 9 do
+  not. The verdict comes from simulating reads through the pipeline's own aligner,
+  bundle and `coverage_stats.py`, NOT from an ANI cut-off, because the ANI at which
+  `mean_identity` crosses 0.98 is species-dependent (~0.973 to ~0.981 over the three
+  species calibrated). Instrument controls: each shipped reference scores ANI 1.0000
+  against itself, and a genome simulated against itself returns `mean_identity` 0.9980,
+  so the ceiling sits under two points above the floor. Report: `docs/reference_span.tsv`.
+
 - **A second reference for one species was measured, not assumed** (2026-10-21, D42).
   Same reads against a one- and a two-reference bundle: `mean_identity` **0.9641 ->
   0.9947**, `best_reference_breadth` **0.877 -> 0.982**, and **6.2 M more reads map at

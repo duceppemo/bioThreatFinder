@@ -4186,3 +4186,143 @@ The three near-neighbour taxa in that bundle also gained a second assembly, beca
 costs nothing measured here, but it was a side effect rather than a decision. No other
 bacterium was touched: the question of which bacteria deserve a second reference is now
 answerable by measurement, and has been answered for one.
+
+---
+
+## D43 — The worst-case reference measurement: how far the shipped references reach across each target species, measured without a specimen
+
+D42 gave one species a second reference and showed identity 0.9641 → 0.9947 on real
+reads. The measurement was sound and the way it was reached was not: **the species was
+chosen because a sample complained, and the improvement was scored on the same reads
+that motivated it.** No isolate was held out, and the other target bacteria were never
+examined, because no specimen had yet accused them. For a surveillance pack that is
+backwards. A true sample is an isolate nobody has seen.
+
+So this asks a question that needs no specimen at all: *for every assembly of this
+species that is publicly known, would reads from that isolate clear the gates against
+the reference set we ship?* The worst answer over all known assemblies is the pack's
+guarantee. It is a property of the pack, not of a run.
+
+### Scope and method
+
+Frames were taken as the RefSeq complete/chromosome subtree of each of the 26 bacterial
+target taxids — **13,582 assemblies**, all of them downloaded, so the result is a true
+minimum rather than an estimate from a sample. Each was sketched (mash, k=21, s=10,000)
+and measured against the **masked** shipped FASTA, because that is what reads are
+actually aligned to.
+
+`scripts/measure_reference_span.py` carries the whole chain — `frame`, `fetch`, `span`,
+`cover`, `verdict` — so it is repeatable rather than a one-off. Its `--self-test` is in
+the suite.
+
+### Why the verdict is not an ANI number
+
+ANI is cheap enough to run over everything, so it is used **only to choose which genomes
+to test** and to count how many sit near the edge. It cannot carry the verdict, because
+the ANI at which the pipeline's `mean_identity` crosses the 0.98 floor is
+**species-dependent**, and not by a little:
+
+| species | `mean_identity` crosses 0.98 at mash-ANI |
+|---|---|
+| *L. monocytogenes* | ~0.974 |
+| *E. coli* | ~0.973 |
+| *L. pneumophila* | ~0.981 |
+
+Read identity is measured over the regions that still align, so how far it floats above
+genome-wide ANI depends on whether a species' divergence is uniform drift or a few
+replaced loci. A single ANI cut-off across the pack would therefore under-call some
+species and over-call others. The `verdict` stage instead simulates reads from the
+assemblies ANI nominated as worst and pushes them through **the pipeline's own** aligner,
+competitive bundle and `coverage_stats.py`. The deciding number is the one the pipeline
+would itself produce. Calibration panels were measured, not assumed.
+
+Two instrument controls passed before any of it was trusted: each shipped reference
+scores ANI 1.0000 against itself, and a genome simulated against itself returns
+`mean_identity` 0.9980 — not 1.0, because of the read-error model. The ceiling is
+0.998 and the floor is 0.98, so there are under two points of headroom.
+
+### What the measurement found
+
+**Most of the pack is fine, and that is a real result.** 17 of the 26 species need
+no addition: their most divergent known assembly already sits within reach of the single
+shipped reference. Several are clonal enough that one reference is genuinely sufficient.
+The D42 treatment is **not** broadly necessary, which is worth knowing before applying it
+anywhere else.
+
+**Nine species do not span their own diversity**, and the shape differs:
+
+- For most, divergent members lose identity and breadth gradually — the finding settles
+  below `confirmed_in_silico` and reads like a cautious call on a weak signal rather than
+  like a reference gap.
+- For one, the degradation is not gradual. Nine assemblies share **under 100 of 10,000
+  hashes** with the shipped reference, which is not a low ANI but **no measurable
+  similarity**. Simulated reads from those isolates return breadth **0.002** — below even
+  the permissive 0.01 floor — from a library of ~360,000 reads. That is not a downgrade.
+  It is indistinguishable from a clean negative.
+
+For the D42 species itself the measurement also settles the open question: with the
+single original reference, **47.1% of 853 known assemblies** would have failed the
+identity gate. The sample D38 ran into was not an unlucky outlier; it was a coin flip.
+With both references that falls to **3.6%**, and those remaining sit in the two
+genuinely divergent lineages. Two more references would close it. The second reference
+therefore did real work — and the measurement, not the sample, is what shows it.
+
+### Where this intersects the tier ladder
+
+`score_evidence.py` requires the coverage-geometry gates to **pass** for a finding to be
+actionable (the reasoning is recorded at the `actionable_requires` branch), and marker
+rules only ever hold a finding down — they never lift one. So where a shipped reference
+cannot recruit reads from a divergent member of its own species, the row is
+**not actionable regardless of marker evidence**. For the species above whose watchlist
+note already says the actionable signal is a gene cluster rather than the chromosome,
+that design intent is sound, but it means the marker route is a **single point of
+failure** for those isolates: there is no corroborating reference evidence to fall back
+on, so a marker gap and a true negative look the same.
+
+### The selection defect this also exposes
+
+`build_pack_refs.py` ranks candidates on NCBI metadata alone — `refseq_category`, then
+assembly level, then GCF over GCA, then size (`Candidate.sort_key`). **Nothing in that
+key knows what a lineage is.** `--max-per-taxon 2` can therefore return two assemblies
+from the same clade and leave the other half of a species uncovered. D42's second
+reference happened to land in the other lineage; that was luck in the pick, not a
+property of the picker. The `cover` stage replaces the luck with a stated criterion:
+greedy set cover over the species' own diversity, **seeded with what the pack already
+ships**, so its output is a list of additions and never churns a reference that earlier
+measurements were made against. Ties go to single-sequence complete assemblies, which
+D42's geometry substitution needs.
+
+Across the nine species the cover asks for **32 further references**. One species
+accounts for nine of them because it is polyphyletic; its watchlist note already says so.
+
+### What is pinned
+
+`--self-test` covers the four things that could produce a confident-looking table rather
+than an error: the plain shipped filename may be claimed only by a taxid's **first**
+reference (handing it to a later accession would measure the wrong genome and report it
+under the wrong name — silently, and in the flattering direction); the cover is seeded,
+reports additions, and prefers single-sequence assemblies on ties; a near-zero
+shared-hash count is counted as **unmeasurable** rather than reported as a precise low
+ANI; and `require_tool()` **runs** every binary before use. That last one is D41's lesson
+encoded — that rebuild degraded a third of the marker catalogue because a tool resolved
+to a path and then exited 127 on a missing library, and the dry run printed the path
+without ever invoking it. The resolver guard was verified to fail against its own first
+version.
+
+### Not done
+
+No reference was added. This decision is the measurement and the recommendation; acting
+on the 32 is a separate change, species by species, and three of the nine species are
+ones whose watchlist notes say species-level alignment is not the intended route anyway —
+for those, the right response may be to strengthen the marker route rather than the
+reference set.
+
+The report is `docs/reference_span.tsv`. It cannot be regenerated in CI: the frames are
+59 GB of downloaded assemblies, so the committed TSV is the evidence and the script is
+how to redo it. A CI check against the committed worst-case figures is not built.
+
+One further observation, flagged rather than chased: for a species group whose members
+are near-identical, simulated reads from one member spread across the sibling references
+in the same bundle, so breadth lands near 0.5 at an ANI of 0.999. That is competitive
+mapping working as designed, but it means breadth can be diluted by siblings rather than
+by divergence, which is a different failure mode from the one measured here.

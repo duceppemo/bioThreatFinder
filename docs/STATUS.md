@@ -301,9 +301,22 @@ has no data on the chemistry it is calibrated for. See **D35**.
   The floor stays at 0.98 and no per-taxon override exists. `--max-per-taxon` is 1 for
   bacteria and 3 for viruses by default, and the help text already gave the reason -
   intra-species diversity losing reads from a divergent strain - so this is the existing
-  design extended to a bacterium on the strength of a measurement. Which other bacteria
-  deserve a second reference is now a question answerable the same way, and is
-  unanswered. See **D38**, **D42**.
+  design extended to a bacterium on the strength of a measurement. See **D38**, **D42**.
+- ~~Which other bacteria deserve a second reference is unanswered.~~ **Measured
+  2026-10-21 (D43),** and without a specimen: 13,582 known assemblies across the 26
+  bacterial targets, each scored against the reference the pipeline actually aligns to.
+  **17 of 26 species need no addition** - one reference already reaches their most
+  divergent known member - so D42's treatment is not broadly necessary. **9 do not
+  span their own diversity**, and a seeded greedy cover asks for **32 further
+  references**. For the D42 species itself, the single original reference would have
+  failed the identity gate on **47.1% of 853 known assemblies**, falling to 3.6% with
+  both: that sample was not an unlucky outlier. Nothing was added - D43 is the
+  measurement and the recommendation. Two cautions recorded there: an ANI threshold
+  cannot carry the verdict, because the ANI at which read identity crosses 0.98 is
+  species-dependent; and one species degrades discontinuously rather than gradually, so
+  its divergent members return breadth 0.002 and are non-actionable whatever the markers
+  say, since the geometry gates must pass and marker rules only ever hold a finding
+  down. Report: `docs/reference_span.tsv`. See **D43**.
 
 - ~~*Salmonella* needs a real marker block, not a declaration.~~ **Done 2026-10-20
   (D40):** `salm_invA` + `salm_ttrC` + `salm_ssaV`, and *S. enterica* in the
