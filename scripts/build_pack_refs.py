@@ -420,6 +420,97 @@ def datasets_candidates(datasets_bin: str, taxid: int, levels: Sequence[str],
     return keep
 
 
+def assembly_key(src, accession_by_path: Dict[str, str]) -> str:
+    """The identity of the underlying assembly, for de-duplication and for staleness.
+
+    Keyed on the ACCESSION, never on the path and never on the gzip md5: paths differ
+    because each taxid gets its own filename even when NCBI returned the same assembly
+    for both, and gzip md5s differ because the container embeds the original filename
+    and mtime, so two byte-identical genomes hash differently. Falls back to the
+    resolved path when the manifest has no accession for the file.
+    """
+    rp = str(Path(src).resolve())
+    return accession_by_path.get(rp) or rp
+
+
+def bundle_inputs_path(comp: Path) -> Path:
+    """Sidecar recording what went into a competitive bundle."""
+    return comp.with_name(comp.name.replace(".fna.gz", "") + ".inputs.tsv")
+
+
+def write_bundle_inputs(comp: Path, keys: Iterable[str]) -> None:
+    p = bundle_inputs_path(comp)
+    try:
+        p.write_text("# assemblies concatenated into "
+                     f"{comp.name}; written by build_pack_refs.py\n"
+                     + "".join(f"{k}\n" for k in sorted(keys)))
+    except OSError as exc:
+        LOG.warning("could not write %s: %s", p.name, exc)
+
+
+def read_bundle_inputs(comp: Path) -> Optional[set]:
+    """The recorded input set, or None when the bundle predates the sidecar."""
+    p = bundle_inputs_path(comp)
+    if not p.is_file():
+        return None
+    try:
+        return {ln.strip() for ln in p.read_text().splitlines()
+                if ln.strip() and not ln.startswith("#")}
+    except OSError:
+        return None
+
+
+def bundle_staleness(comp: Path, expected: Sequence[str],
+                     sources: Sequence[Path]) -> Optional[str]:
+    """Why this bundle must be rebuilt, or None if it is current.
+
+    EXISTENCE IS NOT FRESHNESS. D42 records a bundle that was skipped because its
+    output file existed, so a taxon's manifest claimed two references while the
+    aligner went on using one - a disagreement invisible from either side, and in the
+    direction that overstates the pack. The remedy named there was a staleness check
+    against the inputs; this is it.
+
+    Two independent signals, because each catches what the other misses. The recorded
+    INPUT SET is exact and catches a reference added, removed or swapped even when
+    every mtime looks settled - a restore from backup, a copy that preserved times, a
+    re-download of the same accession. MTIME catches a genome whose content changed
+    under a name the set already knew. A bundle with no sidecar can only be checked
+    the second way, and says so.
+    """
+    if not comp.is_file() or comp.stat().st_size == 0:
+        return "missing or empty"
+    recorded = read_bundle_inputs(comp)
+    if recorded is not None:
+        want = set(expected)
+        if recorded != want:
+            added = sorted(want - recorded)[:4]
+            gone = sorted(recorded - want)[:4]
+            bits = []
+            if added:
+                bits.append(f"now also wants {', '.join(added)}")
+            if gone:
+                bits.append(f"no longer wants {', '.join(gone)}")
+            return "input set changed: " + "; ".join(bits)
+    comp_mtime = comp.stat().st_mtime
+    newer = [Path(s).name for s in sources
+             if Path(s).is_file() and Path(s).stat().st_mtime > comp_mtime]
+    if newer:
+        return f"input genome newer than the bundle: {', '.join(sorted(newer)[:4])}"
+    if recorded is None:
+        LOG.info("  (no input record beside %s; checked by mtime only)", comp.name)
+    return None
+
+
+def index_staleness(mmi: Path, comp: Path) -> Optional[str]:
+    """An index built from a previous bundle is the same disagreement one step on:
+    the FASTA says one thing and the aligner reads another."""
+    if not mmi.is_file() or mmi.stat().st_size == 0:
+        return "missing or empty"
+    if comp.is_file() and comp.stat().st_mtime > mmi.stat().st_mtime:
+        return "bundle is newer than the index"
+    return None
+
+
 def load_extra_refs(path: Optional[Path]) -> Dict[int, List[str]]:
     """taxid -> [extra accessions], from a measured cover (D43).
 
@@ -1337,9 +1428,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         present_neighbours = [n for n in t["neighbours"] if genomes_by_taxid.get(n)]
         missing_neighbours = [n for n in t["neighbours"] if not genomes_by_taxid.get(n)]
 
-        if comp.is_file() and comp.stat().st_size > 0 and not args.force:
-            LOG.info("target %s: competitive FASTA exists, skipping build: %s", tid, comp.name)
+        # What this bundle SHOULD contain, computed before deciding whether to skip.
+        bundle_sources = list(target_genomes)
+        for ntid in present_neighbours:
+            bundle_sources.extend(genomes_by_taxid[ntid])
+        expected_keys: List[str] = []
+        for src in bundle_sources:
+            k = assembly_key(src, accession_by_path)
+            if k not in expected_keys:
+                expected_keys.append(k)
+
+        stale = bundle_staleness(comp, expected_keys, bundle_sources)
+        if stale is None and not args.force:
+            LOG.info("target %s: competitive FASTA is current, skipping build: %s",
+                     tid, comp.name)
         else:
+            if comp.is_file() and stale and stale != "missing or empty":
+                LOG.warning("target %s: REBUILDING %s - %s", tid, comp.name, stale)
             LOG.info("target %s (%s): building competitive FASTA from 1 target + "
                      "%d/%d neighbour(s)", tid, t["name"],
                      len(present_neighbours), len(t["neighbours"]))
@@ -1361,8 +1466,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 # a systematic FALSE NEGATIVE, and worst of all on exactly the
                 # target/near-neighbour pairs the bundle exists to discriminate.
                 def _key(src) -> str:
-                    rp = str(Path(src).resolve())
-                    return accession_by_path.get(rp) or rp
+                    return assembly_key(src, accession_by_path)
 
                 written: set[str] = set()
                 dropped: list[tuple[str, str]] = []
@@ -1379,6 +1483,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                             append_with_taxid_prefix(src, ntid, out)
                             written.add(k)
                 tmp.replace(comp)
+                # Stamp the bundle with the set ACTUALLY written, so the next
+                # run compares against what is on disk and not against intent.
+                write_bundle_inputs(comp, written)
 
                 # Verify what was actually written, rather than trusting the logic
                 # above. Hash each sequence and assert no identical sequence appears
@@ -1438,9 +1545,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if not args.skip_index:
             for preset in presets:
                 mmi = comp_dir / f"{tid}.{preset}.mmi"
-                if mmi.is_file() and mmi.stat().st_size > 0 and not args.force:
-                    LOG.info("target %s: index exists, skipping: %s", tid, mmi.name)
+                istale = index_staleness(mmi, comp)
+                if istale is None and not args.force:
+                    LOG.info("target %s: index is current, skipping: %s", tid, mmi.name)
                     continue
+                if mmi.is_file() and istale and istale != "missing or empty":
+                    LOG.warning("target %s: REINDEXING %s - %s", tid, mmi.name, istale)
                 LOG.info("target %s: minimap2 -x %s index -> %s", tid, preset, mmi.name)
                 tmp_mmi = mmi.with_suffix(".mmi.part")
                 proc = subprocess.run(

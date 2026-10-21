@@ -4396,3 +4396,69 @@ afterwards. Three of the nine species in that cover are ones whose watchlist not
 species-level alignment is not the intended confirmation route anyway, so for those the
 right response may be the marker route instead — which is the second finding D43 left
 open, and is untouched here.
+
+---
+
+## D45 — Existence is not freshness: a bundle is rebuilt when its inputs changed, not merely when it is absent
+
+D42 recorded this as an open item and why it was open: adding a reference to a taxon did
+not invalidate that taxon's competitive bundle, because the FASTA and its minimap2
+indexes were skipped whenever the output file merely **existed**. The manifest then said
+two references while the aligner went on using one — a disagreement invisible from either
+side, and in the direction that **overstates** the pack. That bundle was rebuilt by hand;
+the general check was explicitly not done.
+
+It is done here, and deliberately before anything applies D43's cover, because that will
+touch nine bundles and would otherwise walk straight back into this.
+
+### Two signals, because each catches what the other cannot
+
+A sidecar beside each bundle records the set of assemblies actually concatenated into it,
+written from what the build **wrote** rather than from what it intended.
+
+- **The input set** is exact. It catches a reference added, removed or swapped with every
+  mtime perfectly settled — a restore from backup, a copy that preserved times, a
+  re-download of one accession. That is the shape D42 hit, and mtime alone can be fooled
+  by it.
+- **mtime** catches content that changed under a name the recorded set already knew.
+
+Keys are assembly **accessions**, never paths and never gzip md5s: paths differ because
+each taxid gets its own filename even when NCBI returned the same assembly for both, and
+gzip md5s differ because the container embeds the original filename and mtime, so two
+byte-identical genomes hash differently. The de-duplication that writes a bundle and the
+staleness check that reads it now call one shared function, so they cannot drift apart.
+
+### The shipped pack, and what is not claimed about it
+
+A bundle written before the sidecar existed can only be checked by mtime, and the log
+says so rather than implying the stronger guarantee. All 90 shipped bundles are in that
+state and all 90 report current, which agrees with the `refs` invariant from D42.
+
+They are deliberately **not** stamped retroactively. A stamp derived from the manifest
+would be a claim about a bundle's contents that nobody verified — the precise error this
+line of work exists to avoid. Each gets stamped by its own next rebuild, from what that
+rebuild actually writes.
+
+The indexes get the same treatment: an index older than its bundle is the same
+disagreement one step on, with the FASTA saying one thing and the aligner reading
+another.
+
+### What is pinned
+
+Thirteen checks (`stale`). An accession identifies an assembly rather than a filename,
+and an unknown file falls back to its path. A bundle newer than its genomes is current; a
+genome newer than the bundle is not. The record round-trips. A reference **added** with
+every mtime settled is still caught, and so is one removed — the two cases the old
+predicate could not see. Missing and **empty** are both stale, not merely absent. And the
+three index cases.
+
+Both decisive cases were run against the old existence-only predicate, which reports
+each of them as current. The tests therefore discriminate rather than merely passing.
+
+Suite **322 passed, 0 failed** (303 passed / 3 skipped without `samtools` on PATH).
+
+### Not done
+
+No pack was rebuilt, so nothing on disk changed. The check only decides what a future
+run does. Applying D43's cover is still the next step, and it will now stamp the nine
+bundles it touches.

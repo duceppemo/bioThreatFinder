@@ -3701,6 +3701,92 @@ def test_extra_refs_cover(tmp: Path) -> None:
            [c.accession for c in ranked])
 
 
+def test_bundle_staleness(tmp: Path) -> None:
+    """D44. A competitive bundle used to be skipped whenever its output merely EXISTED,
+    so a taxon's manifest could claim two references while the aligner went on using
+    one - a disagreement invisible from either side, and in the direction that
+    overstates the pack (D42). Existence is not freshness.
+
+    Two signals, because each catches what the other cannot. The recorded input set is
+    exact and catches a reference added, removed or swapped with every mtime settled -
+    a restore from backup, a copy that preserved times, a re-download of one accession.
+    mtime catches content that changed under a name the set already knew.
+    """
+    import os
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import build_pack_refs as bpr
+    except Exception as exc:
+        record("stale:<import failed>", False, f"{type(exc).__name__}: {exc}")
+        return
+
+    def touch(path: Path, when: float, body: bytes = b"x") -> Path:
+        path.write_bytes(body)
+        os.utime(path, (when, when))
+        return path
+
+    d = tmp / "stalepack"
+    d.mkdir(exist_ok=True)
+    g1 = touch(d / "1639_t.fna.gz", 1000.0)
+    g2 = touch(d / "1642_n.fna.gz", 1000.0)
+    comp = touch(d / "1639.fna.gz", 2000.0)
+    acc = {str(g1.resolve()): "GCF_AAA.1", str(g2.resolve()): "GCF_BBB.1"}
+    keys = [bpr.assembly_key(g1, acc), bpr.assembly_key(g2, acc)]
+
+    record("stale:an accession identifies the assembly, not the filename",
+           keys == ["GCF_AAA.1", "GCF_BBB.1"], f"{keys}")
+    record("stale:a file the manifest does not know falls back to its path",
+           bpr.assembly_key(d / "unknown.fna.gz", acc).endswith("unknown.fna.gz"))
+
+    # No sidecar yet: the shipped pack is in this state, so it must be checkable.
+    record("stale:a bundle newer than its genomes is current",
+           bpr.bundle_staleness(comp, keys, [g1, g2]) is None)
+    os.utime(g2, (3000.0, 3000.0))
+    why = bpr.bundle_staleness(comp, keys, [g1, g2])
+    record("stale:a genome newer than the bundle makes it stale",
+           why is not None and "newer" in why, f"{why}")
+    os.utime(g2, (1000.0, 1000.0))
+
+    # The decisive case. A reference is ADDED and the bundle's mtime is newer than
+    # every genome, so mtime alone says current - which is how D42's bundle passed.
+    # The recorded input set still catches it.
+    bpr.write_bundle_inputs(comp, {"GCF_AAA.1", "GCF_BBB.1"})
+    record("stale:the input record round-trips",
+           bpr.read_bundle_inputs(comp) == {"GCF_AAA.1", "GCF_BBB.1"},
+           f"{bpr.read_bundle_inputs(comp)}")
+    record("stale:a bundle matching its record is current",
+           bpr.bundle_staleness(comp, keys, [g1, g2]) is None)
+    g3 = touch(d / "1639_t2.fna.gz", 1000.0)
+    acc[str(g3.resolve())] = "GCF_CCC.1"
+    why = bpr.bundle_staleness(comp, keys + ["GCF_CCC.1"], [g1, g2, g3])
+    record("stale:a reference ADDED with every mtime settled is still caught",
+           why is not None and "GCF_CCC.1" in why and "also wants" in why, f"{why}")
+    why = bpr.bundle_staleness(comp, ["GCF_AAA.1"], [g1])
+    record("stale:a reference REMOVED is caught too",
+           why is not None and "no longer wants" in why and "GCF_BBB.1" in why,
+           f"{why}")
+
+    gone = d / "nothing.fna.gz"
+    record("stale:a missing bundle is stale",
+           bpr.bundle_staleness(gone, keys, [g1, g2]) == "missing or empty")
+    empty = d / "empty.fna.gz"
+    empty.write_bytes(b"")
+    record("stale:an empty bundle is stale, not merely present",
+           bpr.bundle_staleness(empty, keys, [g1, g2]) == "missing or empty")
+
+    # The index is the same disagreement one step on: the FASTA says one thing and
+    # the aligner reads another.
+    mmi = touch(d / "1639.sr.mmi", 2500.0)
+    record("stale:an index newer than its bundle is current",
+           bpr.index_staleness(mmi, comp) is None)
+    os.utime(comp, (4000.0, 4000.0))
+    why = bpr.index_staleness(mmi, comp)
+    record("stale:an index older than its bundle is stale",
+           why is not None and "newer" in why, f"{why}")
+    record("stale:a missing index is stale",
+           bpr.index_staleness(d / "absent.mmi", comp) == "missing or empty")
+
+
 CASES = {
     "selftests": test_selftests,
     "tiering": test_tiering,
@@ -3739,6 +3825,7 @@ CASES = {
     "mref": test_multi_reference_geometry,
     "refs": test_refs_manifest_integrity,
     "extrarefs": test_extra_refs_cover,
+    "stale": test_bundle_staleness,
 }
 
 
