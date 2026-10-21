@@ -3614,6 +3614,92 @@ def test_refs_manifest_integrity(tmp: Path) -> None:
            f"bundle predates a genome it should contain: {stale[:6]}")
 
 
+# ---------------------------------------------------------------------------
+# Extra references come from a measured cover, not from curation rank
+# ---------------------------------------------------------------------------
+
+def test_extra_refs_cover(tmp: Path) -> None:
+    """D43. `Candidate.sort_key` ranks on NCBI metadata and nothing in it knows what a
+    lineage is, so `--max-per-taxon N` can return N assemblies from ONE clade while the
+    manifest reports N references and every statistic is computed over their summed
+    length. Reporting more coverage than was gained is the flattering direction, so
+    extras now come from a recorded measurement and the ranked guess is announced.
+    """
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import build_pack_refs as bpr
+    except Exception as exc:
+        record("extrarefs:<import failed>", False, f"{type(exc).__name__}: {exc}")
+        return
+
+    # The report format the measurement emits.
+    rep = tmp / "span_report.tsv"
+    rep.write_text(
+        "taxid\tname\tn_known\trefs_to_add\tadd_accessions\n"
+        "1639\tListeria monocytogenes\t853\t2\tGCF_000000001.1;GCF_000000002.1\n"
+        "632\tYersinia pestis\t241\t0\t-\n"
+        "446\tLegionella pneumophila\t251\t1\tGCF_000000003.1\n")
+    got = bpr.load_extra_refs(rep)
+    record("extrarefs:the measurement's own report is read directly",
+           got.get(1639) == ["GCF_000000001.1", "GCF_000000002.1"], f"{got}")
+    record("extrarefs:a species needing nothing contributes no accession",
+           632 not in got, f"{got}")
+
+    # A plain two-column list, for a pick made by hand.
+    plain = tmp / "extra_plain.tsv"
+    plain.write_text("# taxid accession\n1639\tGCF_000000001.1\n"
+                     "1639\tGCF_000000002.1\n1639\tGCF_000000001.1\n")
+    got2 = bpr.load_extra_refs(plain)
+    record("extrarefs:a plain taxid/accession list works too",
+           got2.get(1639, [])[:2] == ["GCF_000000001.1", "GCF_000000002.1"], f"{got2}")
+    record("extrarefs:a repeated accession is held once, in first-seen order",
+           got2.get(1639) == ["GCF_000000001.1", "GCF_000000002.1"], f"{got2}")
+
+    # A path that does not exist must stop the run. Silently loading nothing would
+    # build the pack with one reference per taxon while the operator believed a
+    # measured cover had been applied - the pack would be wrong and the log would
+    # not say so.
+    missing = tmp / "nope.tsv"
+    try:
+        bpr.load_extra_refs(missing)
+        fatal = False
+    except SystemExit:
+        fatal = True
+    record("extrarefs:a missing cover file is fatal, not silently empty", fatal)
+    record("extrarefs:and no cover file at all is simply no extras",
+           bpr.load_extra_refs(None) == {})
+
+    # Ordering. The primary must stay the curated pick because it keeps the plain
+    # <taxid>_<name>.fna.gz filename that pack.yaml promises and that earlier
+    # measurements were made against; the pinned ones follow in the cover's order,
+    # which is by how many known assemblies each rescues. Re-sorting them by
+    # sort_key would discard the measurement.
+    def cand(acc, cat="", level="complete", size=3000000):
+        return bpr.Candidate(accession=acc, level=level, refseq_category=cat,
+                             size_hint=size, source="datasets")
+    ranked = [cand("GCF_AAA.1", "reference genome"), cand("GCF_BBB.1"),
+              cand("GCF_CCC.1")]
+    pins = [cand("GCF_ZZZ.9"), cand("GCF_YYY.9")]
+    out = bpr.order_candidates(list(ranked), pins)
+    record("extrarefs:the curated assembly stays first and keeps the plain filename",
+           out[0].accession == "GCF_AAA.1", f"{[c.accession for c in out]}")
+    record("extrarefs:the pinned assemblies come next, in the cover's order",
+           [c.accession for c in out[1:3]] == ["GCF_ZZZ.9", "GCF_YYY.9"],
+           f"{[c.accession for c in out]}")
+    record("extrarefs:nothing is lost from the ranked tail",
+           {c.accession for c in out} ==
+           {"GCF_AAA.1", "GCF_BBB.1", "GCF_CCC.1", "GCF_ZZZ.9", "GCF_YYY.9"},
+           f"{[c.accession for c in out]}")
+    # A pinned accession that the ranked list already contains must not be duplicated:
+    # two manifest rows naming one accession is the exact failure D42 fixed.
+    dup = bpr.order_candidates(list(ranked), [cand("GCF_BBB.1")])
+    accs = [c.accession for c in dup]
+    record("extrarefs:a pin already in the ranked list is not held twice",
+           accs.count("GCF_BBB.1") == 1, f"{accs}")
+    record("extrarefs:with no pins the ranked order is untouched",
+           [c.accession for c in bpr.order_candidates(list(ranked), [])] ==
+           [c.accession for c in ranked])
+
 
 CASES = {
     "selftests": test_selftests,
@@ -3652,6 +3738,7 @@ CASES = {
     "statecols": test_marker_state_columns,
     "mref": test_multi_reference_geometry,
     "refs": test_refs_manifest_integrity,
+    "extrarefs": test_extra_refs_cover,
 }
 
 

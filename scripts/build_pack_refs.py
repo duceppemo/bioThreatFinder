@@ -420,6 +420,126 @@ def datasets_candidates(datasets_bin: str, taxid: int, levels: Sequence[str],
     return keep
 
 
+def load_extra_refs(path: Optional[Path]) -> Dict[int, List[str]]:
+    """taxid -> [extra accessions], from a measured cover (D43).
+
+    WHY THIS FILE EXISTS RATHER THAN A CLEVERER sort_key. `Candidate.sort_key` ranks on
+    NCBI metadata alone - refseq_category, then assembly level, then GCF over GCA, then
+    size. NOTHING IN THAT KEY KNOWS WHAT A LINEAGE IS, so `--max-per-taxon 2` can return
+    two assemblies from one clade and leave the other half of a species uncovered, while
+    reporting two references. D42 added a second reference that happened to land in the
+    other lineage, which was luck in the pick rather than a property of the picker.
+
+    Choosing references that SPAN a species needs a measurement over the species'
+    diversity, which needs every known assembly on disk - 59 GB for the bacterial
+    targets of the human pack. That does not belong inside a download tool. So the
+    measurement lives in `scripts/measure_reference_span.py`, whose `cover` stage emits
+    the accessions, and this reads them. The provenance of an extra reference is then a
+    recorded measurement rather than a heuristic nobody can audit.
+
+    Accepts the report TSV from that script (columns `taxid` and `add_accessions`,
+    semicolon-separated) or a plain two-column taxid/accession list.
+    """
+    out: Dict[int, List[str]] = {}
+    if not path:
+        return out
+    if not path.is_file():
+        raise SystemExit(f"ERROR: --extra-refs: no such file: {path}")
+    with path.open() as fh:
+        header = fh.readline().rstrip("\n").split("\t")
+        if "taxid" in header and "add_accessions" in header:
+            i_t, i_a = header.index("taxid"), header.index("add_accessions")
+            for line in fh:
+                f = line.rstrip("\n").split("\t")
+                if len(f) <= max(i_t, i_a) or not f[i_t].strip().isdigit():
+                    continue
+                accs = [a.strip() for a in f[i_a].split(";")
+                        if a.strip() and a.strip() != "-"]
+                if accs:
+                    out[int(f[i_t].strip())] = accs
+        else:
+            fh.seek(0)
+            for line in fh:
+                if line.startswith("#") or not line.strip():
+                    continue
+                f = line.split()
+                if len(f) < 2 or not f[0].strip().isdigit():
+                    continue
+                out.setdefault(int(f[0]), []).append(f[1].strip())
+    for tid, accs in out.items():
+        seen: List[str] = []
+        for a in accs:
+            if a not in seen:
+                seen.append(a)
+        out[tid] = seen
+    return out
+
+
+def pinned_candidates(datasets_bin: str, accessions: Sequence[str],
+                      timeout: int = 600) -> List[Candidate]:
+    """Candidate records for accessions named explicitly, in the order given.
+
+    A pinned accession is usually NOT among the top `want` the subtree query returns -
+    that is the whole point of pinning it - so it has to be looked up by accession
+    rather than filtered out of a ranked list.
+    """
+    if not accessions:
+        return []
+    cmd = [datasets_bin, "summary", "genome", "accession", *accessions,
+           "--as-json-lines"]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        LOG.warning("--extra-refs: could not look up %s: %s",
+                    ",".join(accessions), exc)
+        return []
+    found: Dict[str, Candidate] = {}
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        acc = rec.get("accession") or dig(rec, "assembly_info", "assembly_accession",
+                                          default="")
+        if not acc:
+            continue
+        found[acc] = Candidate(
+            accession=acc,
+            organism=dig(rec, "organism", "organism_name", default="") or "",
+            taxid=int(dig(rec, "organism", "tax_id", default=0) or 0),
+            level=dig(rec, "assembly_info", "assembly_level", default="") or "",
+            refseq_category=dig(rec, "assembly_info", "refseq_category", default="") or "",
+            size_hint=int(dig(rec, "assembly_stats", "total_sequence_length", default=0) or 0),
+            contig_hint=int(dig(rec, "assembly_stats", "number_of_contigs", default=0) or 0),
+            source="extra-refs",
+        )
+    for acc in accessions:
+        if acc not in found:
+            LOG.warning("--extra-refs: %s was not found at NCBI; it will not be added",
+                        acc)
+    # Pinned order is the cover's order, which is by how many known assemblies each
+    # one rescues. Do NOT re-sort by sort_key: that would undo the measurement.
+    return [found[a] for a in accessions if a in found]
+
+
+def order_candidates(cands: List[Candidate], pinned: List[Candidate]) -> List[Candidate]:
+    """Best-ranked assembly first, then the pinned ones, then the rest.
+
+    The primary stays the curated pick because it keeps the plain
+    `<taxid>_<name>.fna.gz` filename promised by pack.yaml, and earlier recorded
+    measurements were made against it. Extras are what the cover chose.
+    """
+    if not pinned:
+        return cands
+    pinned_accs = {c.accession for c in pinned}
+    rest = [c for c in cands if c.accession not in pinned_accs]
+    head = rest[:1]
+    return head + pinned + rest[1:]
+
+
 def fetch_assembly_summary(division: str, cache_dir: Path, curl_bin: str,
                            dry_run: bool) -> Optional[Path]:
     """Download (and cache) one RefSeq division's assembly_summary.txt."""
@@ -706,6 +826,15 @@ notes:
                         "Viruses need more: intra-species diversity is high enough that "
                         "one RefSeq genome can lose reads from a divergent lineage "
                         "(e.g. Influenza A, Lassa, the hantaviruses).")
+    p.add_argument("--extra-refs", type=Path, default=None,
+                   help="TSV naming additional assemblies to carry for a taxon, from a "
+                        "MEASURED cover: either the report of "
+                        "scripts/measure_reference_span.py (columns taxid and "
+                        "add_accessions) or a plain taxid/accession list. Needed because "
+                        "--max-per-taxon alone cannot span a species: candidates are "
+                        "ranked on NCBI metadata and nothing in that ranking knows what "
+                        "a lineage is, so N assemblies can all come from one clade while "
+                        "the manifest reports N references (D43).")
     p.add_argument("--assembly-level", default="complete,chromosome",
                    help="comma-separated, best-first, from: complete,chromosome,scaffold,contig "
                         "(default: %(default)s). Relaxed automatically per taxon if nothing "
@@ -869,12 +998,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     tasks: Dict[int, dict] = {}       # taxid -> {name, group, role, want}
     targets: List[dict] = []          # ordered target records
 
+    extra_refs = load_extra_refs(args.extra_refs)
+
     for r in rows:
         tid = int(r["taxid"].strip())
         group = (r.get("group") or "").strip().lower()
         want = args.max_per_taxon_virus if group == "virus" else args.max_per_taxon
+        # A pinned extra is an instruction, not a preference: honour it even when
+        # --max-per-taxon is the default 1, or the file would be read and ignored.
+        pinned = extra_refs.get(tid, [])
+        if pinned:
+            want = max(want, 1 + len(pinned))
         tasks[tid] = {"taxid": tid, "name": (r.get("name") or "").strip(),
-                      "group": group, "role": "target", "want": want}
+                      "group": group, "role": "target", "want": want,
+                      "pinned": pinned}
         neighbours = parse_neighbours(r.get("near_neighbour_taxids", ""))
         targets.append({"taxid": tid, "name": (r.get("name") or "").strip(),
                         "group": group, "neighbours": neighbours})
@@ -889,11 +1026,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             # A neighbour inherits its target's group: it is by construction a
             # close relative, so the group is the same, and the group drives both
             # --max-per-taxon and which RefSeq divisions the fallback searches.
+            n_want = (args.max_per_taxon_virus if t["group"] == "virus"
+                      else args.max_per_taxon)
+            n_pinned = extra_refs.get(ntid, [])
+            if n_pinned:
+                n_want = max(n_want, 1 + len(n_pinned))
             tasks[ntid] = {"taxid": ntid, "name": name,
                            "group": known_groups.get(key) or t["group"],
                            "role": "near_neighbour",
-                           "want": args.max_per_taxon_virus if t["group"] == "virus"
-                                   else args.max_per_taxon}
+                           "want": n_want, "pinned": n_pinned}
 
     n_targets = len(targets)
     n_neighbours = sum(1 for v in tasks.values() if v["role"] == "near_neighbour")
@@ -903,6 +1044,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     LOG.info("plan: assembly levels %s%s; %d genome(s) per taxon (%d for viruses)",
              ",".join(levels), "" if args.no_relax else " (relaxable)",
              args.max_per_taxon, args.max_per_taxon_virus)
+    if extra_refs:
+        n_pin = sum(len(v) for v in extra_refs.values())
+        LOG.info("plan: %d pinned extra reference(s) across %d taxon(s) from %s",
+                 n_pin, len(extra_refs), args.extra_refs)
+
+    # `--max-per-taxon N` for a non-virus WITHOUT a measured cover is the silent case
+    # D43 names: the N assemblies are ranked on NCBI metadata, nothing in that ranking
+    # knows what a lineage is, so they can all come from one clade while the manifest
+    # says N references and every downstream statistic is computed over the summed
+    # length of both. Reporting more coverage than was gained is the direction that
+    # flatters the pack, so it is said out loud rather than left to be noticed.
+    if args.max_per_taxon > 1:
+        unpinned = sorted(t["taxid"] for t in tasks.values()
+                          if t["group"] != "virus" and not t.get("pinned"))
+        if unpinned:
+            LOG.warning("--max-per-taxon %d is set for %d non-virus taxon(s) with NO "
+                        "pinned cover: their extra assemblies will be chosen by "
+                        "curation rank, which may return several from ONE lineage and "
+                        "leave the rest of the species uncovered",
+                        args.max_per_taxon, len(unpinned))
+            LOG.warning("  measure the span first, then pass its report as "
+                        "--extra-refs: scripts/measure_reference_span.py "
+                        "--stage frame,fetch,span,cover (see D43)")
 
     # ---- tools ----------------------------------------------------------
     datasets_bin = which("datasets")
@@ -1047,6 +1211,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 use_levels = list(ASSEMBLY_LEVELS)
                 LOG.info("  no assembly at level(s) %s; relaxing to any level",
                          ",".join(levels))
+
+            # A pinned accession is deliberately not among the top-ranked candidates,
+            # and it must survive the --assembly-level filter too: the cover chose it
+            # on measured distance, which does not care whether NCBI calls the
+            # assembly complete or chromosome.
+            pinned_accs = [a for a in task.get("pinned", []) if a not in taken_acc]
+            if pinned_accs and datasets_bin:
+                pins = pinned_candidates(datasets_bin, pinned_accs)
+                if pins:
+                    LOG.info("  pinned by measured cover: %s",
+                             ", ".join(c.accession for c in pins))
+                cands = order_candidates(cands, pins)
 
             already = {Path(p).name for p in got}
             for cand in cands:

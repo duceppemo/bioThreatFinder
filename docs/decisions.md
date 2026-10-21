@@ -4326,3 +4326,73 @@ are near-identical, simulated reads from one member spread across the sibling re
 in the same bundle, so breadth lands near 0.5 at an ANI of 0.999. That is competitive
 mapping working as designed, but it means breadth can be diluted by siblings rather than
 by divergence, which is a different failure mode from the one measured here.
+
+---
+
+## D44 — The reference picker learns what it cannot know: extras come from a measured cover, and the ranked guess says so out loud
+
+D43 measured the pack's reach and named the defect that produced the gap it found:
+`build_pack_refs.py` ranks candidate assemblies with `Candidate.sort_key`, on
+`refseq_category`, then assembly level, then GCF over GCA, then size. **Nothing in that
+key knows what a lineage is.** So `--max-per-taxon 2` can return two assemblies from one
+clade, write two manifest rows, and leave the other half of a species uncovered — while
+every geometry statistic is computed over the summed length of both, so the pack reports
+more coverage than it gained. D42's second reference landed in the other lineage. That
+was luck in the pick, not a property of the picker.
+
+### Why this is not a better sort_key
+
+Choosing references that span a species requires measuring the species' diversity, which
+requires every known assembly on disk — 59 GB for this pack's bacterial targets. That
+does not belong inside a download tool, and a heuristic that pretended to it would be
+exactly the kind of plausible-looking guess this project keeps finding. So the
+measurement stays in `measure_reference_span.py`, whose `cover` stage emits accessions,
+and the builder learns to **accept** them: `--extra-refs` reads either that report
+directly (the `taxid` and `add_accessions` columns) or a plain taxid/accession list. The
+provenance of an extra reference is then a recorded measurement rather than a heuristic.
+
+Three properties the implementation holds to:
+
+- **The primary stays the curated pick.** It keeps the plain `<taxid>_<name>.fna.gz`
+  filename `pack.yaml` promises, and earlier recorded measurements were made against it.
+  Pinned extras follow it, so the output is additions and never churn.
+- **Pinned order is the cover's order**, which is by how many known assemblies each one
+  rescues. They are deliberately *not* re-sorted by `sort_key`; that would discard the
+  measurement that chose them.
+- **A pin is an instruction, not a preference.** It is honoured even when
+  `--max-per-taxon` is the default 1, or the file would be read and ignored. And a
+  pinned accession is looked up *by accession* rather than filtered out of a ranked
+  subtree list, because not being top-ranked is the whole point of pinning it.
+
+### The silent case is now loud
+
+`--max-per-taxon N > 1` for a non-virus taxon with no pinned cover still works, because
+removing it would break a documented flag. It now warns, naming the count of affected
+taxa and the command that would measure them properly. Measured on the shipped pack: 163
+non-virus taxa fall under that warning at `--max-per-taxon 2`, and 32 pinned extras
+across 9 taxa are read from D43's committed report. At the default of 1 the warning does
+not fire, because one reference makes no span claim to be wrong about.
+
+### What is pinned
+
+Eleven checks (`extrarefs`). Both input formats parse; a species needing nothing
+contributes no accession; a repeated accession is held once in first-seen order; a
+**missing** cover file is fatal rather than silently empty — loading nothing would build
+a one-reference-per-taxon pack while the operator believed a measured cover had been
+applied, and the log would not say so; the curated assembly stays first; pins follow in
+the cover's order; nothing is lost from the ranked tail; and a pin already present in the
+ranked list is **not held twice**, which is the two-rows-one-accession failure D42 fixed,
+reachable again through this path. That last check was verified to fail against the
+naive `cands[:1] + pinned + cands[1:]` a reader would most plausibly write.
+
+Suite **309 passed, 0 failed**.
+
+### Not done
+
+No reference was added and no pack was rebuilt. The mechanism now exists and the cover
+is committed; applying it is a download, a re-mask and a bundle rebuild per species, and
+D34's masking invariant plus D42's three pack invariants will all have to pass
+afterwards. Three of the nine species in that cover are ones whose watchlist notes say
+species-level alignment is not the intended confirmation route anyway, so for those the
+right response may be the marker route instead — which is the second finding D43 left
+open, and is untouched here.
