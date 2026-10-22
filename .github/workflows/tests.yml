@@ -18,7 +18,7 @@ on:
     # Weekly, for the network-dependent spec solve only.
     - cron: '0 6 * * 1'
   # So the conda-specs job can be run on demand after a pin changes, rather than waiting
-  # for Monday. STATUS.md's instruction is to re-validate after ANY pin change.
+  # for Monday. operations.md's instruction is to re-validate after ANY pin change.
   workflow_dispatch:
 
 permissions:

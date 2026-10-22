@@ -195,7 +195,7 @@ One-offs against real data, not automated:
 - **No threshold is measured.** Every number in `packs/*/pack.yaml` is a literature
   default (Wright et al., UKHSA mSCAPE, Oskolkov) or a reasoned guess.
 - **Conda environments HAVE been exercised.** 13 `.nextflow-conda/env-*` directories
-  exist and every run above used `-profile mamba`. `docs/STATUS.md` records all 13 specs
+  exist and every run above used `-profile mamba`. `docs/operations.md` records all 13 specs
   put through the solver: 12 solved, samtools 1.24 did not, and samtools is now pinned
   1.22. The original note follows for the pins it still describes.
 - **(historical) No conda environment resolved by the pipeline has been exercised.** The pins in

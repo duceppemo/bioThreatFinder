@@ -120,7 +120,7 @@ def download(url: str, dest: Path, want_md5: str, dry: bool) -> None:
         return
     dest.parent.mkdir(parents=True, exist_ok=True)
     log(f"fetching {dest.name}")
-    # curl over https: rsync port 873 is firewalled on this host, see docs/STATUS.md.
+    # curl over https: rsync port 873 is firewalled on this host, see docs/operations.md.
     # -C - resumes, which is why md5 rather than size is the acceptance test.
     rc = subprocess.call(["curl", "-sSL", "--fail", "-C", "-", "-o", str(dest),
                           f"https://{url}" if not url.startswith("http") else url])

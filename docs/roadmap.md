@@ -12,7 +12,7 @@
    datasets/minimap2/seqkit/samtools/mmseqs2/hmmer/mafft; `btf-kraken2` holds
    kraken2 2.17.2 and bracken; `btf-sylph` holds sylph 1.0.0, matching the pin in
    `modules/local/detect.nf` because a sketch must be readable by the version that
-   queries it. See docs/STATUS.md.
+   queries it. See docs/operations.md.
 3. ~~Build databases~~ DONE - taxonomy snapshot, pack refs (90 targets, 379 rows),
    masking, markers, host genome, sylph pack sketch (rebuilt 2026-10-21 over all 375
    references), Kraken2 PlusPF and Metabuli are all built on NVMe. KrakenUniq is

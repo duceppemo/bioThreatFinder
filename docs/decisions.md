@@ -658,7 +658,7 @@ far less identical stretches than a 200 bp 95%-identity alignment. The result pa
   are identical, because 620 had been masked standalone while 622 was carried forward from a
   shared-sequence run. Re-masking both pairs together (263/264 and 620/622) made the
   per-source columns agree and populated the `SHARED_SEQUENCE` flag that had been empty -
-  the provenance marker `docs/STATUS.md` records as a known gap. `tests/test_pipeline.py`
+  the provenance marker `docs/operations.md` records as a known gap. `tests/test_pipeline.py`
   group `shared_assembly` now compares the per-source columns too; it previously compared
   only the four totals, all of which agreed, so it passed green on the inconsistency it is
   named for. It compares only across
@@ -2954,7 +2954,7 @@ rather than drawing an empty one that reads as all-clear.
 Beyond the suite: `nextflow run -preview` on the plumbing samplesheet to check
 the channel arity, and two sylph-only end-to-end runs on the plumbing positive
 control — deliberately off the 123 GB PlusPF index, which would have put the box
-back under the `systemd-oomd` pressure trap recorded in STATUS.md.
+back under the `systemd-oomd` pressure trap recorded in docs/operations.md.
 
 ### The failure, reproduced end to end rather than argued
 
@@ -2988,7 +2988,7 @@ nothing read.
 ## D34 — Twelve references had never been masked, and the record of what was examined was keyed on a taxid that owns twelve of them
 
 **Found 2026-10-15 while implementing a different fix**, which is the only reason
-it was found at all. STATUS.md carried a to-do: the `SHARED_SEQUENCE` flag is
+it was found at all. docs/operations.md carried a to-do: the `SHARED_SEQUENCE` flag is
 derived from run-time contig collisions, so a `--only-taxid` run of one partner
 produces correct numbers with an empty flag, and "the durable fix is to derive
 sharing from the refs manifest's `accession` column, which is an artifact rather
@@ -4878,7 +4878,7 @@ explicit way to point at a specific binary.
 
 ### The three environments existed only as a paragraph
 
-`docs/STATUS.md` explained why kraken2 must have its own environment — installing it beside
+`docs/operations.md` explained why kraken2 must have its own environment — installing it beside
 mmseqs2/hmmer/mafft makes the solver resolve **kraken2 2.0.8-beta (2019)**, which has no
 `--report-minimizer-data`, so the index builds, works, and carries none of the evidence
 stage 1 scores on. Excellent reasoning, and **not machine-readable**: there was no
@@ -4966,7 +4966,7 @@ operational incidents specific to this machine (the `systemd-oomd` pressure limi
 colliding builds, which jobs were running when). The content is the hardest-won knowledge in
 the repo and deleting it would be vandalism, so the right move is to reframe it as
 `docs/operations.md` with the deployment-specific notes clearly labelled. Left as a separate
-change because it touches every link to it.
+change because it touches every link to it. **Done as D50.**
 
 **The databases are not published anywhere.** The reproducibility question they raise is
 partly answered already — both the reference and marker manifests pin **accession and md5**,
@@ -4974,3 +4974,112 @@ so those are re-fetchable with integrity verification — but the pinned taxonom
 **not** re-downloadable, because NCBI overwrites `new_taxdump.tar.gz` in place. Everything
 else keys to that snapshot. That makes it the one artifact whose publication is load-bearing
 rather than convenient, and it is 2.2 GB. Recorded here; not decided.
+
+---
+
+## D50 — The handoff becomes a manual: `STATUS.md` → `operations.md`, and the rename found a three-way name collision
+
+**Date:** 2026-10-22
+**Evidence:** measured-here (every command in the new file was run), reasoned (the framing)
+**Status:** done
+
+D49 listed this as the one deliberately deferred item: `docs/STATUS.md` was written because a
+session was ending with long builds in flight, and it still read that way — "Read this first
+on resume", a table of jobs "running detached", first person for the two incidents that cost
+the most. The content is the hardest-won knowledge in the repo. The fix was never to trim it.
+
+### What changed, and what deliberately did not
+
+Nothing was deleted. The file is `git mv`-d, so its history follows it, and the reframe is
+four kinds of edit:
+
+1. **Framing.** A handoff tells the next session what is in flight; a manual tells an
+   operator what to run. The jobs table is now build provenance — the dates the shipped
+   databases were built from, with the explicit note that a figure which disagrees is the
+   thing to investigate.
+2. **Labelling.** Unlabelled sections are portable. **HOST-SPECIFIC** marks what was
+   observed on this machine: the `systemd-oomd` 50% pressure limit, the blocked rsync port,
+   the broken `libunistring` in `btf-refs`, and the database inventory. Each of those
+   presented as a bug in something else, which is why they stay.
+3. **Paths.** Four `export PATH=/home/bioinfo/miniconda3/envs/...` lines became
+   `conda activate`, finishing what D49 started in the code. `/media/8tb` became `$BTF_DB`.
+4. **One stale contradiction removed.** The "Next steps" section still said "Nothing in this
+   project has ever processed real data end to end" — two sections below the record of
+   `zymo_ont` completing on real data in 15h 36m. The list was the part of the file that had
+   rotted, because a handoff's to-do list is written to be read once.
+
+### A new table, and the collision it exposed
+
+The manual opens with every read-only check in one table, which is what an operations
+document is for and what six scattered sections could not be used as. Assembling it ran each
+command — and the marker-database row would not have worked as written, because **the build
+scripts spell the project root three ways and only two of them agree:**
+
+| Spelling | Means | Here |
+|---|---|---|
+| `--btf-db` | exactly `$BTF_DB` | `/media/8tb/bioThreatFinder` |
+| `--db-root` | the **parent** of `$BTF_DB`; these scripts append `bioThreatFinder/` themselves | `/media/8tb` |
+| `--db-root`'s default | `/media/36tb/db`, which *is* `$BTF_DB_ROOT` | — |
+
+So the obvious substitution — `--db-root "$BTF_DB_ROOT"` — reproduces exactly the trap D47
+had to document a workaround for: it reports a healthy pack as having no marker database at
+all. Writing `$BTF_DB_ROOT` there was the first thing attempted and it was wrong. The file
+now defines `BTF_VOL=$(dirname "$BTF_DB")`, states the collision in a table before any
+command uses it, and records the consequence: **a deployment's `$BTF_DB` must end in
+`bioThreatFinder`**, because those scripts hardcode that segment. That constraint was
+load-bearing and undocumented.
+
+Two further corrections fell out of running the table rather than writing it:
+
+- **Only the sylph check needs a tool.** The other four are stdlib Python and run from a bare
+  clone. That is not an accident — the head node has neither sylph nor kraken2, which is why
+  D46 reads a sidecar record and D48 parses `taxo.k2d` by hand — but it had never been
+  stated, so a reader would reasonably have assumed all five needed an environment.
+- **The exit conventions are not uniform and the table now says so.** Three checks use
+  0/3/1; `mask_pack_refs.py --dry-run` uses 0/1; the rest are reports. Claiming one
+  convention for all eight would have been tidier and false.
+- **The first draft said the Kraken2 index is checked at launch. It is not.** `main.nf`
+  carries three guards — `warnIfSketchStale()`, `warnIfMarkerDbStale()`,
+  `warnIfPackPartlyMasked()` — and coverage is on demand only. Which is right, and the file
+  now gives the reason rather than only the fact: the answer is `3` today and stays `3`
+  until someone adds a helminth library, so warning at every launch would train the
+  operator to ignore the warnings that matter.
+- **The first draft also put D45's bundle predicate in that launch list.** It is a rebuild
+  decision inside `build_pack_refs.py`, not a check — which makes it the one artifact with
+  no standalone read-only form, since asking the question means invoking the builder and
+  its `--dry-run` reaches the network. Recorded as a gap beside Metabuli's, rather than
+  implied away by a tidy table.
+
+Both of those were claims about this repo's own code that read plausibly and were wrong,
+caught by grepping `main.nf` instead of trusting the sentence. A summary table is a new
+assertion about the system even when every row is copied from somewhere that was true.
+
+Measured today against the shipped databases: markers **0**, sylph **0**, masking **0**,
+threshold coherence **0**, index coverage **3** — which is D48's documented state, not a
+regression, and the table says so in the row.
+
+### The README's test count was wrong again
+
+D49 corrected "322 checks; 303 passed" to "371 checks; 352 passed / 3 skipped". Measured
+now: **378 with samtools, and without it 362 register, 359 pass, 3 skip.** The 371/352 pair
+matched nothing. Two wrong counts in two commits is a reason to state how the number is
+obtained rather than the number alone, which the line now does.
+
+The quick start had the same split personality as the docs: it told the reader to
+`export BTF_DB_ROOT` and `export BTF_DB`, then passed `/media/8tb` to every build script
+below. It now uses the variables it just set.
+
+### Why not fold it into the roadmap or delete the overlap
+
+`docs/roadmap.md` is the authority on what is not built and in what order. The residue in
+`operations.md` is the part that needs a machine, a database or a measurement rather than a
+design decision, and it points at the roadmap for priority instead of restating it. The
+alternative — one combined document — was rejected because the two have different readers:
+the roadmap is read when deciding what to work on, the manual when something has to be
+rebuilt at an inconvenient time.
+
+Links were repointed in `README.md`, `docs/roadmap.md`, `docs/verification.md`,
+`.github/workflows/tests.yml` and `scripts/fetch_mock_communities.py`. The four historical
+mentions in this file were repointed too: the file is the same file renamed, so the path is
+the only thing that changed, and a dead link in a decision log is worse than an edited
+filename in one.
