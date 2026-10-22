@@ -229,8 +229,67 @@ synthetic pack whose database is **newer than every reference**, so mtime report
 and only the record catches the unsketched one.
 
 **What is open, by design:** nothing is scheduled, so a reference added and never used is
-never reported — nobody launched a run. The Kraken2, Metabuli and marker databases have no
-freshness check at all.
+never reported — nobody launched a run. ~~The Kraken2, Metabuli and marker databases have no
+freshness check at all.~~ **The marker database has one now (D47); Kraken2 and Metabuli
+still do not.**
+
+## The same predicate, third artifact: the marker database vs its catalogue (D47)
+
+Closed 2026-10-22. The marker database's input is `packs/<pack>/markers.tsv`, so D45's
+predicate transfers to it unchanged — and nothing compared them. **The shipped database was
+measured first and is current** (166/166 markers, every claimed tier present, no index
+older than its source), so this is a check rather than a fix.
+
+Why it hid: `marker_evidence.py` treats `markers.manifest.tsv` as authoritative for
+tested-vs-untested, so a catalogue marker with no manifest row evaluates UNKNOWN, which
+never promotes a finding — the call settles a tier lower. And this pack already carries
+**16 markers that can only ever be UNKNOWN** (3 failed, 4 curation_required, 9 motif_todo),
+so a seventeenth is invisible among sixteen and the ready explanation is the one needing no
+action.
+
+Four comparisons, and **the mtime/set relationship is inverted from the sketch's**:
+
+| comparison | what only it can see |
+|---|---|
+| `marker_id` sets | a marker added or removed with every mtime settled |
+| mtime | a marker **edited** under an id the manifest already knows — D41's wrong-gene shape, which the sets cannot see |
+| manifest vs combined artifact | a claimed tier the database does not hold. **The unsafe one:** downstream reports ABSENT, asserting the marker was searched for |
+| index vs source | an index older than the FASTA/HMM it was built from |
+
+```bash
+# read-only; exits 0 fresh, 3 stale and names the markers, 1 could not tell.
+# --db-root MATTERS: it defaults to the shared /media/36tb/db, so a bare --check reports
+# this healthy pack as having no database at all.
+python3 scripts/build_marker_db.py --pack human --db-root /media/8tb --check
+
+# Or point it straight at a directory, which also checks a backup in place:
+python3 scripts/build_marker_db.py --pack human --check \
+        --markers-dir /media/8tb/bioThreatFinder/packs/human/markers
+```
+
+Checked at launch in `main.nf` `warnIfMarkerDbStale()` (the two TSVs only — cheap, and it
+catches the operator-caused shape), in full by `--check`, and the suite runs the full check
+against the shipped database on every commit. **Three things worth not rediscovering:**
+
+- **The guard did not compile the first time.** The column parser was a closure in a local
+  `def`, called as `idsOf(...)`. Nextflow 26.04 resolves `name(...)` against declared
+  functions only, so `main.nf` failed to compile — and markers are ON unless
+  `--skip_markers`, so that was every run. Found by extracting the function and running it
+  under Nextflow, not by reading it. It is a top-level `def markerIdColumn()` now.
+- **Compare presence, never sequence counts.** `concat_files()` de-duplicates within each
+  marker while `n_nt_seqs` counts the per-marker archive, so they are not meant to agree.
+  The count-comparing version was built and run: it calls the **correct shipped database
+  stale on 116 of 166 markers**. A guard that cries stale on a good database gets switched
+  off, so that version is worse than none.
+- **The guard's own advice did not work, for the same reason the `--db-root` note above
+  exists.** It printed `--pack human --check`, which on a healthy pack exits 3 with "no
+  marker database" because of that default. The warning now passes `--markers-dir <the
+  directory it judged>`, and that printed command was run verbatim to confirm it.
+
+Verified against the retained pre-D40 database (`backups/markers-pre-D40-rebuild-20261021`,
+163 rows): against the current 166-row catalogue it names exactly `salm_invA`, `salm_ttrC`,
+`salm_ssaV` and exits 3, and the launch guard run under Nextflow names the same three. Suite
+**364 passed, 0 failed**.
 
 ## A behaviour change to be aware of: unevaluable vaccine and veto checks now cap the tier
 

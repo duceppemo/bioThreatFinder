@@ -63,6 +63,57 @@ Profile HMMs get NAME 'marker|<marker_id>' for the same reason: the HMM name is
 what appears in the hmmsearch --domtblout query column, so the same
 split('|')[1] rule works for the HMM tier.
 
+EXISTENCE IS NOT FRESHNESS (--check)
+------------------------------------
+D45 established the predicate for the competitive bundles and D46 carried it to
+the sylph sketch: a database is current when it covers its INPUTS, not when it
+opens. This database's input is markers.tsv, and nothing checked that until
+--check existed.
+
+The consequence of a stale marker database is quiet and points the wrong way.
+marker_evidence.py treats markers.manifest.tsv as AUTHORITATIVE for tested vs
+untested, so a marker added to the catalogue after the last build has no
+manifest row and evaluates UNKNOWN. UNKNOWN never promotes a finding, so the
+cost is a lost confirmation - and it is indistinguishable from the 16 markers
+that are legitimately unevaluable on this pack (3 failed, 4 curation_required,
+9 motif_todo). An operator reading "UNKNOWN" attributes it to the known curation
+gap, which is the one explanation that requires no action.
+
+Four comparisons, because each one sees what the others cannot:
+
+  catalogue vs manifest   EXACT, and the predicate proper. Catches a marker
+                          added or removed with every mtime settled.
+  mtime                   catches an EDITED marker, which set coverage cannot
+                          see: change an accession or a gene under a marker_id
+                          the manifest already knows and every set still agrees
+                          while the sequence underneath is wrong. That is D41's
+                          wrong-gene bug exactly, and it is the inverse of the
+                          sylph case, where the sets caught what mtime missed.
+  manifest vs artifact    the manifest claims a tier the combined file does not
+                          hold. This is the one that matters most, because it
+                          fails UNSAFE: marker_evidence.py believes the claim,
+                          searches, finds nothing, and reports ABSENT rather
+                          than UNKNOWN. ABSENT is a positive assertion that the
+                          marker was looked for and is not there.
+  index vs source         an index older than the FASTA or HMM it was built
+                          from means the aligner searches the previous
+                          sequences while every set above agrees. D45's
+                          index check, same reasoning.
+
+No sidecar record is needed here, which is the difference from D46. That record
+exists because a run cannot open a .syldb - sylph lives in its own env and is
+used inside the process, so the head node can only compare timestamps. These
+artifacts are plain text: the combined FASTAs carry the marker_id at field 1 of
+every header and each profile carries it in its NAME line, so the run reads the
+genuine artifact directly and there is nothing to keep stamped. Presence is
+compared, never sequence COUNTS - the combined files are de-duplicated within
+each marker while the manifest counts the per-marker archive, so equal counts
+are not expected and demanding them would report every de-duplicated marker as
+stale.
+
+  scripts/build_marker_db.py --pack human --check    # read-only
+    exit 0  fresh      exit 3  stale, rebuild      exit 1  could not tell
+
 Retrieval
 ---------
 NCBI E-utilities over HTTPS via urllib - Python standard library only, no
@@ -113,7 +164,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 LOG = logging.getLogger("build_marker_db")
 
@@ -1750,6 +1801,230 @@ def write_manifest(path: Path, rows: Iterable[dict]) -> None:
     tmp.replace(path)
 
 
+# ---------------------------------------------------------------------------
+# Freshness: does the built database still cover markers.tsv?
+# See "EXISTENCE IS NOT FRESHNESS" in the module docstring for why each of the
+# four comparisons is here and what it catches that the others do not.
+# ---------------------------------------------------------------------------
+
+CHECK_FRESH = 0
+CHECK_UNDETERMINED = 1
+CHECK_STALE = 3
+
+# Which manifest column claims which tier, and which combined artifact has to
+# hold the marker if the claim is true. One table, so a tier cannot be checked
+# in one direction and forgotten in the other.
+TIER_CLAIMS = (
+    ("dna", "n_nt_seqs", "markers.nt.fna"),
+    ("protein", "n_aa_seqs", "markers.aa.faa"),
+    ("hmm", "has_hmm", "markers.hmm"),
+)
+
+# An index and the file it was built from. An index merely EXISTING says nothing:
+# D45's lesson on the competitive bundles, which is why mtime is compared.
+INDEX_SOURCES = (
+    ("markers.nt.sr.mmi", "markers.nt.fna"),
+    ("markers.nt.map-ont.mmi", "markers.nt.fna"),
+    ("markers.hmm.h3f", "markers.hmm"),
+    ("markers.hmm.h3i", "markers.hmm"),
+    ("markers.hmm.h3m", "markers.hmm"),
+    ("markers.hmm.h3p", "markers.hmm"),
+)
+
+
+def _manifest_claims_tier(row: dict, column: str) -> bool:
+    """Does this manifest row claim the tier that `column` records?
+
+    `has_hmm` is a yes/no word while the other two are counts, so the two forms
+    are read here rather than at each call site.
+    """
+    raw = (row.get(column) or "").strip()
+    if column == "has_hmm":
+        return raw.lower() in ("yes", "true", "1")
+    try:
+        return int(float(raw or 0)) > 0
+    except ValueError:
+        return False
+
+
+def marker_ids_in_artifact(path: Path) -> Optional[Set[str]]:
+    """The marker_ids a combined artifact actually holds, or None if unreadable.
+
+    Reads FASTA headers and HMM NAME lines through marker_id_of(), the same
+    parse marker_evidence.py attributes a hit with, so this cannot disagree with
+    the pipeline about what a header means. A line that is not one of ours is
+    skipped rather than guessed at.
+    """
+    if not path.exists():
+        return None
+    found: Set[str] = set()
+    try:
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if line.startswith(">"):
+                    mid = marker_id_of(line)
+                elif line.startswith("NAME"):
+                    parts = line.split(None, 1)
+                    mid = marker_id_of(parts[1]) if len(parts) == 2 else None
+                else:
+                    continue
+                if mid:
+                    found.add(mid)
+    except OSError:
+        return None
+    return found
+
+
+def check_marker_db_freshness(catalogue_path: Path, out_dir: Path,
+                              manifest_path: Path,
+                              rebuild: str = "scripts/build_marker_db.py --pack <pack>"
+                              ) -> int:
+    """Read-only. Is the built marker database current for this catalogue?
+
+    Prints what disagrees and returns an exit code: CHECK_FRESH,
+    CHECK_STALE, or CHECK_UNDETERMINED when the question cannot be answered.
+    Nothing here writes, so it is safe to run against a live database.
+    """
+    def say(msg: str) -> None:
+        print(msg, flush=True)
+
+    if not catalogue_path.exists():
+        say(f"UNDETERMINED: no catalogue at {catalogue_path}")
+        return CHECK_UNDETERMINED
+    if not out_dir.exists():
+        say(f"STALE: no marker database at {out_dir}")
+        say(f"verdict: STALE. Build it: {rebuild}")
+        return CHECK_STALE
+    if not manifest_path.exists():
+        # The sequence files may well be intact, but the manifest is what
+        # decides tested-vs-untested, so without it every marker is UNKNOWN.
+        say(f"STALE: no {manifest_path.name} in {out_dir}. marker_evidence.py "
+            f"treats it as authoritative, so every marker would be UNKNOWN.")
+        say(f"verdict: STALE. Rebuild: {rebuild}")
+        return CHECK_STALE
+
+    try:
+        catalogue = read_marker_catalogue(catalogue_path)
+    except Exception as exc:                              # noqa: BLE001
+        say(f"UNDETERMINED: cannot read catalogue {catalogue_path}: {exc}")
+        return CHECK_UNDETERMINED
+
+    try:
+        with manifest_path.open(encoding="utf-8") as fh:
+            man_rows = [r for r in csv.DictReader(fh, delimiter="\t")
+                        if (r.get("marker_id") or "").strip()]
+    except OSError as exc:
+        say(f"UNDETERMINED: cannot read {manifest_path}: {exc}")
+        return CHECK_UNDETERMINED
+
+    if not man_rows:
+        say(f"STALE: {manifest_path.name} holds no marker row.")
+        say(f"verdict: STALE. Rebuild: {rebuild}")
+        return CHECK_STALE
+
+    cat_ids = [r["marker_id"] for r in catalogue if r.get("marker_id")]
+    manifest = {r["marker_id"].strip(): r for r in man_rows}
+    cat_set, man_set = set(cat_ids), set(manifest)
+
+    proved: List[str] = []       # a set disagreement: the database IS stale
+    suggested: List[str] = []    # only a timestamp: it MAY be stale
+
+    # ---- 1. the predicate proper: does the database cover the catalogue? ----
+    missing = [m for m in cat_ids if m not in man_set]
+    if missing:
+        proved.append(
+            f"{len(missing)} catalogue marker(s) have NO manifest row "
+            f"({', '.join(missing[:6])}{', ...' if len(missing) > 6 else ''}), "
+            f"so they evaluate UNKNOWN and can never confirm a finding")
+    orphans = sorted(man_set - cat_set)
+    if orphans:
+        proved.append(
+            f"{len(orphans)} manifest row(s) are no longer in the catalogue "
+            f"({', '.join(orphans[:6])}{', ...' if len(orphans) > 6 else ''})")
+
+    # ---- 2. mtime: an EDITED marker, which the sets above cannot see --------
+    try:
+        cat_mtime = catalogue_path.stat().st_mtime
+        man_mtime = manifest_path.stat().st_mtime
+        if cat_mtime > man_mtime:
+            suggested.append(
+                f"the catalogue is NEWER than the manifest, so a marker may have "
+                f"been edited under a marker_id the database already knows - "
+                f"a changed accession or gene is invisible to the set comparison")
+    except OSError:
+        pass
+
+    # ---- 3. the manifest's claims against the artifacts themselves ---------
+    # Read an artifact only when some row claims that tier, so a pack with no
+    # HMM tier does not pay to scan a profile file that is legitimately absent.
+    unreadable: List[str] = []
+    for tier, column, filename in TIER_CLAIMS:
+        claimants = [m for m, r in manifest.items()
+                     if _manifest_claims_tier(r, column)]
+        if not claimants:
+            continue
+        present = marker_ids_in_artifact(out_dir / filename)
+        if present is None:
+            unreadable.append(filename)
+            proved.append(
+                f"{len(claimants)} manifest row(s) claim the {tier} tier but "
+                f"{filename} is missing or unreadable")
+            continue
+        absent = sorted(m for m in claimants if m not in present)
+        if absent:
+            proved.append(
+                f"{len(absent)} manifest row(s) claim the {tier} tier but "
+                f"{filename} does not hold them "
+                f"({', '.join(absent[:6])}{', ...' if len(absent) > 6 else ''}) - "
+                f"these report ABSENT rather than UNKNOWN, which asserts the "
+                f"marker was searched for")
+        # The other direction: sequence in the index for a marker the manifest
+        # records as having none. Nothing downstream reads it, but the manifest
+        # and the database disagree, and the manifest is what is trusted.
+        stray = sorted(m for m in present
+                       if m in manifest and not _manifest_claims_tier(
+                           manifest[m], column))
+        if stray:
+            proved.append(
+                f"{filename} holds {len(stray)} marker(s) the manifest records "
+                f"as having no {tier} sequence "
+                f"({', '.join(stray[:6])}{', ...' if len(stray) > 6 else ''})")
+
+    # ---- 4. indexes against the files they were built from -----------------
+    for index_name, source_name in INDEX_SOURCES:
+        index, source = out_dir / index_name, out_dir / source_name
+        if not source.exists():
+            continue
+        if not index.exists():
+            proved.append(f"{index_name} is missing, but {source_name} is present")
+            continue
+        try:
+            if index.stat().st_mtime < source.stat().st_mtime:
+                proved.append(
+                    f"{index_name} is OLDER than {source_name}, so searches use "
+                    f"the previous sequences")
+        except OSError:
+            pass
+
+    if not proved and not suggested:
+        say(f"verdict: FRESH. All {len(cat_ids)} catalogue marker(s) have a "
+            f"manifest row, every claimed tier is present in the combined "
+            f"artifact that has to hold it, no index predates its source, and "
+            f"the catalogue is not newer than the build.")
+        return CHECK_FRESH
+
+    for line in proved + suggested:
+        say(f"STALE: {line}")
+    # "is" when a set proves it, "may be" when only a timestamp suggests it.
+    # Overstating a timestamp as proof is how a guard loses its reader.
+    if proved:
+        say(f"verdict: STALE. Rebuild: {rebuild}")
+        return CHECK_STALE
+    say(f"verdict: MAY BE STALE on timestamps alone. Rebuild to be certain: "
+        f"{rebuild}")
+    return CHECK_STALE
+
+
 def blank_manifest_row(row: dict, status: str, note: str,
                        retrieval_errors: int = 0) -> dict:
     """A manifest row with no sequence: explicit status, empty paths."""
@@ -2966,6 +3241,16 @@ notes:
     p.add_argument("--skip-protein", action="store_true",
                    help="do not build the protein tier (implies --skip-hmm, since the "
                         "profiles here are protein profiles)")
+    p.add_argument("--check", action="store_true",
+                   help="read-only: is the built database current for the pack's "
+                        "markers.tsv? Exits 0 fresh, 3 stale, 1 undetermined. "
+                        "Writes nothing, so it is safe against a live database")
+    p.add_argument("--markers-dir", type=Path, default=None, metavar="DIR",
+                   help="with --check: the marker directory to judge, instead of the one "
+                        "derived from --db-root. The default --db-root is the SHARED db "
+                        "root while a pack's marker database is built on the project "
+                        "volume, so a bare --check would report a healthy pack as having "
+                        "no database at all. Also the way to check a backup directly")
     p.add_argument("--self-test", action="store_true",
                    help="run the built-in unit tests (offline) and exit")
     p.add_argument("-v", "--verbose", action="store_true", help="debug logging")
@@ -3034,6 +3319,28 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     manifest_path = out_dir / "markers.manifest.tsv"
     todo_path = out_dir / "curation_required.tsv"
     cache_dir = args.db_root / "bioThreatFinder" / "cache" / "entrez"
+
+    # --markers-dir judges a directory directly, which is what the launch guard points at:
+    # it knows exactly where the database is, so its advice should not depend on a default
+    # that differs from it. Refused outside --check rather than silently ignored - a build
+    # writes a dozen artifacts and honouring this for only some of them would be worse.
+    if args.markers_dir is not None:
+        if not args.check:
+            raise SystemExit("ERROR: --markers-dir applies to --check only")
+        out_dir = args.markers_dir
+        manifest_path = out_dir / "markers.manifest.tsv"
+
+    # Before the taxdump load, which is minutes and gigabytes and which a
+    # read-only freshness question has no use for.
+    if args.check:
+        # The remediation must be RUNNABLE as printed. --db-root is carried whenever it is
+        # not the default, because the default is the SHARED root while a pack's marker
+        # database is built on the project volume - advice omitting it would send the
+        # operator to rebuild in the wrong place.
+        rebuild = f"scripts/build_marker_db.py --pack {args.pack}"
+        if args.db_root != DEFAULT_DB_ROOT:
+            rebuild += f" --db-root {args.db_root}"
+        return check_marker_db_freshness(catalogue_path, out_dir, manifest_path, rebuild)
 
     LOG.info("pack=%s db_root=%s threads=%d", args.pack, args.db_root, args.threads)
     LOG.info("catalogue: %s", catalogue_path)

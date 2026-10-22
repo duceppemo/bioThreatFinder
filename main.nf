@@ -380,6 +380,154 @@ def warnIfSketchStale(refsManifest, sylphDb, packName) {
              "Or pass --skip_sylph to run without this arm rather than with a partial one."
 }
 
+// The `marker_id` column of a marker TSV, or null if the file has no usable header.
+//
+// A TOP-LEVEL FUNCTION, NOT A CLOSURE IN A LOCAL `def`. Nextflow 26.04's strict syntax
+// resolves `name(...)` against declared functions only, so a closure called that way fails
+// to COMPILE - which would have taken down every run with markers enabled, the default.
+// Found by extracting the guard and running it, not by reading it.
+//
+// Both files are heavily commented and the comments are interleaved with data rows as
+// section banners, so readLines()[0] is not the header. Same rule as
+// read_marker_catalogue(): drop '#' lines, then the first line remaining is the header.
+def markerIdColumn(tsv) {
+    def rows = tsv.readLines().findAll { it.trim() && !it.trim().startsWith('#') }
+    if (rows.size() < 2) { return null }
+    def header = rows[0].split('\t')*.trim() as List
+    def i = header.indexOf('marker_id')
+    if (i < 0) { return null }
+    def out = []
+    rows.drop(1).each { line ->
+        def f = line.split('\t') as List
+        if (f.size() > i) {
+            def v = f[i]?.trim()
+            if (v) { out << v }
+        }
+    }
+    return out
+}
+
+// A MARKER DATABASE THAT EXISTS IS NOT A DATABASE OF THIS CATALOGUE.
+//
+// Third time for D45's predicate - a database is current when it covers its INPUTS, not
+// when it opens - and this arm's input is packs/<pack>/markers.tsv. Nothing compared them
+// until now, so a marker added to the catalogue and never built was invisible at launch.
+//
+// THE COST IS A LOST CONFIRMATION, AND IT HIDES IN A KNOWN GAP. marker_evidence.py treats
+// markers.manifest.tsv as authoritative for tested-vs-untested, so a catalogue marker with
+// no manifest row evaluates UNKNOWN. UNKNOWN never promotes a finding, so nothing breaks
+// and no call is obviously wrong - the finding simply settles a tier lower. And this pack
+// already carries 16 markers that can only ever be UNKNOWN (3 failed, 4 curation_required,
+// 9 motif_todo), so an operator reading UNKNOWN attributes it to the curation gap that is
+// genuinely there. The one explanation requiring no action is the one that fits.
+//
+// Two comparisons here, both over the two plain TSVs:
+//
+//   the marker_id sets   EXACT. A marker added to the catalogue, or a manifest row for one
+//                        no longer in it.
+//   mtime                catches an EDITED marker, which the sets CANNOT see: change an
+//                        accession or a gene under a marker_id the manifest already knows
+//                        and every set still agrees while the sequence underneath is the
+//                        old one. That is D41's wrong-gene bug, and it is the inverse of
+//                        the sylph case, where the sets caught what mtime missed.
+//
+// NO SIDECAR RECORD, which is the difference from D46. That record exists because a run
+// cannot open a .syldb - sylph lives in its own env and is used inside the process, so the
+// head node could only compare timestamps. These artifacts are plain text, so there is
+// nothing to keep stamped.
+//
+// The two comparisons --check also makes and this does not are deliberately left there:
+// whether the manifest's claimed tiers are really in the combined FASTAs and HMM file, and
+// whether an index predates its source. Those are build-integrity questions rather than
+// did-you-rebuild questions, they mean streaming ~17 MB of artifact, and the suite already
+// runs the full check against the shipped database. Naming --check is not a deferral of
+// something this guard should have done.
+//
+// WARN rather than exit, like the masking and sketch guards: the arm is still worth having
+// for the markers it does cover, and the other arms are unaffected.
+def warnIfMarkerDbStale(catalogue, markersDir, packName) {
+    if (!catalogue || !catalogue.exists() || !markersDir || !markersDir.exists()) {
+        return
+    }
+    def manifest = file("${markersDir}/markers.manifest.tsv")
+    if (!manifest.exists()) {
+        log.warn "The marker database at ${markersDir} has no markers.manifest.tsv. " +
+                 "marker_evidence.py treats that file as authoritative for tested vs " +
+                 "untested, so EVERY marker would be reported UNKNOWN and no finding " +
+                 "could be confirmed on marker evidence. Build it with:\n" +
+                 "  python3 scripts/build_marker_db.py --pack ${packName}"
+        return
+    }
+
+    def catIds = markerIdColumn(catalogue)
+    def manIds = markerIdColumn(manifest)
+    if (catIds == null || manIds == null || !catIds) { return }
+
+    def manSet = manIds as Set
+    def catSet = catIds as Set
+    def notBuilt = catIds.findAll { !manSet.contains(it) }
+    def notInCatalogue = manIds.findAll { !catSet.contains(it) }
+
+    def catalogueNewer = false
+    try {
+        catalogueNewer = catalogue.lastModified() > manifest.lastModified()
+    } catch (Exception ignored) {
+        catalogueNewer = false
+    }
+
+    if (!notBuilt && !notInCatalogue && !catalogueNewer) { return }
+
+    def detail = []
+    if (notBuilt) {
+        def uniq = notBuilt.toUnique()
+        detail << "${notBuilt.size()} catalogue marker(s) have NO manifest row " +
+                  "(${uniq.take(6).join(', ')}${uniq.size() > 6 ? ', ...' : ''})"
+    }
+    if (notInCatalogue) {
+        def uniq = notInCatalogue.toUnique()
+        detail << "${notInCatalogue.size()} manifest row(s) are no longer in the " +
+                  "catalogue (${uniq.take(6).join(', ')}${uniq.size() > 6 ? ', ...' : ''})"
+    }
+    if (catalogueNewer) {
+        detail << "markers.tsv is NEWER than the manifest, so a marker may have been " +
+                  "edited under an id the database already knows - a changed accession " +
+                  "or gene is invisible to the set comparison above"
+    }
+    // "is" when a set proves it, "may be" when only a timestamp suggests it. Overstating a
+    // timestamp as proof is how a guard loses its reader.
+    def verdict = (notBuilt || notInCatalogue) ? 'is STALE' : 'may be STALE'
+    // THE CONSEQUENCE FOLLOWS THE SIGNAL THAT FIRED, because the two differ in kind and
+    // one is worse. A missing manifest row costs a confirmation: UNKNOWN never promotes a
+    // finding, so the call settles a tier lower. An EDITED marker is still searched, and
+    // searched against the sequence the previous build retrieved - so it can return a
+    // confident PRESENT or ABSENT for the wrong gene, which is D41's bug and is not a
+    // downgrade at all. Printing the mild consequence for the severe case is how a guard
+    // teaches its reader to misjudge it.
+    def consequence = notBuilt
+        ? "A catalogue marker with no manifest row evaluates UNKNOWN, which never " +
+          "promotes a finding - the call simply settles a tier lower, and reads exactly " +
+          "like the ${packName} pack's existing unevaluable markers."
+        : (catalogueNewer && !notInCatalogue
+            ? "An edited marker is still SEARCHED, against the sequence the previous " +
+              "build retrieved, so it can report a confident PRESENT or ABSENT for the " +
+              "wrong gene rather than declining to answer."
+            : "A manifest row with no catalogue entry is evidence the database and the " +
+              "catalogue were not built together.")
+    // --markers-dir, because this guard KNOWS where the database is and the builder's
+    // --db-root defaults to the SHARED root while a pack's marker database is built on the
+    // project volume. Advice that omits it reports a healthy pack as having no database at
+    // all - a false alarm produced by the guard's own instruction, which is the fastest way
+    // to teach an operator to ignore both.
+    log.warn "The marker database at ${markersDir} ${verdict} for the ${packName} " +
+             "pack: ${detail.join('; ')}. ${consequence} Check and fix with:\n" +
+             "  python3 scripts/build_marker_db.py --pack ${packName} " +
+             "--markers-dir ${markersDir} --check   " +
+             "(read-only; exits 3 when stale and names the markers)\n" +
+             "  python3 scripts/build_marker_db.py --pack ${packName} " +
+             "--db-root <the volume holding bioThreatFinder/>   (rebuild)\n" +
+             "Or pass --skip_markers to run without this arm rather than with a partial one."
+}
+
 def assertNcbiTaxonomy(dbDir, label) {
     def manifest = file("${dbDir}/BTF_BUILD_MANIFEST.txt")
     if (!manifest.exists()) {
@@ -828,6 +976,10 @@ workflow {
     } else {
         ch_markers_dir = file(pack.confirm.markers_dir ?: "${pack.confirm.refs_dir}/../markers")
         ch_marker_cat  = file("${pack.dir}/markers.tsv", checkIfExists: true)
+
+        // checkIfExists only asks whether the catalogue is THERE, and the database beside
+        // it can be older than the catalogue it claims to cover - see warnIfMarkerDbStale().
+        warnIfMarkerDbStale(ch_marker_cat, ch_markers_dir, pack.name)
 
         MARKER_ALIGN_NT(ch_clean, ch_markers_dir)
         MARKER_SEARCH_AA(ch_clean, ch_markers_dir)

@@ -4063,6 +4063,296 @@ def test_sketch_freshness(tmp: Path) -> None:
            f"references with a path")
 
 
+def test_marker_db_freshness(tmp: Path) -> None:
+    """D47. The third artifact nothing compared against its inputs.
+
+    D45 gave the competitive bundles the predicate - a database is current when it covers
+    its INPUTS, not when it opens - and D46 carried it to the sylph sketch. The marker
+    database was the one left, and its input is packs/<pack>/markers.tsv.
+
+    WHY IT HIDES. marker_evidence.py treats markers.manifest.tsv as authoritative for
+    tested-vs-untested, so a catalogue marker with no manifest row evaluates UNKNOWN.
+    UNKNOWN never promotes a finding, so nothing fails and no call is obviously wrong -
+    the finding settles a tier lower. And this pack already carries 16 markers that can
+    only ever be UNKNOWN (3 failed, 4 curation_required, 9 motif_todo), so the symptom is
+    indistinguishable from the curation gap that is genuinely there.
+
+    The four comparisons, and what each one sees that the others cannot:
+
+      catalogue vs manifest   exact. A marker added or removed with every mtime settled.
+      mtime                   an EDITED marker, which the sets cannot see: change a gene
+                              under an id the manifest knows and every set still agrees
+                              while the sequence underneath is the old one. D41's bug,
+                              and the inverse of the sylph case.
+      manifest vs artifact    a claimed tier the combined file does not hold. The one
+                              that fails UNSAFE - downstream reports ABSENT, which
+                              asserts the marker was searched for.
+      index vs source         an index older than the FASTA it was built from, so the
+                              aligner searches the previous sequences.
+
+    Presence is compared and never sequence COUNTS: the combined files are de-duplicated
+    within each marker while the manifest counts the per-marker archive, so equal counts
+    are not expected and demanding them would call every de-duplicated marker stale.
+    """
+    import os
+    builder = SCRIPTS / "build_marker_db.py"
+    text = builder.read_text(encoding="utf-8")
+    record("markerdb:the builder has a read-only --check mode",
+           '"--check"' in text and "def check_marker_db_freshness(" in text)
+    record("markerdb:--check has its own exit code, distinct from an error",
+           "CHECK_STALE = 3" in text and "CHECK_UNDETERMINED = 1" in text,
+           "stale must be distinguishable from 'could not tell'")
+    # --check must answer before the taxdump load, or a read-only question costs minutes
+    # and gigabytes and cannot be run casually - which is how a check stops being used.
+    check_at = text.index("if args.check:")
+    record("markerdb:--check returns before the taxdump is loaded",
+           check_at < text.index("_LINEAGE = load_rankedlineage("),
+           "a freshness question must not pay for the lineage table")
+
+    main_text = (REPO / "main.nf").read_text(encoding="utf-8")
+    record("markerdb:the run pre-flight exists",
+           "def warnIfMarkerDbStale(" in main_text)
+    # Called in the marker branch, not merely defined. A guard nobody calls is a comment.
+    # Match through the ELSE branch, where the arm is set up: a pattern stopping at the
+    # first `    }` sees only the skip branch.
+    marker_branch = re.search(r"if \(SKIP\.skip_markers\) \{.*?\n    \}\n", main_text, re.S)
+    record("markerdb:the pre-flight is called where the arm is set up",
+           bool(marker_branch) and "warnIfMarkerDbStale(" in marker_branch.group(0),
+           "warnIfMarkerDbStale is defined but not wired into the marker branch")
+
+    # THE PARSER MUST BE A TOP-LEVEL FUNCTION.
+    #
+    # Nextflow 26.04's strict syntax resolves `name(...)` against declared functions only,
+    # so the column parser written as a closure in a local `def` failed to COMPILE - which
+    # would have taken down every run with markers enabled, the default. It got as far as
+    # a committed file and was caught by extracting the guard and running it under
+    # Nextflow, not by reading it.
+    record("markerdb:the column parser is a top-level def, not a local closure",
+           re.search(r"^def markerIdColumn\(", main_text, re.M) is not None,
+           "a closure in a local def cannot be called as markerIdColumn(...) under "
+           "Nextflow's strict syntax - the script will not compile")
+
+    # The builder writes this file and the run reads it. If they drift, nothing fails:
+    # the builder writes a record nobody reads and every run skips the comparison.
+    record("markerdb:the builder and the run name the same manifest file",
+           'manifest_path = out_dir / "markers.manifest.tsv"' in text
+           and '"${markersDir}/markers.manifest.tsv"' in main_text,
+           "both sides must name markers.manifest.tsv or the check silently never happens")
+
+    # ---- the four comparisons, against synthetic packs ----
+    cat_cols = ["marker_id", "taxon", "gene", "aliases", "marker_class", "evidence_type",
+                "locus", "min_coverage", "min_identity", "copy_expectation",
+                "query_strategy", "source_db", "notes"]
+    man_cols = ["marker_id", "taxon", "gene", "marker_class", "evidence_type",
+                "query_strategy", "status", "n_nt_seqs", "n_aa_seqs", "has_hmm",
+                "accessions", "nt_path", "aa_path", "hmm_path", "md5", "retrieved_utc",
+                "retrieval_errors", "note"]
+    ids = ["alpha_gene", "beta_gene", "gamma_gene"]
+    BUILT, LATER = 1_700_000_000, 1_700_000_100
+
+    def build_fixture(root: Path):
+        """A consistent pack and database, which must report FRESH."""
+        pack = root / "packs" / "testpack"
+        db = root / "bioThreatFinder" / "packs" / "testpack" / "markers"
+        pack.mkdir(parents=True, exist_ok=True)
+        db.mkdir(parents=True, exist_ok=True)
+        with (pack / "markers.tsv").open("w", newline="") as fh:
+            fh.write("# a synthetic catalogue, comments interleaved as in the real one\n")
+            w = csv.DictWriter(fh, fieldnames=cat_cols, delimiter="\t",
+                               extrasaction="ignore", lineterminator="\n")
+            w.writeheader()
+            for m in ids:
+                w.writerow({"marker_id": m, "taxon": "Testus testus", "gene": m,
+                            "marker_class": "virulence", "evidence_type": "dna,protein",
+                            "min_coverage": "0.5", "min_identity": "0.9",
+                            "query_strategy": "gene", "source_db": "nuccore"})
+        with (db / "markers.manifest.tsv").open("w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=man_cols, delimiter="\t",
+                               extrasaction="ignore", lineterminator="\n")
+            w.writeheader()
+            for m in ids:
+                w.writerow({"marker_id": m, "taxon": "Testus testus", "gene": m,
+                            "marker_class": "virulence", "evidence_type": "dna,protein",
+                            "query_strategy": "gene", "status": "built",
+                            "n_nt_seqs": "2", "n_aa_seqs": "1", "has_hmm": "no",
+                            "retrieved_utc": "2026-10-22T00:00:00Z",
+                            "retrieval_errors": "0", "note": ""})
+        with (db / "markers.nt.fna").open("w") as fh:
+            for m in ids:
+                fh.write(f">marker|{m}|ACC_{m}.1|{m} gene [Testus testus]\nACGTACGTAC\n")
+        with (db / "markers.aa.faa").open("w") as fh:
+            for m in ids:
+                fh.write(f">marker|{m}|WP_{m}.1|{m} protein [Testus testus]\nMKVLAA\n")
+        for idx in ("markers.nt.sr.mmi", "markers.nt.map-ont.mmi"):
+            (db / idx).write_bytes(b"\x00fake index")
+        os.utime(pack / "markers.tsv", (BUILT, BUILT))
+        for p in db.iterdir():
+            os.utime(p, (BUILT + 10, BUILT + 10))
+        return pack, db
+
+    seq = [0]
+
+    def verdict(mutate) -> tuple[int, str]:
+        seq[0] += 1
+        root = tmp / f"mdb{seq[0]}"
+        pack, db = build_fixture(root)
+        mutate(pack, db)
+        proc = run([sys.executable, "-I", builder, "--pack", "testpack",
+                    "--packs-dir", root / "packs", "--db-root", root, "--check"])
+        return proc.returncode, proc.stdout + proc.stderr
+
+    def rewrite_manifest(db: Path, edit) -> None:
+        with (db / "markers.manifest.tsv").open() as fh:
+            rows = list(csv.DictReader(fh, delimiter="\t"))
+        for r in rows:
+            edit(r)
+        with (db / "markers.manifest.tsv").open("w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=man_cols, delimiter="\t",
+                               extrasaction="ignore", lineterminator="\n")
+            w.writeheader()
+            w.writerows(rows)
+        os.utime(db / "markers.manifest.tsv", (BUILT + 10, BUILT + 10))
+
+    code, out = verdict(lambda p, d: None)
+    record("markerdb:a consistent database is FRESH", code == 0 and "FRESH" in out,
+           f"exit {code}: {out.strip()[:160]}")
+
+    def add_marker(pack, db):
+        p = pack / "markers.tsv"
+        p.write_text(p.read_text() + "delta_gene\tTestus testus\tdelta_gene\t\t"
+                     "virulence\tdna,protein\t\t0.5\t0.9\t\tgene\tnuccore\t\n")
+        os.utime(p, (BUILT, BUILT))   # mtime settled: only the SET can see this
+    code, out = verdict(add_marker)
+    record("markerdb:a marker added to the catalogue is caught with mtimes settled",
+           code == 3 and "delta_gene" in out and "NO manifest row" in out,
+           f"exit {code}: {out.strip()[:200]}")
+
+    def drop_marker(pack, db):
+        p = pack / "markers.tsv"
+        p.write_text("".join(ln for ln in p.read_text().splitlines(True)
+                             if not ln.startswith("gamma_gene\t")))
+        os.utime(p, (BUILT, BUILT))
+    code, out = verdict(drop_marker)
+    record("markerdb:a manifest row with no catalogue entry is caught",
+           code == 3 and "no longer in the catalogue" in out,
+           f"exit {code}: {out.strip()[:200]}")
+
+    def edit_marker(pack, db):
+        """A changed gene under an id the manifest already knows.
+
+        Every set still agrees exactly, so mtime is the ONLY signal that fires. This is
+        the case set coverage is blind to, and the reason both signals are kept.
+        """
+        p = pack / "markers.tsv"
+        p.write_text(p.read_text().replace("beta_gene\tTestus testus\tbeta_gene",
+                                           "beta_gene\tTestus testus\tbeta_OTHER"))
+        os.utime(p, (LATER, LATER))
+    code, out = verdict(edit_marker)
+    record("markerdb:an EDITED marker is caught by mtime when every set agrees",
+           code == 3 and "edited" in out.lower(),
+           f"exit {code}: {out.strip()[:200]}")
+
+    def strip_from_combined(pack, db):
+        """The manifest claims the dna tier; the combined FASTA does not hold it.
+
+        marker_evidence.py believes the claim, searches, finds nothing and reports
+        ABSENT - a positive assertion that the marker was looked for. The unsafe one.
+        """
+        keep, skipping = [], False
+        for ln in (db / "markers.nt.fna").read_text().splitlines(True):
+            if ln.startswith(">"):
+                skipping = ln.startswith(">marker|gamma_gene|")
+            if not skipping:
+                keep.append(ln)
+        (db / "markers.nt.fna").write_text("".join(keep))
+        os.utime(db / "markers.nt.fna", (BUILT + 10, BUILT + 10))
+    code, out = verdict(strip_from_combined)
+    record("markerdb:a claimed tier the combined artifact lacks is caught",
+           code == 3 and "gamma_gene" in out and "ABSENT" in out,
+           f"exit {code}: {out.strip()[:200]}")
+
+    code, out = verdict(lambda p, d: rewrite_manifest(
+        d, lambda r: r.__setitem__("n_nt_seqs", "0") if r["marker_id"] == "alpha_gene" else None))
+    record("markerdb:sequence present for a marker recorded as empty is caught",
+           code == 3 and "alpha_gene" in out,
+           f"exit {code}: {out.strip()[:200]}")
+
+    # THE DE-DUPLICATION TRAP. concat_files() collapses redundancy WITHIN a marker while
+    # n_nt_seqs counts the per-marker archive, so the two are not expected to match. A
+    # check comparing counts rather than presence would report every de-duplicated marker
+    # as stale - which on the shipped pack is most of them.
+    code, out = verdict(lambda p, d: rewrite_manifest(
+        d, lambda r: r.__setitem__("n_nt_seqs", "47")))
+    record("markerdb:a de-duplicated combined file is NOT reported stale",
+           code == 0 and "FRESH" in out,
+           f"exit {code}: counts must not be compared, only presence: {out.strip()[:160]}")
+
+    def stale_index(pack, db):
+        os.utime(db / "markers.nt.sr.mmi", (BUILT - 1000, BUILT - 1000))
+    code, out = verdict(stale_index)
+    record("markerdb:an index older than its source is caught",
+           code == 3 and "OLDER" in out, f"exit {code}: {out.strip()[:200]}")
+
+    code, out = verdict(lambda p, d: (d / "markers.nt.sr.mmi").unlink())
+    record("markerdb:a missing index is caught",
+           code == 3 and "missing" in out, f"exit {code}: {out.strip()[:200]}")
+
+    code, out = verdict(lambda p, d: shutil.rmtree(d))
+    record("markerdb:an absent database is STALE, not an error",
+           code == 3 and "no marker database" in out, f"exit {code}: {out.strip()[:200]}")
+    # The remediation must be RUNNABLE, not a template. A guard that prints
+    # "--pack <pack>" makes the reader translate before acting, and this project has
+    # already recorded once that an instruction needing translation is not an instruction.
+    record("markerdb:the remediation command names the actual pack",
+           "--pack testpack" in out and "--pack <pack>" not in out,
+           f"placeholder left in the fix instruction: {out.strip()[:200]}")
+
+    # AND THE LAUNCH GUARD'S OWN ADVICE HAS TO WORK WHEN PASTED.
+    #
+    # --db-root defaults to the SHARED db root (/media/36tb/db) while a pack's marker
+    # database is built on the project volume, so `--pack human --check` on its own reports
+    # a healthy pack as having NO DATABASE AT ALL - exit 3, from the command the warning
+    # just told the operator to run. A guard whose own instruction cries stale on a good
+    # database is how both get ignored. The guard therefore passes --markers-dir, which it
+    # can because it knows exactly which directory it judged.
+    record("markerdb:the launch guard's --check advice names the directory it judged",
+           "--markers-dir ${markersDir} --check" in main_text,
+           "the printed --check command must not rely on the default --db-root, which "
+           "points at the shared volume rather than the project one")
+    record("markerdb:--markers-dir exists and is refused outside --check",
+           '"--markers-dir"' in text
+           and "ERROR: --markers-dir applies to --check only" in text,
+           "an option that silently does nothing on a build path is worse than none")
+
+    code, out = verdict(lambda p, d: (d / "markers.manifest.tsv").unlink())
+    record("markerdb:an absent manifest is STALE and says every marker would be UNKNOWN",
+           code == 3 and "UNKNOWN" in out, f"exit {code}: {out.strip()[:200]}")
+
+    # A verdict and a failure must not share an exit code: a caller that cannot answer the
+    # question has to be distinguishable from one answering "stale".
+    code, out = verdict(lambda p, d: (p / "markers.tsv").unlink())
+    record("markerdb:an absent catalogue is UNDETERMINED, not a verdict",
+           code == 1 and "UNDETERMINED" in out, f"exit {code}: {out.strip()[:200]}")
+
+    # ---- and the shipped artifact itself ----
+    #
+    # The comparison that did not exist. It needs no network and no taxdump, so it runs
+    # wherever the built pack is - which makes the suite the freshness check for the two
+    # build-integrity comparisons the launch guard deliberately leaves to --check.
+    shipped_cat = REPO / "packs" / "human" / "markers.tsv"
+    shipped_db = pathlib.Path("/media/8tb/bioThreatFinder/packs/human/markers")
+    if not (shipped_cat.exists() and (shipped_db / "markers.manifest.tsv").exists()):
+        skip("markerdb:the shipped marker database is current",
+             f"no built marker database at {shipped_db}")
+        return
+    proc = run([sys.executable, "-I", builder, "--pack", "human",
+                "--packs-dir", REPO / "packs", "--db-root", "/media/8tb", "--check"])
+    record("markerdb:the shipped marker database is current",
+           proc.returncode == 0,
+           f"exit {proc.returncode} (3 = stale, 1 = undetermined): "
+           f"{(proc.stdout + proc.stderr).strip()[:400]}")
+
+
 CASES = {
     "selftests": test_selftests,
     "tiering": test_tiering,
@@ -4103,6 +4393,7 @@ CASES = {
     "extrarefs": test_extra_refs_cover,
     "stale": test_bundle_staleness,
     "sketch": test_sketch_freshness,
+    "markerdb": test_marker_db_freshness,
 }
 
 

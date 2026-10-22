@@ -4582,3 +4582,154 @@ That is the correct trade — the sketch only matters when it is queried.
 
 The Kraken2, Metabuli and marker databases still have no freshness check at all. The sketch
 was the easy case: its inputs are one directory, and `sylph inspect` lists what it holds.
+
+---
+
+## D47 — The predicate's third arrival: the marker database is current when it covers its catalogue, and the signal that catches an edit is the one the sketch did not need
+
+D45 gave the competitive bundles the predicate — a database is rebuilt when its **inputs**
+changed, not merely when it is absent — and D46 carried it to the sylph sketch. D46 closed
+by naming what was left: the Kraken2, Metabuli and marker databases had no freshness check
+at all. This is the marker database's turn, and it is the only one of the three the
+predicate transfers to unchanged, because its input is a file in this repo:
+`packs/<pack>/markers.tsv`. The Kraken2 and Metabuli indexes are built from NCBI snapshots
+rather than from the pack, so "covers its inputs" is a different question for them and is
+deliberately not answered here.
+
+### Why a stale marker database hides, and where it hides
+
+`marker_evidence.py` treats `markers.manifest.tsv` as **authoritative** for tested versus
+untested — that is a deliberate contract, written so that a marker which was never built
+cannot be scored as absent. The consequence is that a marker added to the catalogue after
+the last build has no manifest row and evaluates UNKNOWN. UNKNOWN never promotes a finding,
+so nothing fails, nothing errors, and no call is obviously wrong: the finding simply settles
+a tier lower.
+
+What makes it hide rather than merely cost something is the pack it lands in. This pack
+already carries **16 markers that can only ever be UNKNOWN** — 3 `failed`, 4
+`curation_required`, 9 `motif_todo` — all of them tracked, documented and expected. So an
+operator reading UNKNOWN has a ready explanation that fits, and it is the one explanation
+that requires no action. A seventeenth UNKNOWN is invisible among sixteen.
+
+### Four comparisons, and the inversion worth noticing
+
+| comparison | what only it can see |
+|---|---|
+| catalogue vs manifest `marker_id` sets | a marker added or removed with every mtime settled |
+| mtime | a marker **edited** under an id the manifest already knows |
+| manifest vs the combined artifact | a claimed tier the database does not actually hold |
+| index vs its source | an index older than the FASTA or HMM it was built from |
+
+The second row is the interesting one, and it is **the inverse of the sylph case**. There,
+the exact set caught what mtime was blind to: a reference added with every timestamp
+settled. Here the set comparison is the blind one. Change a marker's accession or gene
+under a `marker_id` the manifest already lists and every set still agrees perfectly while
+the sequence underneath is the one the previous build retrieved. That is D41's bug exactly
+— `ypest_pmt1_caf1` holding the wrong gene — and mtime is the only signal that sees it.
+Neither signal is a weaker version of the other, which is why both are kept.
+
+The third row is the one that fails **unsafe**, and it is the reason it is checked at all.
+If the manifest claims a tier the combined file does not hold, `marker_evidence.py` believes
+the claim, searches, finds nothing, and reports **ABSENT** — a positive assertion that the
+marker was looked for and is not there. Every other failure in this decision costs a
+confirmation; this one manufactures evidence, and `absence_expected` markers and
+`veto_if` rules read ABSENT as a fact.
+
+### No sidecar record, which is the difference from D46
+
+The sketch needed `<db>.genomes.txt` because a run **cannot open a `.syldb`**: sylph lives
+in its own env and is used inside the process, so the head node could only compare
+timestamps. These artifacts are plain text. The combined FASTAs carry the `marker_id` at
+field 1 of every header and each profile carries it in its `NAME` line, so a run reads the
+genuine artifact directly and there is nothing to keep stamped — no second record to drift,
+and no `--stamp` to forget. Both sides parse those headers through the **existing**
+`marker_id_of()`, the same function `marker_evidence.py` attributes a hit with, so the check
+cannot disagree with the pipeline about what a header means.
+
+### Presence, never counts — and the measurement that proves it matters
+
+`concat_files()` de-duplicates **within** each marker while `n_nt_seqs` counts the
+per-marker archive, which is the provenance copy and is deliberately left whole. The two
+numbers are therefore not expected to match, and the check compares whether a marker is
+**present** in the artifact, never how many sequences it has there.
+
+This is not a hypothetical. The plausible implementation — compare the count — was built and
+run: it reports the **shipped, correct database as stale on 116 of its 166 markers**. A
+guard that cries stale on a good database is a guard that gets switched off, so the wrong
+version here is worse than no version. Both the synthetic case and the shipped-artifact
+check fail against it, which is how it is now pinned.
+
+### Three defects found by running it rather than reading it
+
+**The guard did not compile.** The TSV column parser was first written as a closure in a
+local `def` and called as `idsOf(...)`. Nextflow 26.04's strict syntax resolves `name(...)`
+against declared functions only, so `main.nf` failed to **compile** — which would have taken
+down every run with markers enabled, the default, and markers are on unless `--skip_markers`
+is passed. Reading it would not have found this; extracting the function and running it
+under Nextflow did. It is now a top-level `def markerIdColumn()` and the suite asserts that.
+
+**The warning stated the wrong consequence.** The message appended one explanation —
+"evaluates UNKNOWN … settles a tier lower" — to whichever signal fired. For an edited
+marker that is false and falsely reassuring: an edited marker *is* searched, against the old
+sequence, so it can return a confident PRESENT or ABSENT for the wrong gene. That is not a
+downgrade. The consequence sentence now follows the signal that fired, because printing the
+mild consequence for the severe case teaches the reader to misjudge the guard.
+
+**The guard's own advice did not work.** The warning told the operator to run
+`build_marker_db.py --pack human --check`, and that command reports **exit 3, "no marker
+database"** on a perfectly healthy pack — because `--db-root` defaults to the shared
+`/media/36tb/db` while a pack's marker database is built on the project volume. A guard
+whose own instruction cries stale on a good database discredits itself and the check in one
+step, which is the same failure the count-comparison version would have caused from the
+other direction. Found by pasting the printed command. `--check` now takes
+`--markers-dir`, the guard passes the directory it actually judged, and the builder carries
+a non-default `--db-root` into its rebuild line; `--markers-dir` is refused outside
+`--check`, because an option silently ignored on a build path is worse than none. It also
+removes the symlink tree this decision's own verification needed: a retained backup is now
+checkable in place.
+
+### Where it is checked, which is three places for three different reasons
+
+| where | what it compares | on disagreement |
+|---|---|---|
+| `main.nf` `warnIfMarkerDbStale()`, in the marker branch — at launch | the `marker_id` sets and the mtimes, over the two plain TSVs | `log.warn` naming the markers, `is STALE` when a set proves it and `may be STALE` when only a timestamp suggests it |
+| `scripts/build_marker_db.py --check` | all four, including the artifacts and the indexes | names them, exits **3** (0 fresh, 1 undetermined) |
+| `tests/test_pipeline.py -k markerdb` | the full check against the shipped database | fails the suite |
+
+The launch guard deliberately stops at the two TSVs. The artifact and index comparisons mean
+streaming ~17 MB and they answer a build-integrity question rather than a did-you-rebuild
+one, so they belong to the builder and to the suite — which runs them on every commit, where
+a corrupted build is actually caught. That split is stated in the code so it reads as a
+boundary rather than an omission.
+
+`--check` answers before `load_rankedlineage()`, because a read-only question that costs
+minutes and gigabytes is a question nobody asks twice. The suite pins that ordering.
+
+### Verified against the artifact, not against a fixture
+
+The retained pre-D40 marker database is still on disk
+(`backups/markers-pre-D40-rebuild-20261021`, 163 rows). Pointed at the current 166-row
+catalogue, `--check` names **exactly `salm_invA`, `salm_ttrC`, `salm_ssaV`** — the three
+markers D40 added, which produced this project's first `confirmed_in_silico` on real data —
+and exits 3. The launch guard, extracted and run under Nextflow against the same pair, names
+the same three, and the `--check` command it prints was then run **as printed** and exits 3.
+The shipped database reports FRESH from both.
+
+Twenty-three checks (`markerdb`). Two mutation tests were run rather than assumed: with the mtime
+comparison removed the edited-marker case reports FRESH, and with counts compared instead of
+presence the shipped database reports stale on 116 markers. Suite **364 passed, 0 failed**.
+
+### Not done
+
+**The Kraken2 and Metabuli indexes still have no freshness check**, and this decision does
+not pretend to have given them one. Their inputs are NCBI library snapshots and a pinned
+taxdump, not `packs/`, so the honest predicate for them is a different one — whether the
+taxonomy baked in still matches the pinned taxdump, and whether every watchlist taxon is
+represented — and `assertNcbiTaxonomy()` already covers a part of it.
+
+Nothing is scheduled, for D46's reason: the only consumer is a run, so a run is where the
+operator is told. The same consequence follows and is stated rather than hidden — a marker
+added to the catalogue and never used is never reported, because nobody launched a run.
+
+Nothing was rebuilt. The shipped database is current, which is why this is a check and not
+a fix; it was measured before it was written, which is the only reason that is assertable.

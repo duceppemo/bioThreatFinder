@@ -18,9 +18,14 @@
    references), Kraken2 PlusPF and Metabuli are all built on NVMe. KrakenUniq is
    deliberately not built (D2). Freshness is checked for the competitive bundles (D45) and
    for the sylph sketch (D46 — recorded at build time in `<db>.genomes.txt` and compared
-   against the pack at launch, plus `scripts/build_sylph_db.sh --check`); the Kraken2,
-   Metabuli and marker databases still notice nothing when the references underneath them
-   change.
+   against the pack at launch, plus `scripts/build_sylph_db.sh --check`), and for the
+   marker database against `markers.tsv` (D47 — `marker_id` sets and mtimes at launch, all
+   four comparisons in `build_marker_db.py --check`, the full check over the shipped
+   database in the suite). **Kraken2 and Metabuli still notice nothing**, and the predicate
+   does not transfer to them unchanged: their inputs are NCBI library snapshots and the
+   pinned taxdump rather than `packs/`, so the honest question for them is whether the
+   baked-in taxonomy still matches the pin and whether every watchlist taxon is
+   represented — `assertNcbiTaxonomy()` covers part of it.
 4. **Validate on known-positive data** before trusting any output. *Partly done:*
    ZymoBIOMICS D6300 (EVEN and LOG, Illumina and ONT) plus all ten member organisms have
    run end to end, which refuted D12's neighbour gate and re-scored the tier ladder

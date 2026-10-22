@@ -569,6 +569,12 @@ bash    scripts/fetch_host_genome.sh human --db-root /media/8tb --threads 24
 python3 scripts/build_pack_refs.py  --pack human --btf-db /media/8tb/bioThreatFinder --threads 24
 python3 scripts/mask_pack_refs.py   --pack human --btf-db /media/8tb/bioThreatFinder --threads 24
 python3 scripts/build_marker_db.py  --pack human --db-root /media/8tb --taxdump "$TAX" --threads 24
+# Same question for the marker database, whose input is packs/human/markers.tsv (D47).
+# Writes nothing; exits 0 fresh, 3 stale and names the markers, 1 could not tell.
+# Keep --db-root: it defaults to the SHARED root, where this pack has no marker database,
+# so a bare --check reports a healthy pack as missing one. --markers-dir DIR is the other
+# way to say it, and checks a backup in place.
+python3 scripts/build_marker_db.py  --pack human --db-root /media/8tb --check
 # sylph is an ON-BY-DEFAULT arm and it sketches THIS PACK'S refs, not GTDB. Rebuild it
 # whenever build_pack_refs.py adds a reference, or the new refs are invisible to the arm.
 # Takes ~6 s for 375 genomes; --force is required to overwrite an existing sketch.
@@ -891,6 +897,17 @@ is still open.
   Deliberately **not** scheduled: the only consumer of the sketch is a run, so a nightly job
   would report staleness on the days nobody was going to query it. The consequence is
   honest — a reference added and never used is never reported, because nobody launched.
+- **The marker database is checked against its catalogue too (D47).** Same predicate, third
+  artifact: its input is `packs/<pack>/markers.tsv`, and a marker added there and never
+  built evaluates UNKNOWN — which never promotes a finding, so the call settles a tier
+  lower and reads exactly like this pack's 16 legitimately unevaluable markers. `main.nf`
+  compares the `marker_id` sets and the mtimes at launch; `--check` adds the two
+  build-integrity comparisons (does the manifest's claimed tier really sit in the combined
+  FASTA or HMM file, and does any index predate its source) and the suite runs the full
+  check against the shipped database. Verified against the retained pre-D40 database,
+  where it names the three *Salmonella* markers and exits 3. **The Kraken2 and Metabuli
+  indexes still have no freshness check** — their inputs are NCBI snapshots rather than
+  the pack, so this predicate does not transfer to them unchanged.
 - ***F. tularensis* vs *F. novicida* cannot currently be discriminated.** Both resolved
   to the same assembly (`GCF_000833355.1`), so the duplicate was dropped from the
   competitive bundle. Needs a curated distinct *F. novicida* assembly. This is the
