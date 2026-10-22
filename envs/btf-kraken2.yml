@@ -1,0 +1,27 @@
+# Kraken2 and Bracken, kept APART from envs/btf-refs.yml on purpose.
+#
+#   conda env create -f envs/btf-kraken2.yml
+#
+# THE PIN IS NOT HYGIENE. It is load-bearing twice over:
+#
+#   1. 2.17.2 advertises `--report-minimizer-data`, which supplies the distinct-minimizer
+#      counts and duplicity ratio the stage-1 evidence is scored on. Solving kraken2 into
+#      an environment that also holds mmseqs2/hmmer/mafft resolves 2.0.8-beta (2019)
+#      instead, which lacks the flag - and an index built that way works while carrying
+#      none of the evidence. That is why this file exists separately at all; see
+#      envs/btf-refs.yml.
+#   2. The version that QUERIES an index should match the version that BUILT it, or the
+#      on-disk format may not read back.
+#
+# scripts/build_kraken2_db.sh refuses anything below 2.1.0 and verifies the flag is
+# actually advertised rather than trusting the version string.
+name: btf-kraken2
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - kraken2=2.17.2
+  - bracken=3.1
+  # See the note in envs/btf-refs.yml: kraken2 declares wget, and a mismatched
+  # libunistring breaks it in a way that cannot be fixed by removing the package.
+  - libunistring

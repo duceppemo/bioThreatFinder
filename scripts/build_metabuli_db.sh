@@ -95,7 +95,10 @@ MIN_FREE_GIB=0          # 0 = derive from the route/mode, see check_free_space()
 DRY_RUN=0
 FORCE=0
 
-CONDA_BIN="/home/bioinfo/miniconda3/bin"
+# The conda prefix is not necessarily on PATH for non-interactive runs (cron, Nextflow),
+# so look there explicitly before giving up. Overridable: this was a hardcoded personal
+# miniconda prefix, and $CONDA_PREFIX covers the common case with no configuration.
+CONDA_BIN="${BTF_CONDA_BIN:-${CONDA_PREFIX:-/opt/conda}/bin}"
 
 # ---------------------------------------------------------------------------
 # Prebuilt index catalogue

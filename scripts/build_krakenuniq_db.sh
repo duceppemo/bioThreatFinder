@@ -149,7 +149,10 @@ CLEAN=0
 TAXDUMP_SRC="/media/8tb/bioThreatFinder/taxdump/2026-09-29"
 MAX_TAXDUMP_AGE_DAYS=90
 
-CONDA_BIN="/home/bioinfo/miniconda3/bin"
+# The conda prefix is not necessarily on PATH for non-interactive runs (cron, Nextflow),
+# so look there explicitly before giving up. Overridable: this was a hardcoded personal
+# miniconda prefix, and $CONDA_PREFIX covers the common case with no configuration.
+CONDA_BIN="${BTF_CONDA_BIN:-${CONDA_PREFIX:-/opt/conda}/bin}"
 
 usage() {
     cat <<'EOF'

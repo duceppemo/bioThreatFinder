@@ -646,6 +646,37 @@ workflow {
     if (params.help) { helpMessage(); exit 0 }
     if (!params.input) { helpMessage(); exit 1, "ERROR: --input is required" }
 
+    // BOTH DATABASE ROOTS MUST BE SET EXPLICITLY.
+    //
+    // They used to default to this project's own volumes, so a clone on any other machine
+    // inherited paths that do not exist and then failed inside a process - where the error
+    // is about a missing database file, which reads like a build problem rather than an
+    // unconfigured path. Refused here instead, before anything is staged, naming both and
+    // the three ways to set them. `pack.yaml` interpolates ${btf_db} into every database
+    // path it declares, so an unset root would otherwise reach a process as the literal
+    // string "null/...".
+    def unsetRoots = ['db_root', 'btf_db'].findAll { !params[it] }
+    if (unsetRoots) {
+        exit 1, """
+        ERROR: ${unsetRoots.join(' and ')} ${unsetRoots.size() == 1 ? 'is' : 'are'} not set.
+
+        bioThreatFinder keeps its databases in two roots, deliberately split:
+
+          --db_root   large SHARED read-only resources (taxonomy snapshot, nt)
+          --btf_db    project-owned artifacts: pack references, marker database,
+                      sylph sketch, Kraken2 index. Put this on the fastest disk
+                      available - the k-mer indexes are read-heavy.
+
+        Set them in any of three ways:
+
+          nextflow run . --db_root /path/to/shared --btf_db /path/to/project ...
+          export BTF_DB_ROOT=/path/to/shared BTF_DB=/path/to/project
+          add them to a site config passed with -c
+
+        See the README for how to build the databases under --btf_db.
+        """.stripIndent()
+    }
+
     // `--skip_metabuli false` IS A SILENT NO-OP ON THE NEXTFLOW CLI, AND THAT HAS
     // ALREADY COST THIS PROJECT A FALSIFICATION TEST. See lib/BtfBool.groovy for the
     // mechanism and the history. params is read-only at runtime - assigning params[k]

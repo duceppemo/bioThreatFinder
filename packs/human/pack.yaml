@@ -70,8 +70,30 @@ screen:
   # `scripts/build_sylph_db.sh --check` makes the same comparison against the database
   # itself (exit 3 when stale); --stamp writes the record for a database that predates it.
   sylph_db: "${btf_db}/sylph/human_pack_refs.syldb"
-  # Eukaryotic pathogens (parasites, fungi) are poorly served by GTDB; rely on
-  # Kraken2 PlusPF plus stage-2 alignment for these.
+  # Eukaryotic pathogens (parasites, fungi) are poorly served by GTDB, so stage 1 reaches
+  # them through Kraken2 PlusPF AND the pack sketch above, then stage-2 alignment confirms.
+  #
+  # THIS USED TO SAY "rely on Kraken2 PlusPF", AND THAT WAS MEASURABLY WRONG (D48).
+  # PlusPF holds no node for 19 of the 90 watchlist taxa - the helminths, several protozoa
+  # and most dimorphic fungi - so for most of the organisms this line nominated it for, that
+  # arm can never produce a row. It is not staleness and no rebuild changes it: PlusPF
+  # carries no helminth library at all, and the absent fungi and protozoa have no genome in
+  # its fungi/protozoa libraries under these taxids.
+  #
+  # What makes those 19 reachable is the sylph arm, which profiles THIS PACK's refs rather
+  # than a distributed database: all 19 have a reference here and are in the sketch, and
+  # `combining_rule: any_classifier_or` below lets either arm raise a candidate. So for
+  # eukaryotes the two arms are NOT redundant - sylph is the only stage-1 arm that can see
+  # that group, which is also why the sketch going stale (D46) cost them more than any
+  # other taxa.
+  #
+  # Check before trusting this line again:
+  #   python3 scripts/check_index_coverage.py --pack human   (exit 3 when a taxon is
+  #                                                           absent from the index)
+  #
+  # The value is documentary - nothing reads this key - and is left unchanged so it stays
+  # comparable with earlier runs. `sylph_and_kraken2_then_align` would describe the measured
+  # behaviour better and should be adopted if a consumer is ever written.
   eukaryote_strategy: kraken2_then_align
   # Any classifier raises a candidate; consensus is recorded, not required.
   combining_rule: any_classifier_or

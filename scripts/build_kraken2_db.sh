@@ -220,7 +220,10 @@ done
 # ---------------------------------------------------------------------------
 # Tool resolution
 # ---------------------------------------------------------------------------
-CONDA_BIN="/home/bioinfo/miniconda3/bin"
+# The conda prefix is not necessarily on PATH for non-interactive runs (cron, Nextflow),
+# so look there explicitly before giving up. Overridable: this was a hardcoded personal
+# miniconda prefix, and $CONDA_PREFIX covers the common case with no configuration.
+CONDA_BIN="${BTF_CONDA_BIN:-${CONDA_PREFIX:-/opt/conda}/bin}"
 resolve_tool() {
     local name="$1" p
     if p="$(command -v "$name" 2>/dev/null)"; then printf '%s\n' "$p"; return 0; fi

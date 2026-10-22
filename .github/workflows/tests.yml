@@ -1,0 +1,122 @@
+# The regression suite is designed for exactly this: fixture-driven, offline, needs no
+# databases, runs in ~30 s. It had no CI, which meant every one of the behaviours in
+# docs/verification.md was only ever checked when someone remembered to run it.
+#
+# WHAT THIS DOES NOT DO, deliberately:
+#   - it does not measure accuracy. No ground-truth data is involved; that is
+#     docs/benchmarking.md's job and it needs real reads.
+#   - it does not solve the conda specs. scripts/check_conda_specs.sh does, and it needs
+#     the network and several minutes - it is kept out of the unit suite on purpose, and
+#     runs here only on a schedule, where a slow job costs nobody's commit.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, for the network-dependent spec solve only.
+    - cron: '0 6 * * 1'
+  # So the conda-specs job can be run on demand after a pin changes, rather than waiting
+  # for Monday. STATUS.md's instruction is to re-validate after ANY pin change.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  suite:
+    name: regression suite (python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is what modules/local/*.nf pins for the pipeline's own processes; the
+        # newest is included so a deprecation shows up here rather than in a run.
+        python: ['3.11', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # samtools gates 19 of the checks. Without it the suite still passes, it just
+      # registers fewer cases - so install it rather than accept a quieter green.
+      - name: Install samtools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends samtools
+          samtools --version | head -1
+
+      - name: Run the suite
+        run: python3 tests/test_pipeline.py
+
+      # The suite prints its own counts; this makes a skipped case visible in the log
+      # summary rather than only in the body of the output.
+      - name: Report skips
+        if: always()
+        run: python3 tests/test_pipeline.py 2>&1 | grep -E '^\s+skip' || echo 'no skips'
+
+  nextflow-syntax:
+    name: nextflow parses
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The guard that compares the marker database against its catalogue reached a
+      # committed file once as a closure in a local `def`, which Nextflow 26.04's strict
+      # syntax refuses to compile - and markers are enabled by default, so that was every
+      # run. Reading it did not catch that; compiling it does.
+      - uses: nf-core/setup-nextflow@v2
+        with:
+          version: '26.04.6'
+
+      - name: Compile main.nf
+        run: nextflow run . --help
+
+      - name: Refuse to start with unset database roots
+        run: |
+          if nextflow run . --input tests/data/samplesheet_test.csv 2>&1 | grep -q 'are not set'; then
+            echo "ok: unset db_root/btf_db is refused at launch"
+          else
+            echo "FAIL: expected a refusal naming db_root and btf_db"; exit 1
+          fi
+
+  lint:
+    name: ruff and shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pipx install ruff
+      - name: ruff
+        run: ruff check bin scripts tests || true   # advisory for now, not a gate
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends shellcheck
+          shellcheck -S warning scripts/*.sh || true   # advisory for now, not a gate
+
+  conda-specs:
+    name: conda specs solve
+    # Network-bound and minutes long. Scheduled only, or on demand - not on every commit.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+      - name: Solve every per-process spec
+        shell: bash -el {0}
+        run: bash scripts/check_conda_specs.sh
+      - name: Solve the three build environments
+        shell: bash -el {0}
+        run: |
+          for e in envs/*.yml; do
+            echo "== $e"
+            conda env create --dry-run -f "$e" -n "probe_$(basename "$e" .yml)"
+          done

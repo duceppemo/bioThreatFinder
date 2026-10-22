@@ -173,7 +173,12 @@ LOG = logging.getLogger("build_marker_db")
 # ---------------------------------------------------------------------------
 
 DEFAULT_DB_ROOT = Path("/media/36tb/db")
-CONDA_BIN = Path("/home/bioinfo/miniconda3/bin")
+# LAST-RESORT place to look for a tool, after $PATH. Overridable, because this used to be
+# one developer's miniconda prefix hardcoded. $CONDA_PREFIX is set inside any activated
+# env, so the common case needs no configuration.
+CONDA_BIN = Path(os.environ.get("BTF_CONDA_BIN")
+                 or (Path(os.environ["CONDA_PREFIX"]) / "bin"
+                     if os.environ.get("CONDA_PREFIX") else "/opt/conda/bin"))
 
 # The shared volume runs at ~97% capacity. A marker database is small (tens of
 # MB of sequence; the minimap2 indexes and the MMseqs2 database are the bulk),
@@ -381,12 +386,16 @@ def which(name: str) -> Optional[str]:
     candidate = CONDA_BIN / name
     if candidate.is_file() and os.access(candidate, os.X_OK):
         return str(candidate)
-    if name == "minimap2":
-        dorado = Path("/home/bioinfo/prog/ont-dorado-server/bin/minimap2")
-        if dorado.is_file() and os.access(dorado, os.X_OK):
-            LOG.warning("using minimap2 bundled with ont-dorado-server (%s); "
-                        "it may predate the validated release", dorado)
-            return str(dorado)
+    # A vendored minimap2 was accepted here from a hardcoded path on the machine this was
+    # written on. Removed rather than generalised: a copy that "may predate the validated
+    # release" is a worse outcome than a clear failure. BTF_<TOOL> points at one explicitly.
+    override = os.environ.get(f"BTF_{name.upper()}")
+    if override:
+        p = Path(override)
+        if p.is_file() and os.access(p, os.X_OK):
+            return str(p)
+        LOG.warning("BTF_%s is set to %s, which is not an executable file; ignoring",
+                    name.upper(), override)
     return None
 
 

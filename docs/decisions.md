@@ -4836,3 +4836,141 @@ the alternative, which `pack.yaml` already half-states, is to treat sylph plus s
 alignment as the intended route for eukaryotes and say so plainly rather than nominating
 PlusPF for organisms it does not contain. That wording in `pack.yaml` is now wrong and is
 left for a decision that can weigh both.
+
+---
+
+## D49 — Preparing for a public repository: the three things that were only in one person's head, and one comment that was measurably wrong
+
+The repo is going public. The audit found **no secrets, no credentials and no personal data
+in any tracked file** — every regex hit on `token|secret|password|key` was a parser using the
+word "token", and the only email addresses are `example.org` placeholders. Databases,
+`results/` and `work/` were already untracked. So this is not a sanitisation exercise; it is
+about the things a clone cannot do that this machine could.
+
+### A clone inherited two volumes it does not have
+
+`nextflow.config` defaulted `db_root` to `/media/36tb/db` and `btf_db` to
+`/media/8tb/bioThreatFinder`. The failure mode is the bad kind: the run **starts**, then
+dies inside a process on a missing database file, which reads like a build problem rather
+than an unconfigured path. Both now default to `null` (from `$BTF_DB_ROOT` / `$BTF_DB`) and
+`main.nf` refuses at launch, naming both roots, what each is for, and the three ways to set
+them. `pack.yaml` interpolates `${btf_db}` into every database path it declares, so an unset
+root would otherwise have reached a process as the literal string `null/...`.
+
+Verified three ways: unset is refused before anything is staged; the flags satisfy it; the
+environment variables satisfy it. The CI job asserts the refusal still happens, because a
+guard that stops firing silently stops being a guard.
+
+### Twelve hardcoded paths into one developer's home directory
+
+`CONDA_BIN` was `/home/bioinfo/miniconda3/bin` in six files, and two more accepted a
+minimap2 bundled with an `ont-dorado-server` install at a fixed path. **None of these broke
+anything** — every one sat behind a `$PATH` lookup that wins whenever a tool is properly
+installed — but a published script naming someone's home directory invites doubt about
+everything else in it.
+
+`CONDA_BIN` now resolves `$BTF_CONDA_BIN`, then `$CONDA_PREFIX` (set inside any activated
+env, so the normal case needs no configuration), then `/opt/conda/bin`. The vendored minimap2
+fallbacks were **removed rather than generalised**: the code itself warned that the binary
+"may predate the validated release", and silently using an unvalidated aligner is a worse
+outcome than a clear failure telling the operator to install one. `$BTF_MINIMAP2` is the
+explicit way to point at a specific binary.
+
+### The three environments existed only as a paragraph
+
+`docs/STATUS.md` explained why kraken2 must have its own environment — installing it beside
+mmseqs2/hmmer/mafft makes the solver resolve **kraken2 2.0.8-beta (2019)**, which has no
+`--report-minimizer-data`, so the index builds, works, and carries none of the evidence
+stage 1 scores on. Excellent reasoning, and **not machine-readable**: there was no
+`environment.yml`, so a reader had to reconstruct three environments from prose.
+
+They are now `envs/btf-{refs,kraken2,sylph}.yml`, and they are **curated specs rather than
+`conda env export` output**. That distinction is the whole point: `conda env export
+--from-history -n btf-refs` lists `kraken2` and `bracken`, because that environment still
+holds 2.0.8-beta from the original mistake. **An export would have shipped the trap as the
+recommended install.** The exports also carried `defaults`, `plotly` and `r` channels
+inherited from a global config; the published files declare only conda-forge and bioconda,
+since `defaults` imposes licence conditions on a reader who did not choose it.
+
+All three were put through the solver: `btf-refs` resolves **with no kraken2 at all**,
+`btf-kraken2` resolves kraken2 2.17.2, `btf-sylph` resolves sylph 1.0.0. Seven checks
+(`envs`) pin the invariants offline, the load-bearing one being that `btf-refs` must not
+declare kraken2 — which is precisely what a well-meaning simplification would undo.
+
+### The suite was built for CI and had none
+
+`tests/test_pipeline.py` is fixture-driven, offline, needs no databases and runs in ~30 s.
+Every behaviour in `docs/verification.md` was therefore checked only when someone remembered
+to. `.github/workflows/tests.yml` runs it on push and PR under two Python versions **with
+samtools installed** — without it the suite still passes but registers 19 fewer cases, and
+accepting a quieter green is how coverage quietly erodes.
+
+It also compiles `main.nf`, which is not ceremony: the D47 guard reached a committed file as
+a closure in a local `def`, which Nextflow 26.04's strict syntax refuses to compile, and
+markers are enabled by default — that was every run. Reading it did not catch that.
+`scripts/check_conda_specs.sh` is network-bound and minutes long, so it runs on a schedule
+and on demand rather than on every commit, which is the same reason it was kept out of the
+unit suite.
+
+### `pack.yaml` said something D48 had measured to be false
+
+The `eukaryote_strategy` comment read "rely on Kraken2 PlusPF plus stage-2 alignment" for
+parasites and fungi. D48 measured that PlusPF holds **no node for 19 of 90 watchlist taxa**,
+most of them exactly those organisms. The comment now says what is true — stage 1 reaches
+them through PlusPF **and** the pack sketch, the two arms are **not** redundant for
+eukaryotes, and sylph is the only arm that can see that group, which is also why the sketch
+going stale cost them more than any other taxa. It names the check that settles it.
+
+The **value** is unchanged (`kraken2_then_align`) and nothing reads the key — it is
+documentary, its only consumers being docs and the check script — so the better name
+`sylph_and_kraken2_then_align` is recorded for whenever a consumer is written, rather than
+churned now and made incomparable with earlier runs.
+
+### Author identity, resolved without rewriting history
+
+History carried two author identities and three committer identities, one of them a
+GitHub noreply address. A `.mailmap` maps all of them to the institutional identity, which
+`git log`, `shortlog`, `blame` and the GitHub contributor list all honour: **152 commits now
+present as one author and committers are fully unified, with no SHA changed and no clone
+broken.** `git filter-repo` was considered and rejected — it rewrites every commit for a
+cosmetic gain, and must never be done after a public push.
+
+Two commits have `Claude` as *author* rather than co-author. Left alone: relabelling
+authorship is the maintainer's call, not a cleanup.
+
+### What a reader is told before they trust an output
+
+The README's top disclaimer was already prominent and well-worded and is unchanged. Added
+above the documentation table is a **Validation status** section stating plainly that no
+threshold in `packs/*/pack.yaml` is a measured operating point, that the marker tier
+addresses genuine gaps in the literature and is therefore unvalidated, what validation has
+and has not been done, and that no CLSI standard for untargeted metagenomic sequencing
+exists. Every claim there is sourced from `docs/roadmap.md` or `docs/validation.md` rather
+than written fresh.
+
+A stale number was also corrected: the README advertised "322 checks; 303 passed", measured
+now at **378 with samtools, 359 without**. A wrong test count on the front page is the
+cheapest kind of credibility to lose.
+
+`CITATION.cff` was added, and its `message` carries the validation caveat, so a citation
+cannot be made without encountering it.
+
+### Not done
+
+**No container recipe.** Already roadmap §4, where the project's own words are "required
+before any result is defensible or publishable". Pinned digests per process are a project in
+themselves and are not pretended at here.
+
+**`docs/STATUS.md` is still framed as a session handoff** — first person in places, with
+operational incidents specific to this machine (the `systemd-oomd` pressure limit, the two
+colliding builds, which jobs were running when). The content is the hardest-won knowledge in
+the repo and deleting it would be vandalism, so the right move is to reframe it as
+`docs/operations.md` with the deployment-specific notes clearly labelled. Left as a separate
+change because it touches every link to it.
+
+**The databases are not published anywhere.** The reproducibility question they raise is
+partly answered already — both the reference and marker manifests pin **accession and md5**,
+so those are re-fetchable with integrity verification — but the pinned taxonomy snapshot is
+**not** re-downloadable, because NCBI overwrites `new_taxdump.tar.gz` in place. Everything
+else keys to that snapshot. That makes it the one artifact whose publication is load-bearing
+rather than convenient, and it is 2.2 GB. Recorded here; not decided.

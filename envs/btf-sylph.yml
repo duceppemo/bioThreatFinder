@@ -1,0 +1,19 @@
+# sylph, for building the pack sketch.
+#
+#   conda env create -f envs/btf-sylph.yml
+#
+# THE PIN MATCHES modules/local/detect.nf. A sketch must be readable by the version that
+# queries it, and the pipeline's SYLPH_PROFILE process pins sylph=1.0.0 - so a sketch
+# built by a different major version is a database the run cannot open. The 0.6 -> 1.0
+# jump was a major version change.
+#
+# This is also why the sketch's freshness check (D46) has to read the database rather than
+# compare timestamps: sylph lives only in this environment, so the Nextflow head node has
+# no `sylph inspect`. Every build therefore writes <db>.genomes.txt beside the sketch and a
+# run compares against that record.
+name: btf-sylph
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - sylph=1.0.0

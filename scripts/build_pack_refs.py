@@ -76,7 +76,15 @@ DEFAULT_DB_ROOT = Path("/media/36tb/db")
 # expanded watchlist subtrees against a 6.5-month-old tree. The refs base path has a
 # mismatch guard; the taxdump default had none.
 DEFAULT_TAXDUMP = Path("/media/8tb/bioThreatFinder/taxdump/2026-09-29")
-CONDA_BIN = Path("/home/bioinfo/miniconda3/bin")
+
+# A LAST-RESORT PLACE TO LOOK FOR A TOOL, AFTER $PATH. Overridable, because it used to be
+# this developer's own miniconda prefix hardcoded - harmless, since the PATH lookup wins
+# whenever a tool is properly installed, but a published script naming someone's home
+# directory invites doubt about everything else in it. $CONDA_PREFIX is set inside any
+# activated env, so the common case needs no configuration at all.
+CONDA_BIN = Path(os.environ.get("BTF_CONDA_BIN")
+                 or (Path(os.environ["CONDA_PREFIX"]) / "bin"
+                     if os.environ.get("CONDA_PREFIX") else "/opt/conda/bin"))
 
 # The shared volume runs at ~97% capacity. Refuse to start rather than fill it.
 # Bacteria and viruses are trivial; the eukaryotic parasites (Schistosoma,
@@ -160,12 +168,18 @@ def which(name: str) -> Optional[str]:
     candidate = CONDA_BIN / name
     if candidate.is_file() and os.access(candidate, os.X_OK):
         return str(candidate)
-    if name == "minimap2":
-        dorado = Path("/home/bioinfo/prog/ont-dorado-server/bin/minimap2")
-        if dorado.is_file() and os.access(dorado, os.X_OK):
-            LOG.warning("using minimap2 bundled with ont-dorado-server (%s); "
-                        "it may predate the validated release", dorado)
-            return str(dorado)
+    # A bundled minimap2 was accepted here from a hardcoded ont-dorado-server path on the
+    # machine this was written on. Removed rather than generalised: it is reached only when
+    # minimap2 is on neither $PATH nor the conda prefix, and a vendored copy that "may
+    # predate the validated release" is a worse outcome than a clear failure telling the
+    # operator to install it. $BTF_MINIMAP2 is the explicit way to point at one.
+    override = os.environ.get(f"BTF_{name.upper()}")
+    if override:
+        p = Path(override)
+        if p.is_file() and os.access(p, os.X_OK):
+            return str(p)
+        LOG.warning("BTF_%s is set to %s, which is not an executable file; ignoring",
+                    name.upper(), override)
     return None
 
 

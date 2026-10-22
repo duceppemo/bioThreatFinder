@@ -4355,6 +4355,61 @@ def test_marker_db_freshness(tmp: Path) -> None:
            f"{(proc.stdout + proc.stderr).strip()[:400]}")
 
 
+def test_env_specs(tmp: Path) -> None:
+    """The three build environments, as files rather than as a paragraph.
+
+    They were documented only in prose, so an outside user had to reconstruct three conda
+    environments from a description. These files are CURATED, not `conda env export`
+    output, and the reason is the invariant below.
+    """
+    envs = REPO / "envs"
+    expected = {"btf-refs", "btf-kraken2", "btf-sylph"}
+    present = {p.stem for p in envs.glob("*.yml")} if envs.is_dir() else set()
+    record("envs:all three environments are committed as files",
+           expected <= present, f"missing {sorted(expected - present)}")
+    if not expected <= present:
+        return
+
+    text = {name: (envs / f"{name}.yml").read_text(encoding="utf-8")
+            for name in expected}
+
+    # THE WHOLE REASON THESE ARE THREE FILES.
+    #
+    # Installing kraken2 alongside mmseqs2/hmmer/mafft makes the solver resolve
+    # kraken2 2.0.8-beta (2019), which has no --report-minimizer-data - the flag stage 1's
+    # evidence is scored on. An index built with it WORKS and carries none of that
+    # evidence, so the failure is silent. The environment these files were derived from
+    # still holds 2.0.8-beta for exactly that reason, which is why a `conda env export`
+    # would reproduce the trap and these are curated instead.
+    refs_deps = [ln for ln in text["btf-refs"].splitlines()
+                 if ln.strip().startswith("- ")]
+    record("envs:btf-refs does NOT declare kraken2 or bracken",
+           not any(re.match(r"-\s*(kraken2|bracken)\b", ln.strip())
+                   for ln in refs_deps),
+           "adding kraken2 here resolves 2.0.8-beta, which lacks "
+           "--report-minimizer-data and fails silently - that is why it has its own env")
+
+    # Both pins are load-bearing, not hygiene: kraken2 must match the version that built
+    # the index or the format may not read back, and sylph must match the version that
+    # queries the sketch (modules/local/detect.nf pins sylph=1.0.0).
+    record("envs:kraken2 is pinned to the validated version",
+           "kraken2=2.17.2" in text["btf-kraken2"])
+    record("envs:sylph's pin matches the pipeline's own",
+           "sylph=1.0.0" in text["btf-sylph"]
+           and 'sylph=1.0.0' in (REPO / "modules" / "local" / "detect.nf")
+               .read_text(encoding="utf-8"),
+           "a sketch must be readable by the version that queries it")
+
+    # `defaults` carries licence conditions that a published spec should not impose on a
+    # reader, and the originals also inherited unrelated channels (plotly, r) from this
+    # developer's global config.
+    for name, body in text.items():
+        chans = re.search(r"channels:\n((?:\s*-\s*\S+\n)+)", body)
+        listed = re.findall(r"-\s*(\S+)", chans.group(1)) if chans else []
+        record(f"envs:{name} declares only conda-forge and bioconda",
+               listed == ["conda-forge", "bioconda"], f"channels: {listed}")
+
+
 def test_index_coverage(tmp: Path) -> None:
     """D48. The Kraken2 index's question is coverage, not freshness.
 
@@ -4462,6 +4517,7 @@ CASES = {
     "sketch": test_sketch_freshness,
     "markerdb": test_marker_db_freshness,
     "idxcover": test_index_coverage,
+    "envs": test_env_specs,
 }
 
 

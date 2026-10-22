@@ -84,7 +84,12 @@ LOG = logging.getLogger("simulate_benchmark")
 # ---------------------------------------------------------------------------
 
 DEFAULT_DB_ROOT = Path("/media/36tb/db")
-CONDA_BIN = Path("/home/bioinfo/miniconda3/bin")
+# LAST-RESORT place to look for a tool, after $PATH. Overridable, because this used to be
+# one developer's miniconda prefix hardcoded. $CONDA_PREFIX is set inside any activated
+# env, so the common case needs no configuration.
+CONDA_BIN = Path(os.environ.get("BTF_CONDA_BIN")
+                 or (Path(os.environ["CONDA_PREFIX"]) / "bin"
+                     if os.environ.get("CONDA_PREFIX") else "/opt/conda/bin"))
 
 # Headroom required *on top of* the estimated output size. The shared volume runs
 # near capacity and a half-written benchmark batch is worse than a refusal: its

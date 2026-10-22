@@ -1,0 +1,46 @@
+# Reference, masking and marker tooling. One of THREE environments, deliberately split.
+#
+#   conda env create -f envs/btf-refs.yml
+#
+# WHY KRAKEN2 IS NOT IN THIS FILE, AND MUST NOT BE ADDED
+#
+# Installing kraken2 alongside mmseqs2/hmmer/mafft makes the solver resolve
+# **kraken2 2.0.8-beta (2019)**, which has no `--report-minimizer-data` - the flag the
+# whole stage-1 design rests on. An index built with that version works and carries none
+# of the evidence the pipeline scores on, so the failure is silent. It is specific to
+# kraken2's perl/wget dependencies; everything else here resolves current.
+#
+# The environment this file was derived from still has 2.0.8-beta sitting in it for exactly
+# that reason, which is why this is a CURATED spec rather than a `conda env export`: the
+# export would reproduce the trap. kraken2 lives in envs/btf-kraken2.yml, pinned.
+#
+# Versions this pack was built with, for reference (not pinned, so the env stays
+# installable as upstream moves):
+#   ncbi-datasets-cli 18.38.0   minimap2 2.31     seqkit 2.14.0   samtools 1.23
+#   mmseqs2 18.8cc5c            hmmer 3.4         mafft 7.526
+#
+# Note: the per-process conda specs in modules/local/*.nf are SEPARATE from this file and
+# pin samtools to 1.22, because `samtools=1.24` is unsatisfiable alongside a conda-forge
+# python 3.11. That constraint does not apply here - this env has no pinned python - so do
+# not "fix" the difference. `bash scripts/check_conda_specs.sh` validates those specs.
+name: btf-refs
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - ncbi-datasets-cli
+  - minimap2
+  - seqkit
+  - samtools
+  - mmseqs2
+  - hmmer
+  - mafft
+  # kraken2's declared dependency on wget is why this is here. The wget in the original
+  # environment was linked against libunistring.so.2 while the env shipped .so.5, and
+  # removing the package uninstalls kraken2 and bracken with it. Kept explicit so a fresh
+  # install gets a matching pair rather than inheriting that breakage.
+  - libunistring
+  # Dev tooling, used by the checks in docs/verification.md. Drop these two for a
+  # build-only install.
+  - ruff
+  - shellcheck

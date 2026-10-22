@@ -170,9 +170,10 @@ HOST_DIR="${DB_ROOT}/bioThreatFinder/host/${DOMAIN}"
 # --------------------------------------------------------------------------
 # Tool resolution
 # --------------------------------------------------------------------------
-# The shared conda prefix is not necessarily on PATH for non-interactive runs
-# (cron, Nextflow), so look there explicitly before giving up.
-CONDA_BIN="/home/bioinfo/miniconda3/bin"
+# The conda prefix is not necessarily on PATH for non-interactive runs (cron, Nextflow),
+# so look there explicitly before giving up. Overridable: this was a hardcoded personal
+# miniconda prefix, and $CONDA_PREFIX covers the common case with no configuration.
+CONDA_BIN="${BTF_CONDA_BIN:-${CONDA_PREFIX:-/opt/conda}/bin}"
 
 resolve_tool() {
     # resolve_tool <name> -> prints absolute path, or returns 1
@@ -184,15 +185,14 @@ resolve_tool() {
 
 MINIMAP2="$(resolve_tool minimap2 || true)"
 if [[ -z "$MINIMAP2" ]]; then
-    # Last resort: the copy bundled with the ONT dorado server. It works, but it
-    # may be an older release than the one the pipeline was validated against,
-    # so say so loudly rather than silently using it.
-    if [[ -x /home/bioinfo/prog/ont-dorado-server/bin/minimap2 ]]; then
-        MINIMAP2=/home/bioinfo/prog/ont-dorado-server/bin/minimap2
-        warn "using minimap2 bundled with ont-dorado-server: ${MINIMAP2}"
-        warn "this may be an old build; prefer: ${CONDA_BIN}/mamba install -c bioconda minimap2"
+    # A vendored copy was accepted here from a hardcoded path on the machine this was
+    # written on. Removed: a minimap2 that may predate the validated release is a worse
+    # outcome than a clear failure. $BTF_MINIMAP2 points at one explicitly.
+    if [[ -n "${BTF_MINIMAP2:-}" && -x "${BTF_MINIMAP2}" ]]; then
+        MINIMAP2="${BTF_MINIMAP2}"
+        warn "using \$BTF_MINIMAP2: ${MINIMAP2}"
     else
-        die "minimap2 not found. Install it, e.g.: ${CONDA_BIN}/mamba install -c bioconda minimap2"
+        die "minimap2 not found. Install it (mamba install -c bioconda minimap2), or set \$BTF_MINIMAP2"
     fi
 fi
 

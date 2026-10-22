@@ -104,8 +104,14 @@ def which(name: str) -> str | None:
     p = shutil.which(name)
     if p:
         return p
-    for cand in (Path("/home/bioinfo/miniconda3/envs/btf-refs/bin") / name,
-                 Path("/home/bioinfo/miniconda3/bin") / name):
+    # After $PATH: an explicit override, then the active conda env. These were two
+    # hardcoded personal miniconda paths; $CONDA_PREFIX covers the normal case.
+    _prefix = os.environ.get("CONDA_PREFIX")
+    for cand in (Path(os.environ["BTF_CONDA_BIN"]) / name
+                 if os.environ.get("BTF_CONDA_BIN") else None,
+                 Path(_prefix) / "bin" / name if _prefix else None):
+        if cand is None:
+            continue
         if cand.exists() and os.access(cand, os.X_OK):
             return str(cand)
     return None

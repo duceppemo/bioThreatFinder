@@ -28,9 +28,34 @@ across human, animal and plant health.
 | [`docs/STATUS.md`](docs/STATUS.md) | Session handoff: what is running, environment traps, unresolved questions. |
 
 ```bash
-python3 tests/test_pipeline.py     # 322 checks; 303 passed / 3 skipped without
+python3 tests/test_pipeline.py     # 371 checks; 352 passed / 3 skipped without
                                    # samtools on PATH, ~30 s, no databases
 ```
+
+## Validation status — read this before using any output
+
+This pipeline is **research software under active development, not a validated assay.**
+The gap is specific and is documented rather than glossed:
+
+- **No threshold in `packs/*/pack.yaml` is a measured operating point.** They are reasoned
+  defaults. Three are explicitly marked PROVISIONAL in the code, and
+  `scripts/check_threshold_coherence.py` reports 75 of 89 taxa carrying a
+  `min_unique_reads` that never binds.
+- **The marker tier addresses real gaps in the published literature, which also means it
+  is unvalidated** and must not be presented as established practice. There is no published
+  framework for vaccine-versus-wild-type calling from metagenomic data, and none for
+  *Y. pestis* / *Y. pseudotuberculosis* or *F. tularensis* subspecies discrimination.
+- **Validation is partial.** Mock communities (ZymoBIOMICS D6300, Illumina and ONT) have
+  run end to end. Still missing: proficiency panels, characterised clinical specimens, a
+  declared no-template control, and any ONT data on R10.4.1 chemistry — the chemistry the
+  ONT identity floor is calibrated for.
+- **There is no CLSI standard for untargeted metagenomic sequencing**, and no accredited
+  mNGS proficiency scheme was found. `docs/validation.md` sets out the route to a
+  defensible result and where the normative gaps are.
+
+[`docs/verification.md`](docs/verification.md) lists what has been checked and, explicitly,
+what has not. [`docs/roadmap.md`](docs/roadmap.md) ranks what is missing by published effect
+size. Read both before drawing a conclusion from a run.
 
 ## Workflow
 
@@ -541,13 +566,20 @@ dangerous:
 ## Quick start
 
 ```bash
-# 0. Tool environments. kraken2 MUST be in its own env - see Requirements.
-mamba create -n btf-refs    -c conda-forge -c bioconda \
-      ncbi-datasets-cli minimap2 seqkit samtools mmseqs2 hmmer mafft
-mamba create -n btf-kraken2 -c conda-forge -c bioconda kraken2=2.17.2 bracken
-# sylph gets its own env too: the sketch must be readable by the version that
-# queries it, and modules/local/detect.nf pins sylph=1.0.0.
-mamba create -n btf-sylph   -c conda-forge -c bioconda sylph=1.0.0
+# 0. Tool environments. THREE of them, and the split is not tidiness: putting
+#    kraken2 beside mmseqs2/hmmer/mafft makes the solver pick kraken2 2.0.8-beta,
+#    which lacks --report-minimizer-data and so builds an index that works while
+#    carrying none of the evidence stage 1 scores on. See Requirements, and the
+#    comments in each file.
+conda env create -f envs/btf-refs.yml
+conda env create -f envs/btf-kraken2.yml
+conda env create -f envs/btf-sylph.yml
+
+# 0b. Where the databases live. Both roots must be set - the pipeline refuses to
+#     start otherwise, naming them. db_root holds large shared read-only resources;
+#     btf_db holds project-owned artifacts and wants the fastest disk you have.
+export BTF_DB_ROOT=/path/to/shared      # or pass --db_root
+export BTF_DB=/path/to/project          # or pass --btf_db
 
 # 1. Pin a taxonomy snapshot, then resolve the watchlist against it.
 #    resolve_watchlist.py refuses a snapshot older than 90 days with
