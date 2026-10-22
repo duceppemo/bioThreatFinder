@@ -4733,3 +4733,106 @@ added to the catalogue and never used is never reported, because nobody launched
 
 Nothing was rebuilt. The shipped database is current, which is why this is a check and not
 a fix; it was measured before it was written, which is the only reason that is assertable.
+
+---
+
+## D48 — The Kraken2 index's question is coverage, not freshness: 19 of 90 watchlist taxa have no node in it, and the bound is what makes that tolerable
+
+D47 closed by saying the bundles' freshness predicate does not transfer to the Kraken2 and
+Metabuli indexes, because their inputs are NCBI library snapshots rather than `packs/`, and
+that the honest question for them is a different one. This answers it for Kraken2, and the
+question turns out not to be about staleness at all:
+
+> For every watchlist taxon, does this index hold a node that could carry its reads?
+
+A taxon absent from the index's pruned taxonomy **can never appear in a Kraken2 report**.
+Nothing errors, the arm runs, `screen_summary.tsv` records it as `ok`, and the row simply
+never exists — the shape D34 found in the masking BEDs and D46 found in the sketch, arriving
+a third time from a different direction.
+
+`pack.yaml` is what makes this pointed rather than a general worry. It sets
+`eukaryote_strategy: kraken2_then_align` and says in as many words to rely on Kraken2 PlusPF
+for parasites and fungi. So for precisely those taxa, this is the arm the pack nominates.
+
+### What was measured
+
+**19 of 90 watchlist taxa have no node in the shipped index** — 16 notifiable, 2 emerging,
+and one `high_consequence`. They are the helminths, several protozoa, and most of the
+dimorphic and opportunistic fungi.
+
+**This is not a build error and not staleness.** It follows from PlusPF's library selection:
+PlusPF carries no helminth library at all, and the absent fungi and protozoa have no genome
+in the RefSeq fungi/protozoa libraries under those taxids. Rebuilding against the same
+libraries will not change a single row, which is why the verdict says so explicitly — a
+reader who treats this as "rebuild it" will spend a day and 123 GB learning nothing.
+
+### Why this is bounded, and why the bound is the load-bearing part
+
+Every one of the 19 **has a reference in the pack and is in the sylph sketch**, and sylph is
+on by default and profiles this pack rather than a distributed database. With
+`combining_rule: any_classifier_or`, any arm may raise a candidate. So stage 1 can still
+reach all 19 through sylph: **one arm is blind, not the stage.**
+
+That bound is the difference between a documented limitation and an undetected hole, so it
+is the part the suite guards most carefully. A taxon with no Kraken2 node *and* no sketched
+reference would be invisible to stage 1 entirely, which is a different and worse finding
+than this one; the check reports that case separately and the test fails if it ever appears.
+
+It also sharpens D46 retroactively. The sketch being stale for 22 days was costly partly
+because, for these 19 taxa, sylph is not a redundant second opinion — it is the only stage-1
+arm that can see them.
+
+### Reading `taxo.k2d` without kraken2, and refusing to guess
+
+The head node has no kraken2 — it lives in the `btf-kraken2` env and is used inside the
+process — so `kraken2-inspect` is unavailable where the question needs answering. That is
+D46's constraint exactly. Unlike a `.syldb`, though, `taxo.k2d` has a documented layout and
+needs no tool: an eight-byte `K2TAXDAT` magic, three `uint64` counts, then one record per
+node of seven `uint64` with the NCBI taxid at field index 5.
+
+**The arithmetic is self-checking and the check refuses rather than guesses.**
+`32 + node_count*56 + name_data_len + rank_data_len` must equal the file size exactly; on
+the shipped index it does, to the byte. This matters more than it looks: a wrong stride does
+not fail, it reads the wrong eight bytes of every record and reports them as taxids with
+full confidence. `--self-test` builds a file whose arithmetic does not add up and asserts
+the reader raises instead of returning a set.
+
+### Two things deliberately not claimed
+
+**The pruned taxonomy is not the snapshot.** `kraken2-build` keeps only nodes spanning
+sequences it loaded: 62,771 nodes against the pinned taxdump's 3,016,439. A check demanding
+equality would report every correct index as broken — D47's count-comparison trap in a new
+place — so the taxdump's node count is not referenced at all, and the suite asserts that
+number appears nowhere in the script.
+
+**A node present is not sequence present.** A node can exist because an ancestor or a
+descendant carried a genome. So an absent taxid *proves* the arm cannot report that taxon,
+while a present one is necessary and not sufficient. The verdict is worded that way, and the
+test pins the wording, because a guard that overstates what it proved is the kind this
+project keeps having to walk back.
+
+### What is pinned
+
+Six checks (`idxcover`) plus `--self-test` in the `selftests` group. Suite **371 passed, 0 failed**. The measured **19 of
+90** is pinned, and the failure message says what to do in **both** directions: more
+uncovered taxa is not automatically a regression and fewer is not automatically a fix, so
+either way the instruction is to re-measure and update this entry rather than to adjust the
+number until the test passes.
+
+### Not done
+
+**Metabuli is unchecked.** It is opt-in and off by default (D15, having changed zero
+findings on every scenario measured), so it carries no weight at present; its namespace is
+already verified by `assertNcbiTaxonomy()`, which is the failure that would matter most.
+
+**Nothing is wired into a run.** This is a check an operator runs, not a launch guard, and
+deliberately: the result cannot change between runs unless the index is rebuilt, so warning
+on every launch would be noise of exactly the kind D46 argued against. The suite is where it
+is enforced.
+
+**The gap itself is not closed**, and closing it is not a database question. Adding a
+helminth library to a Kraken2 build is a different index and a different set of trade-offs;
+the alternative, which `pack.yaml` already half-states, is to treat sylph plus stage-2
+alignment as the intended route for eukaryotes and say so plainly rather than nominating
+PlusPF for organisms it does not contain. That wording in `pack.yaml` is now wrong and is
+left for a decision that can weigh both.

@@ -908,6 +908,14 @@ is still open.
   where it names the three *Salmonella* markers and exits 3. **The Kraken2 and Metabuli
   indexes still have no freshness check** — their inputs are NCBI snapshots rather than
   the pack, so this predicate does not transfer to them unchanged.
+- **19 of 90 watchlist taxa have no node in the Kraken2 index (D48)**, so that arm can never
+  report them — the helminths, several protozoa and most dimorphic fungi. This follows from
+  PlusPF's library selection rather than from staleness, so a rebuild changes nothing.
+  Bounded: all 19 are in the sylph sketch, and with `combining_rule: any_classifier_or`
+  stage 1 still reaches them — one arm is blind, not the stage. Check with
+  `scripts/check_index_coverage.py --pack human` (exit 3 when something is uncovered).
+  Note this makes `pack.yaml`'s `eukaryote_strategy: kraken2_then_align` wording wrong: it
+  nominates PlusPF for organisms it does not contain.
 - ***F. tularensis* vs *F. novicida* cannot currently be discriminated.** Both resolved
   to the same assembly (`GCF_000833355.1`), so the duplicate was dropped from the
   competitive bundle. Needs a curated distinct *F. novicida* assembly. This is the

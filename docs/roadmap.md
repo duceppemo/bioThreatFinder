@@ -21,7 +21,7 @@
    against the pack at launch, plus `scripts/build_sylph_db.sh --check`), and for the
    marker database against `markers.tsv` (D47 — `marker_id` sets and mtimes at launch, all
    four comparisons in `build_marker_db.py --check`, the full check over the shipped
-   database in the suite). **Kraken2 and Metabuli still notice nothing**, and the predicate
+   database in the suite). **Kraken2 is now checked for COVERAGE rather than freshness** (D48 - `scripts/check_index_coverage.py`, which found 19 of 90 watchlist taxa absent from its taxonomy, all 19 reachable through sylph instead); **Metabuli still notices nothing**, and the predicate
    does not transfer to them unchanged: their inputs are NCBI library snapshots and the
    pinned taxdump rather than `packs/`, so the honest question for them is whether the
    baked-in taxonomy still matches the pin and whether every watchlist taxon is

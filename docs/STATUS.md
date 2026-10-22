@@ -230,8 +230,51 @@ and only the record catches the unsketched one.
 
 **What is open, by design:** nothing is scheduled, so a reference added and never used is
 never reported — nobody launched a run. ~~The Kraken2, Metabuli and marker databases have no
-freshness check at all.~~ **The marker database has one now (D47); Kraken2 and Metabuli
-still do not.**
+freshness check at all.~~ **The marker database has one now (D47). Kraken2's own question
+turned out to be coverage rather than freshness and is answered in D48 below. Metabuli is
+still unchecked, and is off by default.**
+
+## The Kraken2 index: 19 of 90 watchlist taxa have no node in it (D48)
+
+Found 2026-10-22 by asking the question D47 said was the right one for this index, whose
+inputs are NCBI library snapshots rather than `packs/`: **not "is it stale" but "can it
+report every watchlist taxon at all".** A taxon with no node in the pruned taxonomy can
+never appear in a Kraken2 report — the arm runs, `screen_summary.tsv` records it `ok`, and
+the row simply never exists.
+
+```bash
+# read-only; exits 0 all covered, 3 at least one cannot be reported, 1 could not tell
+python3 scripts/check_index_coverage.py --pack human
+```
+
+**19 of 90 are absent:** the helminths, several protozoa, and most of the dimorphic and
+opportunistic fungi — 16 notifiable, 2 emerging, 1 high_consequence. This is **not
+staleness and not a build error**: it follows from PlusPF's library selection (no helminth
+library exists in it at all), so *rebuilding against the same libraries changes nothing*.
+Do not spend a day and 123 GB on that.
+
+**Why it is tolerable, and the part that must stay true:** every one of the 19 has a pack
+reference and is in the sylph sketch, and sylph is on by default with
+`combining_rule: any_classifier_or`. So stage 1 still reaches all 19 — **one arm is blind,
+not the stage.** A taxon with no Kraken2 node *and* no sketched reference would be invisible
+to stage 1 entirely; the check reports that separately and the suite fails if it appears.
+
+It also sharpens D46 in hindsight: for these 19, sylph is not a redundant second opinion,
+it is the only stage-1 arm that can see them — so the 22 days the sketch was stale cost more
+for this group than for any other.
+
+**`pack.yaml` is now wrong about this.** It sets `eukaryote_strategy: kraken2_then_align`
+and says to rely on Kraken2 PlusPF for parasites and fungi — nominating an arm that does not
+contain most of them. Left for a decision that can weigh adding a helminth library against
+stating sylph + stage-2 alignment as the intended eukaryote route; see D48.
+
+**`taxo.k2d` is read with no kraken2** (the head node has none — D46's constraint again):
+`K2TAXDAT` magic, three uint64 counts, then 7×uint64 per node with the taxid at field 5.
+`32 + nodes*56 + name_len + rank_len` must equal the file size **to the byte** or the reader
+refuses — a wrong stride does not fail, it reads the wrong 8 bytes of every record and
+reports them as taxids confidently. Two overclaims are blocked by tests: the pruned
+taxonomy (62,771 nodes) is never compared to the pinned taxdump's 3,016,439, and a present
+node is called necessary, not sufficient.
 
 ## The same predicate, third artifact: the marker database vs its catalogue (D47)
 

@@ -147,6 +147,8 @@ def test_selftests(tmp: Path) -> None:
         ("selftest:mask_pack_refs", [sys.executable, SCRIPTS / "mask_pack_refs.py", "--self-test"]),
         ("selftest:measure_reference_span",
          [sys.executable, SCRIPTS / "measure_reference_span.py", "--self-test"]),
+        ("selftest:check_index_coverage",
+         [sys.executable, SCRIPTS / "check_index_coverage.py", "--self-test"]),
     ]:
         p = run(cmd)
         record(name, p.returncode == 0, p.stderr.strip().splitlines()[-1] if p.returncode else "")
@@ -4353,6 +4355,71 @@ def test_marker_db_freshness(tmp: Path) -> None:
            f"{(proc.stdout + proc.stderr).strip()[:400]}")
 
 
+def test_index_coverage(tmp: Path) -> None:
+    """D48. The Kraken2 index's question is coverage, not freshness.
+
+    D47 closed by saying the bundles' predicate does not transfer to this index, because
+    its inputs are NCBI library snapshots rather than `packs/`. The question that does
+    apply: can the index report every watchlist taxon at all? A taxon with no node in its
+    pruned taxonomy can never appear in a Kraken2 report - the arm runs, the summary
+    records it `ok`, and the row simply never exists.
+
+    Measured on the shipped index: **19 of 90** watchlist taxa have no node, and all 19
+    are sketched for sylph, so stage 1 can still raise them through that arm. The number
+    is pinned here so it cannot drift unnoticed in either direction - a rebuild that drops
+    a 20th taxon, or one that recovers some, both have to come past this test.
+    """
+    script = SCRIPTS / "check_index_coverage.py"
+    record("idxcover:the check exists and is read-only",
+           script.exists() and "EXIT_GAP = 3" in script.read_text(encoding="utf-8"))
+
+    text = script.read_text(encoding="utf-8")
+    # THE PRUNED TAXONOMY IS NOT THE SNAPSHOT. kraken2-build keeps only nodes spanning
+    # sequences it loaded, so the shipped index holds ~62.5k taxids against the pinned
+    # taxdump's 3,016,439. A check comparing those two would call every correct index
+    # broken, which is the count-comparison trap of D47 in a new place.
+    record("idxcover:the pruned taxonomy is never compared to the taxdump node count",
+           "3016439" not in text and "3,016,439" not in text,
+           "comparing the pruned taxonomy to the snapshot reports every good index broken")
+    # A node is necessary, not sufficient: it can exist because a relative carried the
+    # genome. The verdict has to say so or it overstates what it proved.
+    record("idxcover:a present node is not claimed to be present sequence",
+           "necessary but not sufficient" in text)
+
+    taxo = pathlib.Path("/media/8tb/bioThreatFinder/kraken2/pluspf/taxo.k2d")
+    watchlist = REPO / "packs" / "human" / "watchlist.resolved.tsv"
+    if not (taxo.exists() and watchlist.exists()):
+        skip("idxcover:the shipped index's watchlist coverage", f"no index at {taxo}")
+        return
+
+    proc = run([sys.executable, "-I", script, "--pack", "human"])
+    out = proc.stdout + proc.stderr
+    record("idxcover:the check runs against the shipped index",
+           proc.returncode in (0, 3), f"exit {proc.returncode}: {out.strip()[:200]}")
+
+    m = re.search(r"(\d+) of (\d+) watchlist taxa have NO node", out)
+    if proc.returncode == 0:
+        record("idxcover:the measured gap is 19 of 90", False,
+               "the index now covers every watchlist taxon - that is an IMPROVEMENT, so "
+               "update this test and D48 rather than reverting whatever caused it")
+    elif not m:
+        record("idxcover:the measured gap is 19 of 90", False,
+               f"could not parse the verdict: {out.strip()[:300]}")
+    else:
+        got, total = int(m.group(1)), int(m.group(2))
+        record("idxcover:the measured gap is 19 of 90",
+               (got, total) == (19, 90),
+               f"index coverage CHANGED: {got} of {total} uncovered, was 19 of 90. "
+               f"Neither direction is automatically a regression - re-measure and update "
+               f"D48 rather than adjusting this number to match")
+        # The bound is what makes the gap tolerable rather than alarming, so it is the
+        # part that must not quietly stop being true.
+        record("idxcover:every uncovered taxon still has another stage-1 arm",
+               "GAP, bounded" in out and "invisible to stage 1 entirely" not in out,
+               "a taxon with NO node and NO sketched reference is invisible to stage 1 - "
+               "that is a different and worse finding than the one D48 recorded")
+
+
 CASES = {
     "selftests": test_selftests,
     "tiering": test_tiering,
@@ -4394,6 +4461,7 @@ CASES = {
     "stale": test_bundle_staleness,
     "sketch": test_sketch_freshness,
     "markerdb": test_marker_db_freshness,
+    "idxcover": test_index_coverage,
 }
 
 
