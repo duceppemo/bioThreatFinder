@@ -64,8 +64,11 @@ screen:
   #
   # Because this path is sketched from refs/ rather than distributed, it goes stale when
   # refs/ grows - which it did, for 22 days, over 16 references including all twelve
-  # Filoviridae (D46). `scripts/build_sylph_db.sh --check` answers whether it still covers
-  # the pack (exit 3 when not), and a run warns on its own if any reference is newer.
+  # Filoviridae (D46). Every build records the genome set it wrote in <db>.genomes.txt, read
+  # back from `sylph inspect`, and a RUN compares that against this pack at launch - the
+  # head node has no sylph, so without that record it could only compare timestamps.
+  # `scripts/build_sylph_db.sh --check` makes the same comparison against the database
+  # itself (exit 3 when stale); --stamp writes the record for a database that predates it.
   sylph_db: "${btf_db}/sylph/human_pack_refs.syldb"
   # Eukaryotic pathogens (parasites, fungi) are poorly served by GTDB; rely on
   # Kraken2 PlusPF plus stage-2 alignment for these.

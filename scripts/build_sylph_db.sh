@@ -51,12 +51,25 @@
 #
 # D45 had already named this predicate for the competitive bundles ("existence is not
 # freshness"); it had not travelled to the sketch. --check is that lesson here: it compares
-# the installed database against the refs directory and exits non-zero when they disagree,
-# so the comparison can be a pre-flight or a cron line instead of someone remembering.
+# the installed database against the refs directory and exits non-zero when they disagree.
+#
+# WHERE THE NOTICE BELONGS, AND WHY THE SIDECAR EXISTS
+# ----------------------------------------------------
+# The only consumer of this sketch is a pipeline run, so a run is where the operator has to
+# be told - not a schedule, which would report staleness to a log on days when nobody was
+# going to use the database anyway. main.nf warns at launch.
+#
+# But a run cannot open a .syldb: sylph lives in the btf-sylph env and is used inside the
+# process, so the head node has no sylph and can only compare timestamps. mtime cannot see
+# a reference added, removed or swapped with every timestamp settled - the state that
+# actually shipped. So every build writes <db>.genomes.txt, the names read back out of
+# `sylph inspect`, and the run makes the exact comparison against that. --stamp writes it
+# for a database that already exists.
 #
 #   scripts/build_sylph_db.sh                      # human pack, default paths
 #   scripts/build_sylph_db.sh --pack human --force # rebuild over an existing index
 #   scripts/build_sylph_db.sh --check              # read-only; is the sketch current?
+#   scripts/build_sylph_db.sh --stamp              # record what the installed db holds
 #   scripts/build_sylph_db.sh --dry-run            # print the plan and the command
 #
 # --check exit codes are distinct, so a caller can tell a verdict from a failure:
@@ -92,6 +105,7 @@ DRY_RUN=0
 FORCE=0
 CHECK_NAMES=1
 CHECK_ONLY=0
+STAMP_ONLY=0
 
 log()  { printf '[%s] %s\n'        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2; }
 die()  { printf '[%s] ERROR: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2; exit 1; }
@@ -108,6 +122,37 @@ inspect_basenames() {
     printf '%s\n' "$1" |
         sed -n 's|^[[:space:]]*- file_name:[[:space:]]*\(.*\)$|\1|p' |
         sed 's|.*/||'
+}
+
+# THE SIDECAR EXISTS SO A RUN CAN ASK THE EXACT QUESTION WITHOUT SYLPH.
+#
+# sylph lives in the btf-sylph env and is used INSIDE the process, so the Nextflow head
+# node cannot read the genome list out of the database. Without a record of what the sketch
+# holds, a run can only compare timestamps - and mtime cannot see a reference added,
+# removed or swapped with every timestamp settled, which is precisely the state that
+# shipped for 22 days.
+#
+# This is D45's sidecar, one artifact over: the names are read back out of `sylph inspect`,
+# so the file records what the database ACTUALLY HOLDS rather than what the build intended
+# to put in it. A sidecar derived from the refs directory would be a claim nobody verified -
+# the exact error this line of work exists to avoid - and it would agree with refs/ by
+# construction, which is the one thing it must be able to disagree with.
+sidecar_path() { printf '%s.genomes.txt\n' "$1"; }
+write_sidecar() {
+    local inspect="$1"
+    local path tmp
+    path="$(sidecar_path "$OUT")"
+    tmp="${path}.tmp.$$"
+    {
+        printf '# genomes held by %s\n' "$(basename "$OUT")"
+        printf '# read back from `sylph inspect`, not from the refs directory\n'
+        printf '# written %s by scripts/build_sylph_db.sh\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        inspect_basenames "$inspect" | sort
+    } > "$tmp"
+    # Atomic, because main.nf reads this during a run: a reader must never see it half
+    # written and conclude the sketch is missing genomes.
+    mv -f "$tmp" "$path"
+    log "wrote $(basename "$path") ($(inspect_basenames "$inspect" | grep -c . || true) genomes)"
 }
 
 # Prints up to eight members of a category and a count of the rest. Eight because a
@@ -138,6 +183,9 @@ Options:
   --force            overwrite an existing database
   --check            compare the installed database against the refs directory and
                      exit 0 fresh / 3 stale / 1 undetermined. Writes nothing.
+  --stamp            record what the installed database holds, read back from
+                     'sylph inspect', so a RUN can make the exact comparison without
+                     sylph. Writes only the sidecar; does not rebuild.
   --dry-run          print the plan and the command, build nothing
   -h, --help
 EOF
@@ -154,6 +202,7 @@ while [[ $# -gt 0 ]]; do
         --no-check-names) CHECK_NAMES=0; shift ;;
         --force)          FORCE=1; shift ;;
         --check)          CHECK_ONLY=1; shift ;;
+        --stamp)          STAMP_ONLY=1; shift ;;
         --dry-run)        DRY_RUN=1; shift ;;
         -h|--help)        usage; exit 0 ;;
         *)                usage; die "unknown argument: $1" ;;
@@ -311,6 +360,39 @@ check_freshness() {
         log "       screen support for a reference stage 2 has nothing to map against."
         show_some "in the sketch, not in refs" "${extra[@]}"
     fi
+    # FOURTH COMPARISON: the sidecar a RUN reads, against the database it describes.
+    # A run cannot open the .syldb, so it trusts this file. A sidecar that disagrees with
+    # the database is therefore worse than none - it would answer the exact question
+    # wrongly and confidently - and the fix is --stamp, not a rebuild.
+    local side
+    side="$(sidecar_path "$OUT")"
+    if [[ ! -e "$side" ]]; then
+        log "NOTE: no $(basename "$side") beside the database, so a RUN can only compare"
+        log "      timestamps and will not see a reference added, removed or swapped with"
+        log "      every mtime settled. Write it from the database: --stamp"
+    else
+        local -a recorded=()
+        while IFS= read -r b; do
+            if [[ -n "$b" && "${b:0:1}" != "#" ]]; then recorded+=("$b"); fi
+        done < "$side"
+        local -A in_rec=()
+        for b in "${recorded[@]}"; do in_rec["$b"]=1; done
+        local -a drift=()
+        for b in "${sketched[@]}"; do
+            if [[ -z "${in_rec[$b]:-}" ]]; then drift+=("$b (in db, not recorded)"); fi
+        done
+        for b in "${recorded[@]}"; do
+            if [[ -z "${in_sketch[$b]:-}" ]]; then drift+=("$b (recorded, not in db)"); fi
+        done
+        if (( ${#drift[@]} > 0 )); then
+            stale=1
+            log "STALE RECORD: $(basename "$side") disagrees with the database it describes."
+            log "              A run reads that file and cannot open the .syldb, so it would"
+            log "              answer the exact question wrongly. Fix with --stamp."
+            show_some "disagreements" "${drift[@]}"
+        fi
+    fi
+
     if [[ "${got_c}" != "$SYLPH_C" || "${got_k}" != "$SYLPH_K" || "${got_ms}" != "$SYLPH_MIN_SPACING" ]]; then
         stale=1
         log "STALE: parameters are c=${got_c:-?} k=${got_k:-?} min-spacing=${got_ms:-?}, but"
@@ -326,6 +408,29 @@ check_freshness() {
     log "         sketched genome has been removed, and the parameters match the query."
     exit 0
 }
+
+# --stamp: record what an ALREADY INSTALLED database holds, without rebuilding it.
+#
+# This is how the shipped sketch got a sidecar. It is legitimate where a stamp derived from
+# the refs manifest would not be (D45 refused exactly that for the bundles): the names are
+# read out of the artifact with `sylph inspect`, so this records a measurement of the
+# database rather than an assumption about it.
+stamp_sidecar() {
+    [[ -e "$OUT" ]] || die "no database at ${OUT}; there is nothing to stamp. Build it first."
+    local inspect
+    inspect="$("$SYLPH" inspect "$OUT" 2>/dev/null || true)"
+    [[ -n "$inspect" ]] || die "'${SYLPH} inspect ${OUT}' produced no output; refusing to
+       write a record of a database that cannot be read."
+    local n
+    n="$(inspect_basenames "$inspect" | grep -c . || true)"
+    (( n > 0 )) || die "${OUT} reports no genome files; refusing to record an empty set."
+    write_sidecar "$inspect"
+    exit 0
+}
+
+if (( STAMP_ONLY == 1 )); then
+    stamp_sidecar       # always exits
+fi
 
 if (( CHECK_ONLY == 1 )); then
     check_freshness     # always exits
@@ -379,6 +484,8 @@ got_n="$(inspect_basenames "$INSPECT" | grep -c . || true)"
 mv -f "${TMP_PREFIX}.syldb" "$OUT"
 trap - EXIT
 
+write_sidecar "$INSPECT"
+
 # ---------------------------------------------------------------------------
 # Provenance
 # ---------------------------------------------------------------------------
@@ -403,6 +510,7 @@ done
     printf 'refs_newest=%s\n' "$(basename "$NEWEST_REF")"
     printf 'refs_newest_mtime=%s\n' "$(mtime "$NEWEST_REF")"
     printf 'freshness_check=scripts/build_sylph_db.sh --pack %s --check\n' "$PACK"
+    printf 'genome_record=%s\n' "$(basename "$(sidecar_path "$OUT")")"
     printf 'sylph=%s\n' "$SYLPH"
     printf 'sylph_version=%s\n' "$SYLPH_VERSION"
     printf 'c=%s\nk=%s\nmin_spacing=%s\n' "$got_c" "$got_k" "$got_ms"

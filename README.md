@@ -883,11 +883,14 @@ is still open.
   additive. The gap it closed is worth remembering: for 22 days an on-by-default arm could
   not raise the twelve `Filoviridae` references, and nothing reported that, because the arm
   ran and produced a usable report. ~~The sketch still has no freshness check.~~ **Checked
-  now (D46):** `scripts/build_sylph_db.sh --check` compares the database's own genome list
-  against the refs directory and exits 3 when they disagree, a run warns when a reference
-  is newer than the sketch, and the suite asserts the shipped sketch against the shipped
-  manifest. What remains open is narrower: **nothing runs the check on a schedule**, so it
-  catches the next addition only when a run, a build or the suite happens to look.
+  now (D46), at launch:** every build records the genome set it wrote in
+  `<db>.genomes.txt`, read back out of `sylph inspect`, and `main.nf` compares that against
+  the pack when the run starts — so an added, removed or swapped reference is named before
+  any sample is screened, with no sylph on the head node. `scripts/build_sylph_db.sh
+  --check` makes the same comparison against the database itself and exits 3 when stale.
+  Deliberately **not** scheduled: the only consumer of the sketch is a run, so a nightly job
+  would report staleness on the days nobody was going to query it. The consequence is
+  honest — a reference added and never used is never reported, because nobody launched.
 - ***F. tularensis* vs *F. novicida* cannot currently be discriminated.** Both resolved
   to the same assembly (`GCF_000833355.1`), so the duplicate was dropped from the
   competitive bundle. Needs a curated distinct *F. novicida* assembly. This is the

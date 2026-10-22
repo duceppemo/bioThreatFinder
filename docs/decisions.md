@@ -4489,11 +4489,12 @@ catch, and whose 3-of-3 recovery was measured on the Kraken2 arm.
   while loading cleanly, so for this verdict that is stale as well. Exit codes are distinct
   — **0 fresh, 3 stale, 1 could not tell** — because a check whose failure is
   indistinguishable from its verdict is the error this whole line of work is about.
-- **`main.nf` `warnIfSketchStale()`**, in the sylph branch, is mtime and the recorded count.
-  It is weaker ON PURPOSE: the head node has no sylph — it lives in `btf-sylph`, used inside
-  the process — so a run cannot read the genome list and must not pretend to. It says what
-  it can see, names the references, and points at `--check`. It warns rather than exits,
-  like the masking guard: the arm is still worth having for the genomes it does cover.
+- **`main.nf` `warnIfSketchStale()`**, in the sylph branch, tells the operator at launch —
+  which is where it matters, and why there is no schedule (below). It compares the recorded
+  genome set against the pack, and reference mtimes against the sketch. Where no record
+  exists it falls back to the build manifest's count and says it could only see timestamps,
+  rather than implying the stronger guarantee. It warns rather than exits, like the masking
+  guard: the arm is still worth having for the genomes it does cover.
 
 Comparison is on **basenames**. The stored `file_name` is an absolute path from build time,
 so comparing paths would call a pack that moved volumes stale in its entirety, and a guard
@@ -4512,26 +4513,72 @@ check refuses any mutating `.unique()` in `main.nf`.
 This was found by extracting the shipped function and running it under Nextflow against the
 real manifest — the kind of defect reading cannot show, because the code looks right.
 
+### Where the notice belongs: a launch, not a schedule
+
+The first answer to "so who runs `--check`?" was a nightly cron entry. That is the wrong
+place, and the reason is worth keeping: **the only consumer of this sketch is a pipeline
+run.** A schedule would report staleness to a log on the days nobody was going to use the
+database, and still tell the operator nothing on the day they launch. A run is the moment
+the answer changes what someone does, so a run is where it is said.
+
+That raised the real obstacle. A run **cannot open a `.syldb`** — sylph lives in the
+`btf-sylph` env and is used inside the process, so the head node has no sylph and can only
+compare timestamps. mtime is blind to exactly the state that shipped: a reference added,
+removed or swapped with every timestamp settled.
+
+So D45's sidecar arrives too. Every build writes `<db>.genomes.txt`, and the names are read
+back out of **`sylph inspect`** rather than taken from the input list: the file records what
+the database *holds*, not what the build intended to put in it. A record derived from the
+refs directory would agree with the refs directory by construction, which is the one thing
+it has to be able to disagree with.
+
+`--stamp` writes that record for a database that already exists, and the shipped sketch was
+stamped this way — 375 genomes, twelve Filoviridae among them. That is legitimate where D45
+refused a retroactive stamp for the bundles, and the difference is the whole principle:
+this one is **read from the artifact**, not inferred from a manifest nobody verified.
+
+A run now says `is STALE` when the record proves it and `may be STALE` when only a timestamp
+suggests it, because overstating a timestamp as proof is how a guard loses its reader. A
+sketch with no record still gets the mtime check and is told it was timestamps-only; the
+absence is reported only when something else is already wrong, since a guard that nags on a
+correct pack is a guard that gets ignored.
+
+`--check` gained a fourth comparison for the same reason: a record that disagrees with the
+database it describes is **worse than no record**, because a run trusts it and cannot look
+inside the `.syldb` to know better.
+
 ### What is pinned
 
-Fourteen checks (`sketch`). The shell check runs against a **stub** `sylph inspect`, so
-every verdict is exercised offline and deterministically rather than only where a 177 MB
-database and the right conda env happen to exist: fresh, never-sketched, newer-than-sketch,
-removed-from-refs, wrong `c`, unreadable (exit 1, not a verdict), absent (exit 3, not an
-error). The pre-flight is asserted to be **called** in the sylph branch, not merely defined.
-And the shipped artifact is checked directly, needing no sylph: no reference newer than the
-sketch, and its recorded `genomes=` equal to the pack's reference count — which makes the
-suite the comparison nobody was performing.
+Nineteen checks (`sketch`), the shell ones against a **stub** `sylph inspect` so every
+verdict is exercised offline and deterministically rather than only where a 177 MB database
+and the right conda env happen to exist: fresh, never-sketched, newer-than-sketch,
+removed-from-refs, wrong `c`, a record disagreeing with its database, unreadable (exit 1,
+not a verdict), absent (exit 3, not an error). A build records the genome set; `--stamp`
+records what the **database** holds rather than what `refs/` holds, asserted by stamping
+from an inspect listing that deliberately differs from the directory.
 
-The automation was verified against the artifact that motivated it: `--check` pointed at the
+The pre-flight is asserted to be **called** in the sylph branch, not merely defined. And the
+builder and the run are asserted to name the **same** record file — if those drift apart
+nothing fails, the builder writes a record nobody reads, and every run quietly falls back to
+the timestamps-only check the record was meant to replace.
+
+Two shipped invariants, needing no sylph: no reference newer than the sketch, and the record
+beside it naming **exactly** the pack's 375 references.
+
+The decisive case was run: with the database newer than every reference, so mtime reports
+current, the record still catches the unsketched one. The naive implementation sees nothing
+there. Verified end to end against the artifact that motivated this — `--check` on the
 retained `human_pack_refs.bak-2026-09-29.syldb` names the 16 missing references and exits 3,
-while the live sketch reports FRESH. It discriminates rather than merely passing.
+and the real pre-flight, extracted and run under Nextflow against the real manifest with
+that sketch's own record, names all 16 at launch.
 
-Suite **336 passed, 0 failed** (317 passed / 3 skipped without `samtools` and a taxdump).
+Suite **341 passed, 0 failed**.
 
 ### Not done
 
-**Nothing runs any of this on a schedule.** The check exists; a run, a build, or the suite
-has to happen for it to fire, so the window between adding a reference and noticing is
-shortened rather than closed. The Kraken2, Metabuli and marker databases still have no
-freshness check at all — the sketch was the easy case, because its inputs are one directory.
+Nothing runs on a schedule **by design** (above). The consequence is honest and worth
+stating: a reference added and never used is never reported, because nobody launched a run.
+That is the correct trade — the sketch only matters when it is queried.
+
+The Kraken2, Metabuli and marker databases still have no freshness check at all. The sketch
+was the easy case: its inputs are one directory, and `sylph inspect` lists what it holds.

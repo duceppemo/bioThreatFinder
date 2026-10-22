@@ -237,10 +237,27 @@ def warnIfPackPartlyMasked(refsManifest, maskedDir, packName) {
 // D45 established the predicate for the competitive bundles - a bundle is rebuilt when its
 // INPUTS changed, not merely when it is absent - and the lesson did not travel here.
 //
-// This is mtime, not content: it compares the refs manifest's own files against the
-// sketch's timestamp, because the head node has no sylph (it lives in the btf-sylph env,
-// used inside the process) and cannot read the genome list out of the database.
-// scripts/build_sylph_db.sh --check does the exact set comparison where sylph is available.
+// A RUN IS WHERE THE OPERATOR HAS TO BE TOLD, so this is deliberately not a schedule: the
+// only consumer of the sketch is a run, and a nightly job would report staleness to a log
+// on the days nobody was going to use the database anyway.
+//
+// Two signals, which is D45's pattern because it is the same problem:
+//
+//   the recorded genome set  EXACT, and the reason <db>.genomes.txt exists at all. The
+//                            head node has no sylph - it lives in the btf-sylph env, used
+//                            inside the process - so a run cannot read the genome list out
+//                            of the database. The builder records it from `sylph inspect`
+//                            at build time and the run compares against that, which sees a
+//                            reference added, removed or swapped with every mtime settled.
+//                            That is the state that actually shipped, and mtime is blind
+//                            to it.
+//   mtime                    catches content rewritten under a name the record knows.
+//
+// A sketch with no record still gets the mtime check, and the absence is reported only when
+// something else is already wrong - a guard that nags on every run of a correct pack is a
+// guard that gets ignored. `scripts/build_sylph_db.sh --stamp` writes the record for a
+// database that predates it.
+//
 // WARN rather than exit, like the masking guard: the arm is still worth having for the
 // genomes it does cover, and the other arms are unaffected.
 def warnIfSketchStale(refsManifest, sylphDb, packName) {
@@ -257,30 +274,57 @@ def warnIfSketchStale(refsManifest, sylphDb, packName) {
     def iName = header.indexOf('name')
     if (iPath < 0) { return }
 
+    // The genome set the builder read back out of the database, if it recorded one.
+    // Basenames, because that is what sylph reports and what parse_screen.py reads a taxid
+    // out of - and comparing absolute paths would call a pack that moved volumes stale in
+    // its entirety.
+    def sidecar = file("${sylphDb}.genomes.txt")
+    def recorded = null
+    if (sidecar.exists()) {
+        def names = sidecar.readLines()
+            .collect { it.trim() }
+            .findAll { it && !it.startsWith('#') }
+        if (names) { recorded = names as Set }
+    }
+
     // Rows WITH a path, the same denominator the masking guard uses: a watchlist entry
     // whose genome could not be fetched is a different gap, reported as `no_reference`.
     def considered = 0
     def newer = []
+    def notSketched = []
+    def havePath = [] as Set
     lines.drop(1).each { line ->
         def f = line.split('\t') as List
         if (f.size() <= iPath) { return }
         def pth = f[iPath]?.trim()
         if (!pth) { return }
         considered += 1
+        def base = pth.split('/')[-1]
+        havePath << base
+        def label = (iName >= 0 && f.size() > iName ? f[iName] : base)
+        if (recorded != null && !recorded.contains(base)) {
+            notSketched << label
+        }
         def ref = file(pth)
         if (!ref.exists()) { return }
         if (ref.lastModified() > sketchMtime) {
-            newer << (iName >= 0 && f.size() > iName ? f[iName] : pth.split('/')[-1])
+            newer << label
         }
     }
+    // Recorded but no longer in the pack. Not silent like the case above, but wrong in the
+    // other direction: sylph reports filenames, so a hit on one is screen support for a
+    // reference stage 2 has nothing to map against.
+    def notInPack = recorded == null ? [] : (recorded - havePath) as List
 
-    // The count the builder recorded, when it built this sketch. Every pack's sketch shares
-    // one BTF_BUILD_MANIFEST.txt in ${btf_db}/sylph/, so `db_file=` has to be checked:
-    // without it, a second pack's build would make this guard compare the human sketch
-    // against the animal pack's genome count and report a shortfall that is not there.
+    // The count the builder recorded, when it built this sketch. Only consulted when there
+    // is no recorded genome set, which is strictly better: a count can only ever say HOW
+    // MANY are missing, never which. Every pack's sketch shares one BTF_BUILD_MANIFEST.txt
+    // in ${btf_db}/sylph/, so `db_file=` has to be checked: without it, a second pack's
+    // build would make this guard compare the human sketch against the animal pack's
+    // genome count and report a shortfall that is not there.
     def shortBy = 0
     def buildManifest = file("${sylphDb.parent}/BTF_BUILD_MANIFEST.txt")
-    if (buildManifest.exists()) {
+    if (recorded == null && buildManifest.exists()) {
         def ml = buildManifest.readLines()
         def dbLine = ml.find { it.startsWith('db_file=') }
         def gLine = ml.find { it.startsWith('genomes=') }
@@ -292,12 +336,22 @@ def warnIfSketchStale(refsManifest, sylphDb, packName) {
         }
     }
 
-    if (!newer && !shortBy) { return }
+    if (!newer && !shortBy && !notSketched && !notInPack) { return }
 
     def detail = []
+    if (notSketched) {
+        def uniq = notSketched.toUnique()
+        detail << "${notSketched.size()} reference(s) are NOT in the sketch " +
+                  "(${uniq.take(6).join(', ')}${uniq.size() > 6 ? ', ...' : ''})"
+    }
+    if (notInPack) {
+        detail << "${notInPack.size()} sketched genome(s) are no longer in the pack " +
+                  "(${notInPack.take(4).join(', ')}${notInPack.size() > 4 ? ', ...' : ''})"
+    }
     if (shortBy) {
         detail << "its build manifest records ${considered - shortBy} genomes against " +
-                  "${considered} references with a path in the pack"
+                  "${considered} references with a path in the pack, which says how many " +
+                  "are missing but not which"
     }
     if (newer) {
         // toUnique(), NOT unique(): Groovy's no-arg List.unique() deduplicates IN PLACE and
@@ -308,9 +362,17 @@ def warnIfSketchStale(refsManifest, sylphDb, packName) {
         detail << "${newer.size()} reference file(s) are newer than the sketch " +
                   "(${uniq.take(6).join(', ')}${uniq.size() > 6 ? ', ...' : ''})"
     }
-    log.warn "The sylph sketch at ${sylphDb} may be STALE for the ${packName} pack: " +
-             "${detail.join('; ')}. A genome that was never sketched produces no sylph " +
-             "row, which is indistinguishable from finding nothing on it, and " +
+    // "is" when the recorded genome set proves it, "may be" when only mtime suggests it.
+    // Overstating a timestamp as proof is how a guard loses its reader.
+    def verdict = (notSketched || notInPack) ? 'is STALE' : 'may be STALE'
+    def blind = recorded == null
+        ? " This run could compare only TIMESTAMPS: there is no ${sidecar.name} beside the" +
+          " sketch, so a reference added with its mtime settled would be invisible here." +
+          " Write that record from the database with --stamp."
+        : ""
+    log.warn "The sylph sketch at ${sylphDb} ${verdict} for the ${packName} pack: " +
+             "${detail.join('; ')}.${blind} A genome that was never sketched produces no " +
+             "sylph row, which is indistinguishable from finding nothing on it, and " +
              "screen_summary.tsv will still record this arm as ok. Check and fix with:\n" +
              "  scripts/build_sylph_db.sh --pack ${packName} --check   " +
              "(read-only; exits 3 when stale and names the genomes)\n" +

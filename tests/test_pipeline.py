@@ -3868,6 +3868,11 @@ def test_sketch_freshness(tmp: Path) -> None:
     stub.write_text(
         '#!/usr/bin/env bash\n'
         'if [[ "$1" == "--version" ]]; then echo "sylph 1.0.0"; exit 0; fi\n'
+        'if [[ "$1" == "sketch" ]]; then\n'
+        '  while [[ $# -gt 0 ]]; do if [[ "$1" == "-o" ]]; then printf "x" > "$2.syldb"; fi;'
+        ' shift; done\n'
+        '  exit 0\n'
+        'fi\n'
         'if [[ "$1" == "inspect" ]]; then\n'
         '  [[ -s "$BTF_STUB_LIST" ]] || exit 0\n'
         '  printf -- "- database_file: %s\\n  c: %s\\n  k: 31\\n'
@@ -3945,6 +3950,63 @@ def test_sketch_freshness(tmp: Path) -> None:
     record("sketch:an absent database is stale, not an error",
            proc.returncode == 3, f"rc={proc.returncode} {proc.stderr[-300:]}")
 
+    # ---- the recorded genome set, which is what a RUN compares against ----
+    #
+    # The head node has no sylph, so without this record a run can only compare timestamps
+    # - and mtime cannot see a reference added with its mtime settled, the state that
+    # shipped for 22 days.
+    def run_builder(*args, sketched=refs):
+        listing.write_text("".join(f"/built/elsewhere/{p.name}\n" for p in sketched),
+                           encoding="utf-8")
+        return subprocess.run(
+            [sh, str(builder), "--pack", "toy", "--refs-dir", str(d / "refs"),
+             "--out", str(db), "--sylph", str(stub), *args],
+            capture_output=True, text=True,
+            env=dict(os.environ, BTF_STUB_LIST=str(listing)))
+
+    side = pathlib.Path(f"{db}.genomes.txt")
+    side.unlink(missing_ok=True)
+    proc = run_builder("--force")
+    recorded = [ln.strip() for ln in side.read_text(encoding="utf-8").splitlines()
+                if ln.strip() and not ln.startswith("#")] if side.exists() else []
+    record("sketch:a build records the genome set beside the database",
+           recorded == sorted(p.name for p in refs),
+           f"rc={proc.returncode} recorded={recorded}")
+
+    # THE RECORD IS A MEASUREMENT OF THE DATABASE, NOT OF refs/.
+    #
+    # Derived from refs/ it would agree with refs/ by construction - the one thing it must
+    # be able to disagree with - so --stamp reads it back out of `sylph inspect`. D45
+    # refused a retroactive stamp for exactly this reason; this one is legitimate because
+    # it is read from the artifact.
+    side.unlink()
+    proc = run_builder("--stamp", sketched=refs[:2])
+    recorded = [ln.strip() for ln in side.read_text(encoding="utf-8").splitlines()
+                if ln.strip() and not ln.startswith("#")] if side.exists() else []
+    record("sketch:--stamp records what the DATABASE holds, not what refs/ holds",
+           recorded == sorted(p.name for p in refs[:2]),
+           f"rc={proc.returncode} recorded={recorded} - refs/ has "
+           f"{sorted(p.name for p in refs)}")
+
+    # A record that disagrees with the database it describes is worse than none: a run
+    # trusts it and cannot open the .syldb to check.
+    rc, err = check(refs)
+    record("sketch:a record that disagrees with its database is caught",
+           rc == 3 and "STALE RECORD" in err and "3333_Gamma.fna" in err,
+           f"rc={rc} {err[-400:]}")
+
+    # ---- the two halves must agree on the filename ----
+    #
+    # The builder writes this path and main.nf reads it. If they drift apart, nothing
+    # fails: the builder writes a record nobody reads, and every run quietly falls back to
+    # the timestamps-only check it was meant to replace. Both sides derive the name from
+    # the database path, so assert that one suffix.
+    record("sketch:the builder and the run name the same record file",
+           "sidecar_path() { printf '%s.genomes.txt\\n'" in text
+           and '"${sylphDb}.genomes.txt"' in main_text,
+           "the builder's sidecar_path() and main.nf's reader must agree, or the exact "
+           "check silently never happens")
+
     # ---- and the shipped artifact itself ----
     #
     # This is the comparison that did not exist. It needs no sylph, so it runs here on any
@@ -3966,6 +4028,21 @@ def test_sketch_freshness(tmp: Path) -> None:
            not newer,
            f"{len(newer)} newer ({sorted(set(newer))[:6]}) - run "
            f"scripts/build_sylph_db.sh --pack human --check")
+
+    # The exact invariant, with no sylph: the record beside the shipped sketch must name
+    # exactly the pack's references. This is the comparison a run now makes at launch.
+    shipped_side = pathlib.Path(f"{sketch}.genomes.txt")
+    if not shipped_side.exists():
+        skip("sketch:the shipped record names exactly the pack's references",
+             f"no {shipped_side.name}; write it with scripts/build_sylph_db.sh --stamp")
+    else:
+        held = {ln.strip() for ln in shipped_side.read_text(encoding="utf-8").splitlines()
+                if ln.strip() and not ln.startswith("#")}
+        want = {r["path"].rsplit("/", 1)[-1] for r in rows}
+        record("sketch:the shipped record names exactly the pack's references",
+               held == want,
+               f"{len(want - held)} not sketched ({sorted(want - held)[:4]}), "
+               f"{len(held - want)} sketched but not in the pack ({sorted(held - want)[:4]})")
 
     bm = sketch.parent / "BTF_BUILD_MANIFEST.txt"
     fields = {}

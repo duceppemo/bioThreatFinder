@@ -209,21 +209,28 @@ older than the references it claimed to cover.
 
 | where | what it compares | on disagreement |
 |---|---|---|
-| `scripts/build_sylph_db.sh --check` | the database's own genome list (`sylph inspect`) against `refs/`, plus mtimes and `c`/`k`/`min-spacing` | names the genomes, exits **3** (0 fresh, 1 undetermined) |
-| `main.nf` `warnIfSketchStale()`, in the sylph branch | refs-manifest file mtimes against the sketch, and the builder's recorded `genomes=` against the pack's row count | `log.warn` naming the references and both fix commands |
-| `tests/test_pipeline.py -k sketch` | the shipped sketch against the shipped manifest, with no sylph needed | fails the suite |
+| `main.nf` `warnIfSketchStale()`, in the sylph branch — **at launch, which is the point** | the sketch's recorded genome set against the pack, and reference mtimes against the sketch | `log.warn` naming the references, `is STALE` when the record proves it and `may be STALE` when only a timestamp suggests it |
+| `scripts/build_sylph_db.sh --check` | the database's own genome list (`sylph inspect`) against `refs/`, plus mtimes, `c`/`k`/`min-spacing`, and the record against the database | names the genomes, exits **3** (0 fresh, 1 undetermined) |
+| `tests/test_pipeline.py -k sketch` | the shipped sketch and its record against the shipped manifest, with no sylph needed | fails the suite |
 
-The run-time guard is mtime-and-count rather than exact because **the head node has no
-sylph** — it lives in `btf-sylph`, used inside the process — so it cannot read the genome
-list out of the database. It says what it can see and points at `--check` for the rest.
+**Why there is a record and not a cron line.** The only consumer of this sketch is a run, so
+a run is where the operator is told; a schedule would report staleness on days nobody was
+going to query the database. But a run cannot open a `.syldb` — the head node has no sylph,
+it lives in `btf-sylph` and is used inside the process. So every build writes
+`<db>.genomes.txt`, the names read back out of `sylph inspect` (never from `refs/`, which it
+must be able to disagree with), and the run compares against that. `--stamp` writes it for a
+database that already exists; the shipped sketch was stamped that way, 375 genomes.
 
-Verified by pointing `--check` at the real `human_pack_refs.bak-2026-09-29.syldb`: it
-reports the 16 missing references and exits 3, while the live sketch reports FRESH. The
-run-time guard was verified by extracting the shipped function and running it under
-Nextflow against the real manifest.
+Verified by pointing `--check` at the real `human_pack_refs.bak-2026-09-29.syldb`: it reports
+the 16 missing references and exits 3, while the live sketch reports FRESH. The launch guard
+was verified by extracting the shipped function and running it under Nextflow — against the
+real manifest with that old sketch's own record, where it names all 16, and against a
+synthetic pack whose database is **newer than every reference**, so mtime reports current
+and only the record catches the unsketched one.
 
-**What is still open:** nothing runs any of this on a schedule. The check exists; a run, a
-build or the suite has to happen for it to fire.
+**What is open, by design:** nothing is scheduled, so a reference added and never used is
+never reported — nobody launched a run. The Kraken2, Metabuli and marker databases have no
+freshness check at all.
 
 ## A behaviour change to be aware of: unevaluable vaccine and veto checks now cap the tier
 
