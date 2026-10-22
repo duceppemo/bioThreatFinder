@@ -61,6 +61,11 @@ screen:
   # The GTDB sketch at ${db_root}/sylph/gtdb-r220-c200-dbv1.syldb remains useful for
   # asking "what else is in here", but that is Kraken2's job in this pipeline and it
   # would need a GTDB->NCBI mapping to answer the watchlist question.
+  #
+  # Because this path is sketched from refs/ rather than distributed, it goes stale when
+  # refs/ grows - which it did, for 22 days, over 16 references including all twelve
+  # Filoviridae (D46). `scripts/build_sylph_db.sh --check` answers whether it still covers
+  # the pack (exit 3 when not), and a run warns on its own if any reference is newer.
   sylph_db: "${btf_db}/sylph/human_pack_refs.syldb"
   # Eukaryotic pathogens (parasites, fungi) are poorly served by GTDB; rely on
   # Kraken2 PlusPF plus stage-2 alignment for these.

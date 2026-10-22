@@ -4462,3 +4462,76 @@ Suite **322 passed, 0 failed** (303 passed / 3 skipped without `samtools` on PAT
 No pack was rebuilt, so nothing on disk changed. The check only decides what a future
 run does. Applying D43's cover is still the next step, and it will now stamp the nine
 bundles it touches.
+
+## D46 — The sketch gets the bundles' predicate: a database is current when it covers its inputs, not when it opens
+
+D45 settled this for the competitive bundles and the same week proved the lesson had not
+travelled. The sylph sketch was written 2026-09-29 over 359 genomes; the pack reached 375,
+and the sixteen references added after it — all twelve `11266_Filoviridae*`, D42's second
+*L. monocytogenes* assembly, three *Listeria* neighbours — were in no sketch for 22 days.
+
+Nothing failed, and that is the whole problem. `file(sy_db_path, checkIfExists: true)` asks
+the only question Nextflow can ask about a database, and the sketch answered it correctly
+the entire time. The arm ran, the database loaded, and a genome that was never sketched
+produces no row — which is also what finding nothing on it looks like. `screen_summary.tsv`
+recorded sylph as `ok` for every run in the window. The costly case is the Filoviridae group
+entry, whose purpose (D25) is catching a divergent filovirus no species-keyed row will
+catch, and whose 3-of-3 recovery was measured on the Kraken2 arm.
+
+### Two guards, because they can see different things
+
+- **`scripts/build_sylph_db.sh --check`** is exact: it reads the genome list out of the
+  database with `sylph inspect` and compares it to `refs/`. It catches a reference never
+  sketched with every mtime settled (the state that shipped), one whose file is newer than
+  the sketch, and one sketched but no longer in `refs/` — which is not silent but wrong in
+  the other direction, since sylph reports filenames and stage 2 would have nothing to map
+  against. Parameters are checked too: a database at the wrong `-c` or `-k` matches nothing
+  while loading cleanly, so for this verdict that is stale as well. Exit codes are distinct
+  — **0 fresh, 3 stale, 1 could not tell** — because a check whose failure is
+  indistinguishable from its verdict is the error this whole line of work is about.
+- **`main.nf` `warnIfSketchStale()`**, in the sylph branch, is mtime and the recorded count.
+  It is weaker ON PURPOSE: the head node has no sylph — it lives in `btf-sylph`, used inside
+  the process — so a run cannot read the genome list and must not pretend to. It says what
+  it can see, names the references, and points at `--check`. It warns rather than exits,
+  like the masking guard: the arm is still worth having for the genomes it does cover.
+
+Comparison is on **basenames**. The stored `file_name` is an absolute path from build time,
+so comparing paths would call a pack that moved volumes stale in its entirety, and a guard
+that cries wolf is a guard people learn to skip.
+
+### A counting bug found by running the guard rather than reading it
+
+Groovy's no-arg `List.unique()` deduplicates **in place** and returns the same list, so
+`"${xs.size()} ... (${xs.unique().take(6)})"` reports the deduplicated count beside the
+names. Both guards name genomes from the manifest's `name` column, where twelve Filoviridae
+references share one name — so the new guard said "5 reference files" about sixteen, and
+`warnIfPackPartlyMasked()` has had the same defect since D34: the twelve-unmasked-references
+state it exists to report would have printed as "1 of 375". Both now use `toUnique()`, and a
+check refuses any mutating `.unique()` in `main.nf`.
+
+This was found by extracting the shipped function and running it under Nextflow against the
+real manifest — the kind of defect reading cannot show, because the code looks right.
+
+### What is pinned
+
+Fourteen checks (`sketch`). The shell check runs against a **stub** `sylph inspect`, so
+every verdict is exercised offline and deterministically rather than only where a 177 MB
+database and the right conda env happen to exist: fresh, never-sketched, newer-than-sketch,
+removed-from-refs, wrong `c`, unreadable (exit 1, not a verdict), absent (exit 3, not an
+error). The pre-flight is asserted to be **called** in the sylph branch, not merely defined.
+And the shipped artifact is checked directly, needing no sylph: no reference newer than the
+sketch, and its recorded `genomes=` equal to the pack's reference count — which makes the
+suite the comparison nobody was performing.
+
+The automation was verified against the artifact that motivated it: `--check` pointed at the
+retained `human_pack_refs.bak-2026-09-29.syldb` names the 16 missing references and exits 3,
+while the live sketch reports FRESH. It discriminates rather than merely passing.
+
+Suite **336 passed, 0 failed** (317 passed / 3 skipped without `samtools` and a taxdump).
+
+### Not done
+
+**Nothing runs any of this on a schedule.** The check exists; a run, a build, or the suite
+has to happen for it to fire, so the window between adding a reference and noticing is
+shortened rather than closed. The Kraken2, Metabuli and marker databases still have no
+freshness check at all — the sketch was the easy case, because its inputs are one directory.

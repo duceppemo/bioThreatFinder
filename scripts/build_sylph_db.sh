@@ -38,9 +38,29 @@
 # then VERIFIES the written database reports them back, because the cost of a mismatch is
 # again silence rather than an error.
 #
+# EXISTENCE IS NOT FRESHNESS (--check)
+# ------------------------------------
+# A sketch is built once and then goes on existing while the pack it describes keeps
+# growing. Nothing noticed: on 2026-10-21 the installed sketch was from 2026-09-29 and held
+# 359 genomes against 375 references, so the sixteen added since - including all twelve
+# Filoviridae, whose whole purpose (D25) is catching a divergent filovirus no species-keyed
+# row will catch - had been invisible to an ON-BY-DEFAULT arm for 22 days. No run failed.
+# screen_summary.tsv recorded sylph as `ok` throughout, because the arm ran, the database
+# loaded, and a genome that was never sketched simply produces no row - which is what a
+# clean negative also looks like.
+#
+# D45 had already named this predicate for the competitive bundles ("existence is not
+# freshness"); it had not travelled to the sketch. --check is that lesson here: it compares
+# the installed database against the refs directory and exits non-zero when they disagree,
+# so the comparison can be a pre-flight or a cron line instead of someone remembering.
+#
 #   scripts/build_sylph_db.sh                      # human pack, default paths
 #   scripts/build_sylph_db.sh --pack human --force # rebuild over an existing index
+#   scripts/build_sylph_db.sh --check              # read-only; is the sketch current?
 #   scripts/build_sylph_db.sh --dry-run            # print the plan and the command
+#
+# --check exit codes are distinct, so a caller can tell a verdict from a failure:
+#   0 fresh    3 stale, rebuild with --force    1 could not tell (no sylph, bad db, ...)
 #
 set -eEuo pipefail
 
@@ -71,12 +91,39 @@ SYLPH_MIN_SPACING=30
 DRY_RUN=0
 FORCE=0
 CHECK_NAMES=1
+CHECK_ONLY=0
 
 log()  { printf '[%s] %s\n'        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2; }
 die()  { printf '[%s] ERROR: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2; exit 1; }
+mtime() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ; }
+
+# One parser for `sylph inspect`, used BOTH to verify a database this script just built and
+# to judge one that is already installed (--check). Two copies of this sed would be two
+# chances for the post-build verification and the freshness check to disagree about what the
+# database says - and the whole point of either is that a parameter mismatch is silent.
+inspect_num() {
+    printf '%s\n' "$1" | sed -n "s/^[[:space:]]*$2:[[:space:]]*\([0-9]\+\).*/\1/p" | head -1
+}
+inspect_basenames() {
+    printf '%s\n' "$1" |
+        sed -n 's|^[[:space:]]*- file_name:[[:space:]]*\(.*\)$|\1|p' |
+        sed 's|.*/||'
+}
+
+# Prints up to eight members of a category and a count of the rest. Eight because a
+# warning nobody can read to the end is a warning nobody reads.
+show_some() {
+    local label="$1"; shift
+    printf '    %s (%s):\n' "$label" "$#" >&2
+    printf '      %s\n' "${@:1:8}" >&2
+    if (( $# > 8 )); then printf '      ... and %s more\n' "$(( $# - 8 ))" >&2; fi
+}
 
 usage() {
-    sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'
+    # Bounded by the `set -` line rather than a line number, which silently truncated the
+    # header as it grew: the range used to stop at 42 and had already swallowed the
+    # --dry-run example.
+    sed -n '2,/^set -/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'
     cat >&2 <<EOF
 
 Options:
@@ -89,6 +136,8 @@ Options:
   --no-check-names   build even if filenames carry no taxid (see above; you are
                      asking for an index whose hits cannot be mapped)
   --force            overwrite an existing database
+  --check            compare the installed database against the refs directory and
+                     exit 0 fresh / 3 stale / 1 undetermined. Writes nothing.
   --dry-run          print the plan and the command, build nothing
   -h, --help
 EOF
@@ -104,6 +153,7 @@ while [[ $# -gt 0 ]]; do
         --sylph)          SYLPH="${2:?}"; shift 2 ;;
         --no-check-names) CHECK_NAMES=0; shift ;;
         --force)          FORCE=1; shift ;;
+        --check)          CHECK_ONLY=1; shift ;;
         --dry-run)        DRY_RUN=1; shift ;;
         -h|--help)        usage; exit 0 ;;
         *)                usage; die "unknown argument: $1" ;;
@@ -170,8 +220,120 @@ log "output      : ${OUT}"
 log "sylph       : ${SYLPH} (${SYLPH_VERSION})"
 log "parameters  : c=${SYLPH_C} k=${SYLPH_K} min-spacing=${SYLPH_MIN_SPACING} (sylph defaults; MUST match 'sylph profile')"
 
+# ---------------------------------------------------------------------------
+# --check: is the installed database a sketch of this pack, AS IT IS NOW?
+# ---------------------------------------------------------------------------
+# Three comparisons, because they fail in three different ways:
+#
+#   missing  a reference the sketch has never seen. The silent one, and the one that
+#            actually happened for 22 days. The arm emits no row for that genome, which
+#            is also what finding nothing looks like.
+#   newer    a reference whose FILE is newer than the sketch. Its name IS in the sketch,
+#            so a set comparison alone calls it present while the sequence sketched is
+#            one the pack no longer carries: a re-download of one accession, a restore
+#            from backup, anything that rewrites a file under a name already known.
+#   extra    a genome in the sketch that is no longer in refs/. sylph reports filenames,
+#            so this one is not silent but wrong in the other direction: screen support
+#            for a reference stage 2 cannot competitively confirm, because it is not
+#            there to map against.
+#
+# Parameters are checked too. A database at the wrong -c or -k matches nothing while
+# loading cleanly, so for the purposes of this verdict that is a stale database as well:
+# the fix is the same rebuild.
+check_freshness() {
+    if [[ ! -e "$OUT" ]]; then
+        log "STALE: no database at ${OUT}"
+        log "verdict: STALE. Build it: scripts/build_sylph_db.sh --pack ${PACK}"
+        exit 3
+    fi
+
+    local inspect
+    inspect="$("$SYLPH" inspect "$OUT" 2>/dev/null || true)"
+    [[ -n "$inspect" ]] || die "'${SYLPH} inspect ${OUT}' produced no output, so freshness
+       cannot be judged. sylph refuses any path not ending in .syldb, .sylsp or .syl2db, so
+       a backup named <name>.syldb.bak-<date> is unreadable BY SYLPH and useless as a
+       rollback; name it <name>.bak-<date>.syldb instead."
+
+    local -a sketched=()
+    local p
+    while IFS= read -r p; do
+        if [[ -n "$p" ]]; then sketched+=("$p"); fi
+    done < <(inspect_basenames "$inspect")
+    (( ${#sketched[@]} > 0 )) || die "${OUT} reports no genome files at all. It is damaged
+       rather than stale; rebuild with --force."
+
+    local got_c got_k got_ms
+    got_c="$(inspect_num  "$inspect" 'c')"
+    got_k="$(inspect_num  "$inspect" 'k')"
+    got_ms="$(inspect_num "$inspect" 'min_spacing_parameter')"
+
+    # Basenames on both sides. The stored file_name is an absolute path from build time, so
+    # comparing paths would call the whole database stale after the pack moved volumes -
+    # and a check that cries wolf is a check people learn to skip.
+    local -A in_sketch=() in_refs=()
+    local b f
+    for b in "${sketched[@]}"; do in_sketch["$b"]=1; done
+
+    local -a missing=() newer=() extra=()
+    for f in "${FASTAS[@]}"; do
+        b="$(basename "$f")"
+        in_refs["$b"]=1
+        if [[ -z "${in_sketch[$b]:-}" ]]; then
+            missing+=("$b")
+        elif [[ "$f" -nt "$OUT" ]]; then
+            newer+=("$b")
+        fi
+    done
+    for b in "${sketched[@]}"; do
+        if [[ -z "${in_refs[$b]:-}" ]]; then extra+=("$b"); fi
+    done
+
+    log "sketch      : ${#sketched[@]} genomes, c=${got_c:-?} k=${got_k:-?} min-spacing=${got_ms:-?}, written $(mtime "$OUT")"
+    log "refs        : ${#FASTAS[@]} FASTA files in ${REFS_DIR}"
+
+    local stale=0
+    if (( ${#missing[@]} > 0 )); then
+        stale=1
+        log "STALE: ${#missing[@]} reference(s) were never sketched. The sylph arm is BLIND"
+        log "       to these genomes and reports nothing for them, which is indistinguishable"
+        log "       from a clean negative in screen_summary.tsv."
+        show_some "not in the sketch" "${missing[@]}"
+    fi
+    if (( ${#newer[@]} > 0 )); then
+        stale=1
+        log "STALE: ${#newer[@]} reference file(s) are NEWER than the sketch. The name is in"
+        log "       the database but the sequence behind it has changed since."
+        show_some "newer than the sketch" "${newer[@]}"
+    fi
+    if (( ${#extra[@]} > 0 )); then
+        stale=1
+        log "STALE: ${#extra[@]} sketched genome(s) are no longer in refs/. A hit on one is"
+        log "       screen support for a reference stage 2 has nothing to map against."
+        show_some "in the sketch, not in refs" "${extra[@]}"
+    fi
+    if [[ "${got_c}" != "$SYLPH_C" || "${got_k}" != "$SYLPH_K" || "${got_ms}" != "$SYLPH_MIN_SPACING" ]]; then
+        stale=1
+        log "STALE: parameters are c=${got_c:-?} k=${got_k:-?} min-spacing=${got_ms:-?}, but"
+        log "       'sylph profile' in modules/local/detect.nf queries at the defaults"
+        log "       c=${SYLPH_C} k=${SYLPH_K} min-spacing=${SYLPH_MIN_SPACING}. A mismatch matches nothing, silently."
+    fi
+
+    if (( stale == 1 )); then
+        log "verdict: STALE. Rebuild: scripts/build_sylph_db.sh --pack ${PACK} --force"
+        exit 3
+    fi
+    log "verdict: FRESH. Every reference is sketched, none is newer than the sketch, no"
+    log "         sketched genome has been removed, and the parameters match the query."
+    exit 0
+}
+
+if (( CHECK_ONLY == 1 )); then
+    check_freshness     # always exits
+fi
+
 if [[ -e "$OUT" ]] && (( FORCE == 0 )); then
-    die "${OUT} exists. Pass --force to rebuild, or --out to write elsewhere."
+    die "${OUT} exists. Pass --force to rebuild, or --out to write elsewhere.
+       To ask whether it is still current rather than replacing it: --check"
 fi
 
 if (( DRY_RUN == 1 )); then
@@ -203,10 +365,10 @@ log "sketching ${#FASTAS[@]} genomes ..."
 # GUARD 3: verify the database we just wrote, before trusting it
 # ---------------------------------------------------------------------------
 INSPECT="$("$SYLPH" inspect "${TMP_PREFIX}.syldb" 2>/dev/null || true)"
-got_c="$(printf '%s\n'  "$INSPECT" | sed -n 's/^[[:space:]]*c:[[:space:]]*\([0-9]\+\).*/\1/p' | head -1)"
-got_k="$(printf '%s\n'  "$INSPECT" | sed -n 's/^[[:space:]]*k:[[:space:]]*\([0-9]\+\).*/\1/p' | head -1)"
-got_ms="$(printf '%s\n' "$INSPECT" | sed -n 's/^[[:space:]]*min_spacing_parameter:[[:space:]]*\([0-9]\+\).*/\1/p' | head -1)"
-got_n="$(printf '%s\n'  "$INSPECT" | grep -c '^[[:space:]]*- file_name:' || true)"
+got_c="$(inspect_num  "$INSPECT" 'c')"
+got_k="$(inspect_num  "$INSPECT" 'k')"
+got_ms="$(inspect_num "$INSPECT" 'min_spacing_parameter')"
+got_n="$(inspect_basenames "$INSPECT" | grep -c . || true)"
 
 [[ -n "$got_c" ]] || die "could not read c from 'sylph inspect'; refusing to install an unverified database."
 (( got_c == SYLPH_C ))   || die "built database reports c=${got_c}, expected ${SYLPH_C}. A database whose c differs from the query sketch matches nothing, silently."
@@ -220,7 +382,17 @@ trap - EXIT
 # ---------------------------------------------------------------------------
 # Provenance
 # ---------------------------------------------------------------------------
+# NOTE: every sketch under ${BTF_DB}/sylph/ shares this one manifest, so building a second
+# pack's sketch overwrites the first pack's provenance. `db_file=` below is what makes that
+# recoverable, and anything reading `genomes=` must check it names the sketch it is judging.
 MANIFEST="$(dirname "$OUT")/BTF_BUILD_MANIFEST.txt"
+# The newest input, recorded so staleness has a watermark that does not need sylph to read:
+# this timestamp against the refs directory's own newest file answers "has the pack moved
+# on since?" with two stat calls.
+NEWEST_REF="${FASTAS[0]}"
+for f in "${FASTAS[@]}"; do
+    if [[ "$f" -nt "$NEWEST_REF" ]]; then NEWEST_REF="$f"; fi
+done
 {
     printf 'tool=sylph\n'
     printf 'built_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -228,6 +400,9 @@ MANIFEST="$(dirname "$OUT")/BTF_BUILD_MANIFEST.txt"
     printf 'pack=%s\n' "$PACK"
     printf 'refs_dir=%s\n' "$REFS_DIR"
     printf 'genomes=%s\n' "${#FASTAS[@]}"
+    printf 'refs_newest=%s\n' "$(basename "$NEWEST_REF")"
+    printf 'refs_newest_mtime=%s\n' "$(mtime "$NEWEST_REF")"
+    printf 'freshness_check=scripts/build_sylph_db.sh --pack %s --check\n' "$PACK"
     printf 'sylph=%s\n' "$SYLPH"
     printf 'sylph_version=%s\n' "$SYLPH_VERSION"
     printf 'c=%s\nk=%s\nmin_spacing=%s\n' "$got_c" "$got_k" "$got_ms"

@@ -205,9 +205,15 @@ def warnIfPackPartlyMasked(refsManifest, maskedDir, packName) {
     }
     if (!missing) { return }
 
-    def shown = missing.unique().take(6).join(', ')
+    // toUnique(), NOT unique(): the no-arg List.unique() deduplicates IN PLACE, so
+    // building `shown` used to shrink `missing` before ${missing.size()} was evaluated -
+    // and these names come from the manifest's `name` column, where twelve Filoviridae
+    // references share one name. The twelve-unmasked-references state this guard exists to
+    // report would have printed as "1 of 375".
+    def uniq = missing.toUnique()
+    def shown = uniq.take(6).join(', ')
     log.warn "${missing.size()} of ${considered} references in the ${packName} " +
-             "pack have NO masking result (${shown}${missing.unique().size() > 6 ? ', ...' : ''}). " +
+             "pack have NO masking result (${shown}${uniq.size() > 6 ? ', ...' : ''}). " +
              "A reference that was never examined is NOT a clean one: coverage_stats " +
              "loads every BED into one contig map, so a contig that appears in no BED " +
              "is indistinguishable there from a contig with nothing to mask. Findings " +
@@ -215,6 +221,101 @@ def warnIfPackPartlyMasked(refsManifest, maskedDir, packName) {
              "reads_in_masked_regions. Fix with:\n" +
              "  python3 scripts/mask_pack_refs.py --pack ${packName} --dry-run   " +
              "(read-only; lists them and exits 1)"
+}
+
+// A SKETCH THAT EXISTS IS NOT A SKETCH OF THIS PACK.
+//
+// `file(sy_db_path, checkIfExists: true)` asks the only question Nextflow can ask about a
+// database - is it there - and the sylph sketch spent 22 days answering it correctly while
+// being wrong. It was written 2026-09-29 over 359 genomes; the pack reached 375, and the
+// sixteen references added after it (all twelve Filoviridae, D42's second L. monocytogenes
+// assembly, three Listeria neighbours) were in no sketch. The arm ran, the database loaded,
+// and those genomes produced no rows - so screen_summary.tsv recorded sylph as `ok` for
+// every run in that window. A reference nothing ever sketched reports exactly like a
+// reference nothing was found on.
+//
+// D45 established the predicate for the competitive bundles - a bundle is rebuilt when its
+// INPUTS changed, not merely when it is absent - and the lesson did not travel here.
+//
+// This is mtime, not content: it compares the refs manifest's own files against the
+// sketch's timestamp, because the head node has no sylph (it lives in the btf-sylph env,
+// used inside the process) and cannot read the genome list out of the database.
+// scripts/build_sylph_db.sh --check does the exact set comparison where sylph is available.
+// WARN rather than exit, like the masking guard: the arm is still worth having for the
+// genomes it does cover, and the other arms are unaffected.
+def warnIfSketchStale(refsManifest, sylphDb, packName) {
+    if (!refsManifest || !refsManifest.exists() || !sylphDb || !sylphDb.exists()) {
+        return
+    }
+    def sketchMtime = sylphDb.lastModified()
+    if (!sketchMtime) { return }
+
+    def lines = refsManifest.readLines()
+    if (lines.size() < 2) { return }
+    def header = lines[0].split('\t') as List
+    def iPath = header.indexOf('path')
+    def iName = header.indexOf('name')
+    if (iPath < 0) { return }
+
+    // Rows WITH a path, the same denominator the masking guard uses: a watchlist entry
+    // whose genome could not be fetched is a different gap, reported as `no_reference`.
+    def considered = 0
+    def newer = []
+    lines.drop(1).each { line ->
+        def f = line.split('\t') as List
+        if (f.size() <= iPath) { return }
+        def pth = f[iPath]?.trim()
+        if (!pth) { return }
+        considered += 1
+        def ref = file(pth)
+        if (!ref.exists()) { return }
+        if (ref.lastModified() > sketchMtime) {
+            newer << (iName >= 0 && f.size() > iName ? f[iName] : pth.split('/')[-1])
+        }
+    }
+
+    // The count the builder recorded, when it built this sketch. Every pack's sketch shares
+    // one BTF_BUILD_MANIFEST.txt in ${btf_db}/sylph/, so `db_file=` has to be checked:
+    // without it, a second pack's build would make this guard compare the human sketch
+    // against the animal pack's genome count and report a shortfall that is not there.
+    def shortBy = 0
+    def buildManifest = file("${sylphDb.parent}/BTF_BUILD_MANIFEST.txt")
+    if (buildManifest.exists()) {
+        def ml = buildManifest.readLines()
+        def dbLine = ml.find { it.startsWith('db_file=') }
+        def gLine = ml.find { it.startsWith('genomes=') }
+        if (dbLine && gLine &&
+            dbLine.split('=', 2)[1].trim() == sylphDb.toString() &&
+            gLine.split('=', 2)[1].trim().isInteger()) {
+            def sketched = gLine.split('=', 2)[1].trim() as Integer
+            if (sketched < considered) { shortBy = considered - sketched }
+        }
+    }
+
+    if (!newer && !shortBy) { return }
+
+    def detail = []
+    if (shortBy) {
+        detail << "its build manifest records ${considered - shortBy} genomes against " +
+                  "${considered} references with a path in the pack"
+    }
+    if (newer) {
+        // toUnique(), NOT unique(): Groovy's no-arg List.unique() deduplicates IN PLACE and
+        // returns the same list, so naming the genomes would silently rewrite the count
+        // reported beside them. Twelve newer Filoviridae references share one `name`, and
+        // this read "1 reference file" until the harness was pointed at the real manifest.
+        def uniq = newer.toUnique()
+        detail << "${newer.size()} reference file(s) are newer than the sketch " +
+                  "(${uniq.take(6).join(', ')}${uniq.size() > 6 ? ', ...' : ''})"
+    }
+    log.warn "The sylph sketch at ${sylphDb} may be STALE for the ${packName} pack: " +
+             "${detail.join('; ')}. A genome that was never sketched produces no sylph " +
+             "row, which is indistinguishable from finding nothing on it, and " +
+             "screen_summary.tsv will still record this arm as ok. Check and fix with:\n" +
+             "  scripts/build_sylph_db.sh --pack ${packName} --check   " +
+             "(read-only; exits 3 when stale and names the genomes)\n" +
+             "  scripts/build_sylph_db.sh --pack ${packName} --force   (rebuild)\n" +
+             "Or pass --skip_sylph to run without this arm rather than with a partial one."
 }
 
 def assertNcbiTaxonomy(dbDir, label) {
@@ -502,7 +603,12 @@ workflow {
     if (SKIP.skip_sylph) {
         ch_sylph = ch_clean.map { meta, _r -> tuple(meta, []) }
     } else {
-        SYLPH_PROFILE(ch_clean, file(sy_db_path, checkIfExists: true))
+        def sy_db = file(sy_db_path, checkIfExists: true)
+        // checkIfExists only asks whether the sketch is THERE - see warnIfSketchStale().
+        warnIfSketchStale(
+            file(pack.confirm.refs_manifest ?: "${pack.confirm.refs_dir}/manifest.tsv"),
+            sy_db, pack.name)
+        SYLPH_PROFILE(ch_clean, sy_db)
         ch_sylph = fillMissing(ch_arm_base, SYLPH_PROFILE.out.profile)
     }
 

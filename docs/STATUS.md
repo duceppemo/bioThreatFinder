@@ -200,13 +200,30 @@ dropped. The old sketch is kept as `human_pack_refs.bak-2026-09-29.syldb`; note 
 `sylph inspect` **refuses a file that does not end in `.syldb`**, so a backup named
 `.syldb.bak-<date>` cannot be read back and is useless as a rollback.
 
-**The general lesson, which is D45's lesson arriving a second time:** `build_pack_refs.py`
-now rebuilds a competitive bundle when its inputs changed rather than when it is missing,
-but the sylph sketch has no such check — it is a single file that exists, so nothing
-notices it is older than the references it claims to cover. **This is still true after the
-rebuild**, so the same 22-day blindness can recur the next time a reference is added. A
-freshness check comparing the sketch against the refs manifest belongs in the builder, or
-in the run's pre-flight beside the masking-completeness check.
+**The general lesson, which was D45's lesson arriving a second time:** `build_pack_refs.py`
+rebuilds a competitive bundle when its inputs changed rather than when it is missing; the
+sylph sketch had no such check — it is a single file that exists, so nothing noticed it was
+older than the references it claimed to cover.
+
+**Closed the same day, as D46**, in the two places that can see different things:
+
+| where | what it compares | on disagreement |
+|---|---|---|
+| `scripts/build_sylph_db.sh --check` | the database's own genome list (`sylph inspect`) against `refs/`, plus mtimes and `c`/`k`/`min-spacing` | names the genomes, exits **3** (0 fresh, 1 undetermined) |
+| `main.nf` `warnIfSketchStale()`, in the sylph branch | refs-manifest file mtimes against the sketch, and the builder's recorded `genomes=` against the pack's row count | `log.warn` naming the references and both fix commands |
+| `tests/test_pipeline.py -k sketch` | the shipped sketch against the shipped manifest, with no sylph needed | fails the suite |
+
+The run-time guard is mtime-and-count rather than exact because **the head node has no
+sylph** — it lives in `btf-sylph`, used inside the process — so it cannot read the genome
+list out of the database. It says what it can see and points at `--check` for the rest.
+
+Verified by pointing `--check` at the real `human_pack_refs.bak-2026-09-29.syldb`: it
+reports the 16 missing references and exits 3, while the live sketch reports FRESH. The
+run-time guard was verified by extracting the shipped function and running it under
+Nextflow against the real manifest.
+
+**What is still open:** nothing runs any of this on a schedule. The check exists; a run, a
+build or the suite has to happen for it to fire.
 
 ## A behaviour change to be aware of: unevaluable vaccine and veto checks now cap the tier
 

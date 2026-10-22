@@ -574,6 +574,9 @@ python3 scripts/build_marker_db.py  --pack human --db-root /media/8tb --taxdump 
 # Takes ~6 s for 375 genomes; --force is required to overwrite an existing sketch.
 conda activate btf-sylph
 bash    scripts/build_sylph_db.sh   --pack human --btf-db /media/8tb/bioThreatFinder --threads 24
+# Ask later whether it is still current rather than remembering to rebuild it (D46).
+# Writes nothing; exits 0 fresh, 3 stale and names the genomes, 1 could not tell.
+bash    scripts/build_sylph_db.sh   --pack human --check
 conda activate btf-kraken2
 bash    scripts/build_kraken2_db.sh --db-root /media/8tb --taxdump "$TAX" --threads 40
 
@@ -879,9 +882,12 @@ is still open.
 - ~~The sylph pack sketch is stale.~~ **Rebuilt 2026-10-21**, 359 → 375 genomes, strictly
   additive. The gap it closed is worth remembering: for 22 days an on-by-default arm could
   not raise the twelve `Filoviridae` references, and nothing reported that, because the arm
-  ran and produced a usable report. **The sketch still has no freshness check** — nothing
-  compares it against the refs manifest, so this can recur the next time
-  `build_pack_refs.py` adds a reference.
+  ran and produced a usable report. ~~The sketch still has no freshness check.~~ **Checked
+  now (D46):** `scripts/build_sylph_db.sh --check` compares the database's own genome list
+  against the refs directory and exits 3 when they disagree, a run warns when a reference
+  is newer than the sketch, and the suite asserts the shipped sketch against the shipped
+  manifest. What remains open is narrower: **nothing runs the check on a schedule**, so it
+  catches the next addition only when a run, a build or the suite happens to look.
 - ***F. tularensis* vs *F. novicida* cannot currently be discriminated.** Both resolved
   to the same assembly (`GCF_000833355.1`), so the duplicate was dropped from the
   competitive bundle. Needs a curated distinct *F. novicida* assembly. This is the

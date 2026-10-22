@@ -3787,6 +3787,205 @@ def test_bundle_staleness(tmp: Path) -> None:
            bpr.index_staleness(d / "absent.mmi", comp) == "missing or empty")
 
 
+def test_sketch_freshness(tmp: Path) -> None:
+    """D46. The sylph sketch was the one artifact nothing compared against its inputs.
+
+    It was written 2026-09-29 over 359 genomes and the pack reached 375, so the sixteen
+    references added after it - all twelve Filoviridae among them - were in no sketch for
+    22 days while `screen_summary.tsv` recorded the arm as `ok` every run. Nothing
+    failed, because a genome that was never sketched produces no row, and that is also
+    what finding nothing on it looks like. D45 had already named this predicate for the
+    competitive bundles; the lesson had not travelled here.
+
+    Two guards, checked here, at the two places that can see different things:
+
+      scripts/build_sylph_db.sh --check   exact. It reads the genome list out of the
+                                          database, so it catches a reference added,
+                                          removed, or swapped with every mtime settled.
+      main.nf warnIfSketchStale()         mtime and the recorded count. The head node has
+                                          no sylph - it lives in the btf-sylph env, used
+                                          inside the process - so a run cannot do the
+                                          exact comparison and says what it can see.
+
+    The shell check runs against a STUB sylph, so the branch logic is exercised offline
+    and deterministically rather than only where a 177 MB database and the right conda
+    env happen to exist.
+    """
+    import os
+    builder = SCRIPTS / "build_sylph_db.sh"
+    text = builder.read_text(encoding="utf-8")
+    record("sketch:the builder has a read-only --check mode",
+           "--check)" in text and "check_freshness" in text)
+    record("sketch:--check has its own exit code, distinct from an error",
+           "exit 3" in text, "stale must be distinguishable from 'could not tell'")
+
+    main_text = (REPO / "main.nf").read_text(encoding="utf-8")
+    record("sketch:the run pre-flight exists",
+           "def warnIfSketchStale(" in main_text)
+    # Called in the sylph branch, not merely defined. A guard nobody calls is a comment.
+    # Through the ELSE branch, where the arm is actually set up: a pattern stopping at the
+    # first `    }` matches only the skip branch and can never see the call.
+    sylph_branch = re.search(r"if \(SKIP\.skip_sylph\) \{.*?\n    \}\n", main_text, re.S)
+    record("sketch:the pre-flight is called where the arm is set up",
+           bool(sylph_branch) and "warnIfSketchStale(" in sylph_branch.group(0),
+           "warnIfSketchStale is defined but not wired into the sylph branch")
+
+    # THE COUNT AND THE NAMES MUST AGREE.
+    #
+    # Groovy's no-arg List.unique() deduplicates IN PLACE and returns the same list, so
+    # `"${xs.size()} ... (${xs.unique().take(6)})"` reports the DEDUPLICATED count beside
+    # the names. Both guards name genomes from the manifest's `name` column, where twelve
+    # Filoviridae references share one name - so each would have said "1 reference" about
+    # the twelve-file state it exists to report. Found by running the real function
+    # against the real manifest, not by reading it.
+    offenders = [f"main.nf:{i}" for i, ln in enumerate(main_text.splitlines(), 1)
+                 if re.search(r"\.unique\(\)", re.sub(r"//.*$", "", ln))]
+    record("sketch:no guard counts a list it deduplicated in place",
+           not offenders, f"mutating .unique() at {offenders} - use toUnique()")
+
+    # ---- the shell check, against a stub sylph ----
+    sh = shutil.which("bash")
+    if not sh:
+        skip("sketch:--check verdicts", "no bash")
+        return
+    d = tmp / "sketchfresh"
+    (d / "refs").mkdir(parents=True, exist_ok=True)
+    (d / "db").mkdir(exist_ok=True)
+    refs = []
+    for taxid, name in ((1111, "Alpha"), (2222, "Beta"), (3333, "Gamma")):
+        p = d / "refs" / f"{taxid}_{name}.fna"
+        p.write_text(">c1\nACGT\n")
+        os.utime(p, (1000.0, 1000.0))
+        refs.append(p)
+    db = d / "db" / "toy.syldb"
+    db.write_bytes(b"not a real sketch")
+    os.utime(db, (2000.0, 2000.0))
+
+    # A stub that answers `--version` and `inspect` the way sylph 1.0.0 does. The genome
+    # list and parameters come from files, so each case below is a different database
+    # without rebuilding anything.
+    stub = d / "sylph_stub.sh"
+    stub.write_text(
+        '#!/usr/bin/env bash\n'
+        'if [[ "$1" == "--version" ]]; then echo "sylph 1.0.0"; exit 0; fi\n'
+        'if [[ "$1" == "inspect" ]]; then\n'
+        '  [[ -s "$BTF_STUB_LIST" ]] || exit 0\n'
+        '  printf -- "- database_file: %s\\n  c: %s\\n  k: 31\\n'
+        '  min_spacing_parameter: 30\\n  genome_files:\\n" "$2" "${BTF_STUB_C:-200}"\n'
+        '  while IFS= read -r f; do printf -- "  - file_name: %s\\n'
+        '    genome_size: 4\\n" "$f"; done < "$BTF_STUB_LIST"\n'
+        '  exit 0\n'
+        'fi\n'
+        'exit 1\n', encoding="utf-8")
+    stub.chmod(0o755)
+    listing = d / "sketched.txt"
+
+    def check(sketched, env_extra=None):
+        listing.write_text("".join(f"/built/elsewhere/{p.name}\n" for p in sketched),
+                           encoding="utf-8")
+        env = dict(os.environ, BTF_STUB_LIST=str(listing))
+        env.update(env_extra or {})
+        proc = subprocess.run(
+            [sh, str(builder), "--pack", "toy", "--refs-dir", str(d / "refs"),
+             "--out", str(db), "--sylph", str(stub), "--check"],
+            capture_output=True, text=True, env=env)
+        return proc.returncode, proc.stderr
+
+    # FRESH, and the stub deliberately reports every genome under /built/elsewhere/: the
+    # stored file_name is an absolute path from build time, so comparing paths rather than
+    # basenames would call a pack that moved volumes stale in its entirety. A guard that
+    # cries wolf is a guard people learn to skip, so that case is the same assertion.
+    rc, err = check(refs)
+    record("sketch:a sketch of the whole pack is FRESH, wherever it was built",
+           rc == 0 and "FRESH" in err, f"rc={rc} {err[-300:]}")
+
+    # The decisive case: the one that actually happened. Names only, all mtimes settled.
+    rc, err = check(refs[:2])
+    record("sketch:a reference that was never sketched is caught",
+           rc == 3 and "3333_Gamma.fna" in err and "BLIND" in err,
+           f"rc={rc} {err[-400:]}")
+
+    os.utime(refs[1], (3000.0, 3000.0))
+    rc, err = check(refs)
+    record("sketch:a reference newer than the sketch is caught by mtime",
+           rc == 3 and "2222_Beta.fna" in err and "NEWER" in err,
+           f"rc={rc} {err[-400:]}")
+    os.utime(refs[1], (1000.0, 1000.0))
+
+    rc, err = check(refs + [d / "refs" / "4444_Delta.fna"])
+    record("sketch:a sketched genome no longer in refs/ is caught",
+           rc == 3 and "4444_Delta.fna" in err and "no longer in refs" in err,
+           f"rc={rc} {err[-400:]}")
+
+    # A database at the wrong -c matches nothing while loading cleanly, so the verdict is
+    # the same: it needs rebuilding.
+    rc, err = check(refs, {"BTF_STUB_C": "100"})
+    record("sketch:a parameter mismatch against 'sylph profile' is stale too",
+           rc == 3 and "c=100" in err, f"rc={rc} {err[-400:]}")
+
+    # Undetermined must not read as a verdict. sylph refuses any name not ending .syldb,
+    # which is how a backup written as <name>.syldb.bak-<date> turned out to be
+    # unreadable by sylph and useless as a rollback.
+    listing.write_text("", encoding="utf-8")
+    proc = subprocess.run(
+        [sh, str(builder), "--pack", "toy", "--refs-dir", str(d / "refs"),
+         "--out", str(db), "--sylph", str(stub), "--check"],
+        capture_output=True, text=True,
+        env=dict(os.environ, BTF_STUB_LIST=str(listing)))
+    record("sketch:a database that cannot be read is an error, not a verdict",
+           proc.returncode == 1 and "FRESH" not in proc.stderr,
+           f"rc={proc.returncode} {proc.stderr[-300:]}")
+
+    gone = d / "db" / "absent.syldb"
+    proc = subprocess.run(
+        [sh, str(builder), "--pack", "toy", "--refs-dir", str(d / "refs"),
+         "--out", str(gone), "--sylph", str(stub), "--check"],
+        capture_output=True, text=True,
+        env=dict(os.environ, BTF_STUB_LIST=str(listing)))
+    record("sketch:an absent database is stale, not an error",
+           proc.returncode == 3, f"rc={proc.returncode} {proc.stderr[-300:]}")
+
+    # ---- and the shipped artifact itself ----
+    #
+    # This is the comparison that did not exist. It needs no sylph, so it runs here on any
+    # machine that has the built pack, which is the whole point: the suite is now the
+    # freshness check nobody was performing.
+    refs_manifest = pathlib.Path(
+        "/media/8tb/bioThreatFinder/packs/human/refs/manifest.tsv")
+    sketch = pathlib.Path("/media/8tb/bioThreatFinder/sylph/human_pack_refs.syldb")
+    if not (refs_manifest.exists() and sketch.exists()):
+        skip("sketch:the shipped sketch is current", f"no built artifacts at {sketch}")
+        return
+    with refs_manifest.open() as fh:
+        rows = [r for r in csv.DictReader(fh, delimiter="\t") if (r.get("path") or "").strip()]
+    sketch_mtime = sketch.stat().st_mtime
+    newer = [r["name"] for r in rows
+             if pathlib.Path(r["path"]).exists()
+             and pathlib.Path(r["path"]).stat().st_mtime > sketch_mtime]
+    record("sketch:no shipped reference is newer than the shipped sketch",
+           not newer,
+           f"{len(newer)} newer ({sorted(set(newer))[:6]}) - run "
+           f"scripts/build_sylph_db.sh --pack human --check")
+
+    bm = sketch.parent / "BTF_BUILD_MANIFEST.txt"
+    fields = {}
+    if bm.exists():
+        for line in bm.read_text(encoding="utf-8").splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                fields[k.strip()] = v.strip()
+    if fields.get("db_file") != str(sketch):
+        # Every pack's sketch shares one manifest in that directory, so a manifest naming
+        # another file says nothing about this one - and must not be read as if it did.
+        skip("sketch:the sketch holds every reference the pack has",
+             f"BTF_BUILD_MANIFEST.txt names {fields.get('db_file')!r}")
+        return
+    record("sketch:the sketch holds every reference the pack has",
+           fields.get("genomes") == str(len(rows)),
+           f"manifest records genomes={fields.get('genomes')} against {len(rows)} "
+           f"references with a path")
+
+
 CASES = {
     "selftests": test_selftests,
     "tiering": test_tiering,
@@ -3826,6 +4025,7 @@ CASES = {
     "refs": test_refs_manifest_integrity,
     "extrarefs": test_extra_refs_cover,
     "stale": test_bundle_staleness,
+    "sketch": test_sketch_freshness,
 }
 
 
