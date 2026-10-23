@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Specimen data, or anything from a real investigation
+    url: https://github.com/duceppemo/bioThreatFinder/blob/main/SECURITY.md
+    about: Do not put reads, sample identifiers or a real findings table in a public issue. This explains how to report it instead.
+  - name: What is and is not verified
+    url: https://github.com/duceppemo/bioThreatFinder/blob/main/docs/verification.md
+    about: Before reporting a wrong result, check whether the behaviour is one that has been measured.

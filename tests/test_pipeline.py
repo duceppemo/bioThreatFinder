@@ -4393,6 +4393,155 @@ def test_marker_db_freshness(tmp: Path) -> None:
            f"{(proc.stdout + proc.stderr).strip()[:400]}")
 
 
+def test_containers(tmp: Path) -> None:
+    """D54. The container profiles declared no image at all until v0.4.0.
+
+    `-profile docker` and `-profile singularity` sat in nextflow.config for months while
+    not one process declared a `container`. A run under them launched tasks with no
+    image: the profile looked supported and was absent, which is the shape this project
+    keeps finding in itself.
+
+    conf/containers.config and envs/process/*.yml are GENERATED from each process's own
+    `conda` directive, because the hand-written version of this file is the one that rots
+    - a pin moves in a module, nobody updates the map, and the two routes run different
+    versions of the same tool. Correct one way, wrong the other, visible only in results.
+    """
+    syncer = SCRIPTS / "sync_container_specs.py"
+    cfg = REPO / "conf" / "containers.config"
+    dockerfile = REPO / "containers" / "Dockerfile"
+    spec_dir = REPO / "envs" / "process"
+
+    for f in (syncer, cfg, dockerfile):
+        record(f"container:{f.name} exists", f.exists(), f"missing {f}")
+    if not all(f.exists() for f in (syncer, cfg, dockerfile)):
+        return
+
+    # THE ANTI-DRIFT CHECK, and the reason the files are generated.
+    proc = run([sys.executable, "-I", syncer, "--check"])
+    record("container:the specs and process map still match modules/local",
+           proc.returncode == 0,
+           f"exit {proc.returncode}: {(proc.stdout + proc.stderr).strip()[:300]}")
+
+    cfg_text = cfg.read_text(encoding="utf-8")
+    nf_cfg = (REPO / "nextflow.config").read_text(encoding="utf-8")
+    df = dockerfile.read_text(encoding="utf-8")
+
+    # `#` IS NOT A COMMENT IN A NEXTFLOW CONFIG. The generator emitted one in its first
+    # version, which would have been a parse error on every containerised run. Caught by
+    # compiling the profile, not by reading the file.
+    record("container:the generated config has no shell-style comments",
+           not any(ln.lstrip().startswith("#") for ln in cfg_text.splitlines()),
+           "a `#` line makes nextflow.config fail to parse under every container profile")
+
+    # Every process gets an image, or is named as deliberately excluded. A process with
+    # neither runs in whatever image the executor defaults to.
+    procs = set(re.findall(r"process\s+(\w+)\s*\{",
+                           "".join((REPO / "modules" / "local" / f).read_text(encoding="utf-8")
+                                   for f in ("detect.nf", "preprocess.nf"))))
+    mapped = set(re.findall(r"withName:\s*'(\w+)'", cfg_text))
+    excluded = set(re.findall(r"//\s*(\w+): no container", cfg_text))
+    record("container:every process has an image or is named as excluded",
+           procs == mapped | excluded,
+           f"unaccounted: {sorted(procs - (mapped | excluded))}")
+    record("container:PAVIAN_REPORT is the only process without an image",
+           excluded == {"PAVIAN_REPORT"},
+           f"excluded: {sorted(excluded)} - Pavian installs from GitHub, so no conda "
+           f"spec can declare it; anything else without an image is an oversight")
+
+    # And it must REFUSE rather than fail inside a container it cannot work in.
+    main_nf = (REPO / "main.nf").read_text(encoding="utf-8")
+    record("container:--pavian_html is refused under a container engine",
+           "params.pavian_html && workflow.containerEngine" in main_nf,
+           "without this it runs in the default image, finds no R, and fails with an "
+           "exit code instead of a reason")
+
+    # The tag is the pipeline version, written in literally. A tag that resolved to an
+    # empty string would pull `image:`, which Docker reads as `:latest` - the one tag
+    # that must never be used here, since it runs whatever was built most recently
+    # against a pipeline pinned to something else.
+    m_version = re.search(r"version\s*=\s*'([^']+)'", nf_cfg)
+    tags = set(re.findall(r"container_prefix\}([\w.-]+):([\w.-]+)\"", cfg_text))
+    tags = {tag for _, tag in tags}
+    record("container:every image tag is the manifest version",
+           bool(m_version) and tags == {m_version.group(1)},
+           f"manifest {m_version.group(1) if m_version else '?'}, tags {sorted(tags)}")
+    record("container:no image is pinned to :latest",
+           ":latest" not in cfg_text and ":latest" not in df)
+
+    # All four engine profiles, or the one the user picked silently has no images.
+    for engine in ("docker", "podman", "singularity", "apptainer"):
+        block = re.search(engine + r"\s*\{(.*?)\n    \}", nf_cfg, re.S)
+        record(f"container:the {engine} profile loads the image map",
+               bool(block) and "conf/containers.config" in block.group(1),
+               "a container profile with no image map runs tasks with no image")
+    conda_block = re.search(r"\n    conda\s*\{(.*?)\n    \}", nf_cfg, re.S)
+    record("container:the conda profile does NOT load the image map",
+           bool(conda_block) and "containers.config" not in conda_block.group(1))
+
+    # One spec per image, and the pins inside it are the module's pins - checked by
+    # --check above; here we only insist the files exist and declare no extra channel.
+    specs = sorted(spec_dir.glob("*.yml")) if spec_dir.is_dir() else []
+    images = {n for n, _ in re.findall(r"container_prefix\}([\w.-]+):([\w.-]+)\"",
+                                       cfg_text)}
+    record("container:one spec file per image", {s.stem for s in specs} == images,
+           f"specs {sorted({s.stem for s in specs})} vs images {sorted(images)}")
+    bad_chan = [s.name for s in specs
+                if re.findall(r"channels:\n((?:\s*-\s*\S+\n)+)", s.read_text(encoding="utf-8"))
+                and re.findall(r"-\s*(\S+)",
+                               re.search(r"channels:\n((?:\s*-\s*\S+\n)+)",
+                                         s.read_text(encoding="utf-8")).group(1))
+                != ["conda-forge", "bioconda"]]
+    record("container:every spec declares only conda-forge and bioconda", not bad_chan,
+           f"{bad_chan} - `defaults` imposes licence conditions on a reader who did not "
+           f"choose it")
+
+    # procps, because Nextflow shells out to `ps` for per-task metrics: without it every
+    # task still runs and the trace reports nothing, which is a quiet degradation rather
+    # than an error.
+    record("container:the image installs procps for Nextflow's task metrics",
+           "procps" in df,
+           "without `ps` the trace file is silently empty")
+    record("container:the image is built from the generated spec",
+           "envs/process/${SPEC}.yml" in df,
+           "building from anything else lets the image and the conda route diverge")
+    record("container:the disclaimer ships inside the image",
+           "DISCLAIMER.md" in df,
+           "whoever runs the container is often not whoever read the README")
+
+    # A WORKFLOW THAT DOES NOT PARSE IS A WORKFLOW THAT NEVER RUNS, silently - GitHub
+    # simply skips it, so a broken build job looks exactly like a passing one. The first
+    # version of containers.yml had an inline python heredoc inside a `run: |` block, and
+    # the `PY` terminator at column 0 closed the YAML block scalar. pyyaml is not a
+    # dependency of this suite, so this checks the specific shape that broke: a non-blank,
+    # non-comment line at column 0 that is not a top-level key.
+    key = re.compile(r"^[A-Za-z_][\w-]*:")
+    for wf_path in sorted((REPO / ".github").rglob("*.yml")):
+        offenders = [n for n, line in enumerate(
+                         wf_path.read_text(encoding="utf-8").splitlines(), 1)
+                     if line and not line[0].isspace()
+                     and not line.startswith("#") and not key.match(line)]
+        record(f"container:{wf_path.name} has no line that breaks a YAML block",
+               not offenders,
+               f"line(s) {offenders[:4]} sit at column 0 without being a top-level key, "
+               f"which ends any block scalar they are inside - GitHub skips the workflow")
+
+    # CI must BUILD and SMOKE TEST on a pull request, before anything can be pushed: an
+    # image that exists but lacks a working copy of the tool fails inside a container,
+    # where the message is an exit code rather than a missing tool.
+    wf = REPO / ".github" / "workflows" / "containers.yml"
+    record("container:CI builds the images", wf.is_file())
+    if wf.is_file():
+        wf_text = wf.read_text(encoding="utf-8")
+        record("container:CI smoke-tests every pinned tool in the image",
+               "Smoke test every pinned tool" in wf_text and "docker run --rm" in wf_text)
+        record("container:CI builds on pull requests without pushing",
+               "pull_request" in wf_text
+               and "if: github.event_name != 'pull_request'" in wf_text,
+               "the recipe must be verified before it can be published")
+        record("container:CI checks the specs are current before building",
+               "sync_container_specs.py --check" in wf_text)
+
+
 def test_install_route(tmp: Path) -> None:
     """D53. A clone has to be able to get the databases, and to know what it got.
 
@@ -4895,6 +5044,7 @@ CASES = {
     "roots": test_no_host_paths,
     "lock": test_refs_lock,
     "install": test_install_route,
+    "container": test_containers,
 }
 
 

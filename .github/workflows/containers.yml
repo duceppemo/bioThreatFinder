@@ -1,0 +1,177 @@
+# Build one image per process spec, and prove each one can actually run its tools.
+#
+# WHY THIS EXISTS. `-profile docker` and `-profile singularity` were declared in
+# nextflow.config for months while NO process declared a container image. The profile
+# looked supported and was not - advertised and absent. Images alone would not fix that:
+# an image that exists but does not contain a working copy of the tool the process calls
+# fails inside a container, where the message is about an exit code rather than about a
+# missing tool. So every build here is followed by a smoke test that runs the pinned tool
+# and compares the version it reports against the pin.
+#
+# ON PULL REQUESTS the images are built and smoke-tested but NOT pushed, so the recipe is
+# verified before it can be published. On a version tag they are pushed to ghcr.io.
+name: containers
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - 'containers/**'
+      - 'envs/process/**'
+      - 'conf/containers.config'
+      - 'modules/local/*.nf'
+      - '.github/workflows/containers.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  specs-are-current:
+    name: the specs still match the modules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      # envs/process/*.yml and conf/containers.config are generated from the `conda`
+      # directives. If a pin moved in a module and nobody regenerated, the conda route
+      # and the container route would run different versions of the same tool - correct
+      # one way, wrong the other, visible only in results.
+      - name: Specs and process map match modules/local
+        run: python3 scripts/sync_container_specs.py --check
+
+  build:
+    name: ${{ matrix.spec }}
+    needs: specs-are-current
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # One entry per file in envs/process/. Kept explicit rather than globbed so that
+        # adding a process whose spec is new fails this job until someone looks at it.
+        spec:
+          - bracken
+          - chopper
+          - fastp
+          - hmmer-seqkit
+          - kraken2
+          - krakenuniq
+          - metabuli
+          - minimap2-python-samtools
+          - minimap2-samtools
+          - mmseqs2-seqkit
+          - python
+          - python-samtools
+          - seqkit
+          - sylph
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the pipeline version
+        id: ver
+        run: |
+          v=$(grep -oP "version\s*=\s*'\K[^']+" nextflow.config | head -1)
+          [ -n "$v" ] || { echo "no manifest version in nextflow.config"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Built and LOADED first, so the smoke test runs against the exact image that would
+      # be pushed rather than against a rebuild of it.
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: containers/Dockerfile
+          build-args: |
+            SPEC=${{ matrix.spec }}
+            VERSION=${{ steps.ver.outputs.version }}
+          load: true
+          tags: biothreatfinder-${{ matrix.spec }}:${{ steps.ver.outputs.version }}
+          cache-from: type=gha,scope=${{ matrix.spec }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.spec }}
+
+      # EVERY PINNED TOOL MUST RUN, AND REPORT THE PINNED VERSION. An image that resolves
+      # but whose tool is absent or a different version is worse than no image: the conda
+      # route would be right and this one quietly wrong. The pins are read out of the spec
+      # file itself, so a new tool is checked without editing this workflow.
+      #
+      # Parsed with sed and not an inline python heredoc: the heredoc version of this step
+      # was INVALID YAML - a `PY` terminator at column 0 closes the block scalar - so the
+      # whole workflow would have been skipped rather than failing visibly. Found by
+      # parsing the file, not by reading it.
+      - name: Smoke test every pinned tool
+        run: |
+          img=biothreatfinder-${{ matrix.spec }}:${{ steps.ver.outputs.version }}
+          spec=envs/process/${{ matrix.spec }}.yml
+          fail=0
+          pins=$(sed -nE 's/^[[:space:]]*-[[:space:]]*([A-Za-z0-9_.-]+::)?([A-Za-z0-9_.-]+)=([^[:space:]#]+).*/\2 \3/p' "$spec")
+          [ -n "$pins" ] || { echo "no pins parsed from $spec"; exit 1; }
+          while read -r pkg ver; do
+            case "$pkg" in
+              python)     cmd="python3 --version" ;;
+              samtools)   cmd="samtools --version" ;;
+              minimap2)   cmd="minimap2 --version" ;;
+              seqkit)     cmd="seqkit version" ;;
+              fastp)      cmd="fastp --version" ;;
+              chopper)    cmd="chopper --version" ;;
+              kraken2)    cmd="kraken2 --version" ;;
+              bracken)    cmd="bracken -v" ;;
+              krakenuniq) cmd="krakenuniq --version" ;;
+              metabuli)   cmd="metabuli" ;;
+              sylph)      cmd="sylph --version" ;;
+              mmseqs2)    cmd="mmseqs version" ;;
+              hmmer)      cmd="hmmsearch -h" ;;
+              *) echo "FAIL: no smoke command known for '$pkg' - add one"; fail=1; continue ;;
+            esac
+            # `bash -c`, NOT `bash -lc`. A LOGIN shell sources the base image's profile
+            # scripts, which reset PATH and drop the env's bin directory - measured here:
+            # `bash -lc "sylph --version"` says "command not found" in an image where
+            # `bash -c` prints 1.0.0. Nextflow runs each task through a non-login
+            # `bash -ue`, so this is both the correct test and the honest one; the login
+            # version would have failed every working image.
+            out=$(docker run --rm "$img" bash -c "$cmd" 2>&1 | head -3 || true)
+            echo "--- $pkg (pinned $ver)"
+            printf '%s\n' "$out"
+            if [ -z "$out" ]; then
+              echo "FAIL: $pkg produced no output - the tool is not in the image"
+              fail=1
+              continue
+            fi
+            # hmmer, mmseqs2, metabuli and bracken do not print a version in a form worth
+            # matching; everything else must name its pin.
+            case "$pkg" in
+              hmmer|mmseqs2|metabuli|bracken) : ;;
+              *) printf '%s' "$out" | grep -qF "${ver%%p*}" \
+                   || { echo "FAIL: $pkg does not report the pinned ${ver}"; fail=1; } ;;
+            esac
+          done <<EOF
+          $pins
+          EOF
+          exit $fail
+
+      - name: Push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: containers/Dockerfile
+          build-args: |
+            SPEC=${{ matrix.spec }}
+            VERSION=${{ steps.ver.outputs.version }}
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/biothreatfinder-${{ matrix.spec }}:${{ steps.ver.outputs.version }}
+          cache-from: type=gha,scope=${{ matrix.spec }}

@@ -92,9 +92,16 @@ Remaining stage-1 work:
     reference, with skani for ANI-based assignment
   * Assembly tier: metaSPAdes / Flye on candidate reads, then confirm on contigs
 
-### 4. Containerisation
-Pinned digests per process, Apptainer on HPC. Required before any result is
-defensible or publishable.
+### DONE - Containerisation (v0.4.0)
+One image per process spec, generated from the same `conda` directives the conda route
+uses, so the two cannot drift (`scripts/sync_container_specs.py --check`). Fourteen images
+rather than one, because a fat image reproduces D49's solver trap. docker, podman,
+singularity and apptainer profiles all load the generated map; CI builds every image on a
+version tag and smoke-tests each pinned tool, and builds without pushing on a pull request.
+Remaining:
+  * the images are tagged with the pipeline version, not pinned by digest. A digest pin
+    needs a registry that holds them, which is the first tagged release
+  * no HPC run has been done yet - Apptainer is wired and unexercised
 
 ### 5. Old priority - vaccine / attenuated-strain discrimination
 For several watchlist organisms the chromosome is NOT the actionable signal, so the

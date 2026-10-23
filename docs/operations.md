@@ -52,7 +52,7 @@ table was run against the shipped databases on 2026-10-22.
 | Masking completeness (D34) | `python3 scripts/mask_pack_refs.py --pack human --dry-run` | 0, or 1 if a reference has no result | does every reference have a masking result |
 | Threshold coherence | `python3 scripts/check_threshold_coherence.py` | report, always 0 | which per-taxon gates can never bind |
 | Conda specs | `bash scripts/check_conda_specs.sh` | 0 or nonzero | does every per-process pin still solve (network, minutes) |
-| The suite | `python3 tests/test_pipeline.py` | 0 or nonzero | 436 checks with samtools on `PATH` and `$BTF_DB` set; 375 pass and 14 skip on a bare clone with neither. No network, ~30 s |
+| The suite | `python3 tests/test_pipeline.py` | 0 or nonzero | 465 checks with samtools on `PATH` and `$BTF_DB` set; 404 pass and 14 skip on a bare clone with neither. No network, ~30 s |
 
 **Why there are this many.** Well over thirty bugs found in this project so far share one
 shape: *produces an empty or degraded result indistinguishable from a clean negative.* A
@@ -182,6 +182,48 @@ The order of the build steps is not arbitrary: the sketch records the genome set
 so one built before the references silently omits them (D46), and masking needs the host
 genome for its host pass (D13).
 
+## Tools: conda, or one image per process
+
+`-profile conda` (or `mamba`) resolves each process's `conda` directive. `-profile docker`,
+`podman`, `singularity` and `apptainer` load `conf/containers.config`, which gives each
+process an image.
+
+**Both routes read the same pins.** `envs/process/*.yml` and `conf/containers.config` are
+**generated** from the `conda` directive of the processes that use them, by
+`scripts/sync_container_specs.py`; `--check` fails the suite when they drift. The
+hand-maintained version of that map is the one that rots — a pin moves in a module, nobody
+updates the map, and the two routes run different versions of the same tool: correct one
+way, wrong the other, visible only in results.
+
+**Fourteen small images, not one big one.** A single image holding everything would
+reproduce the trap D49 measured: kraken2 installed beside mmseqs2/hmmer/mafft resolves to
+2.0.8-beta, which has no `--report-minimizer-data`. Per-spec images also build in parallel
+and a pin change rebuilds one.
+
+| | |
+|---|---|
+| build one | `docker build -f containers/Dockerfile --build-arg SPEC=sylph -t biothreatfinder-sylph:0.4.0 .` |
+| run from local builds | `--container_prefix biothreatfinder-` |
+| run from the registry | the default, `ghcr.io/duceppemo/biothreatfinder-` |
+
+The tag is the manifest version, written in literally, so no profile combination can
+resolve it to `latest`. CI builds all fourteen on a version tag and smoke-tests each
+pinned tool against the version it reports; on a pull request it builds and tests without
+pushing, so the recipe is verified before it can be published.
+
+**`PAVIAN_REPORT` has no image, deliberately.** Pavian and two of its dependencies install
+from GitHub, so no conda spec can declare them; it is off by default and runs in the host
+environment. `--pavian_html` under a container engine is refused at launch rather than
+failing inside an image with no R.
+
+**Two things the local build taught, both worth not rediscovering:** a *login* shell in
+these images loses the environment's `bin` from `PATH` — `bash -lc "sylph --version"` says
+"command not found" where `bash -c` prints `1.0.0`, because the base image's profile
+scripts reset it. Nextflow runs tasks through a non-login `bash -ue`, so the image is
+right and the first draft of the CI smoke test was wrong; it would have failed every
+working image. And `procps` has to be installed, or Nextflow's `ps` call for per-task
+metrics silently writes an empty trace.
+
 ## Database roots: what refuses, and what that buys
 
 Every script that writes or reads a built database derives its paths from `$BTF_DB` and
@@ -219,7 +261,7 @@ investigate.
 | `host/human/` | T2T-CHM13v2.0 + sr and map-ont indexes, 17 GB |
 | `sylph/` | `human_pack_refs.syldb`, 177 MB, **375 genomes** at c=200/k=31/min-spacing=30, rebuilt 2026-10-21 with sylph 1.0.0 and a `BTF_BUILD_MANIFEST.txt`. The 2026-09-29 hand-built sketch (359 genomes) is kept beside it as `human_pack_refs.bak-2026-09-29.syldb` — the `.syldb` suffix is deliberate, `sylph inspect` refuses any other extension. Reproducible since 2026-10-05 via `scripts/build_sylph_db.sh` (6 s at 32 threads) |
 | `packs/human/markers/` | 166 manifest rows, **146 built**, 33 profile HMMs (rebuilt 2026-10-21, D41). 16 can only be UNKNOWN (3 failed, 4 curation_required, 9 motif_todo) and 4 are built on fewer tiers than declared — see the vaccine/veto note below |
-| `kraken2/pluspf/` | **complete** 2026-10-02. `hash.k2d` 123.5 GB, `opts.k2d`, `taxo.k2d`, `seqid2taxid.map`, and `database{100,150,250}mers.kmer_distrib`. k=35, minimizer 31, full-sensitivity (no `--max-db-size`). Built against the pinned 2026-09-29 taxdump, md5-verified. Includes the 5,413 assemblies `kraken2-build` had silently dropped. `--clean` run 2026-10-03: 614 GB → 233 GB. The remaining 125.5 GB is `database.kraken`, a Bracken BUILD intermediate — query-time Bracken reads only the `.kmer_distrib` files (measured: 0.6 s, 7.4 MB RSS). Keep it only to derive an extra read length without re-classifying the library |
+| `kraken2/pluspf/` | **complete** 2026-10-02. `hash.k2d` 123.5 GB, `opts.k2d`, `taxo.k2d`, `seqid2taxid.map`, and `database{100,150,250}mers.kmer_distrib`. k=35, minimizer 31, full-sensitivity (no `--max-db-size`). Built against the pinned 2026-09-29 taxdump, md5-verified. Includes the 5,413 assemblies `kraken2-build` had silently dropped. `--clean` run 2026-10-03: 614 GB → 233 GB, then **144 GB** on 2026-10-23 when `database.kraken` was deleted. That 125.5 GB file was a Bracken BUILD intermediate: query-time Bracken reads only the `.kmer_distrib` files, measured at 0.6 s and 7.4 MB RSS, and 100/150/250 are all built (the default `bracken_readlen` is 150). The cost of having deleted it is that a FOURTH read length now needs `bracken-build` re-run over the library |
 | `krakenuniq/` | not built. Opt-in by design (D2) |
 | `metabuli/refseq` | **built** 2026-10-03, 110 GB, NCBI-namespaced. The arm is opt-in too (`--skip_metabuli` defaults true): measured, it changed zero findings on every scenario run, including the `divergent_*` pair meant to favour it. Kept, not removed, because its untested case — an agent absent from the index — cannot be simulated from a database. See D15 |
 

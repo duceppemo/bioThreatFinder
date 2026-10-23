@@ -1,0 +1,59 @@
+name: Bug report
+description: Something behaved differently from what the docs say
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **No specimen data.** No reads, sample identifiers, case metadata, or a findings
+        table from a real investigation — a public tracker is a public record. See
+        [SECURITY.md](https://github.com/duceppemo/bioThreatFinder/blob/main/SECURITY.md).
+        Reproduce with simulated or public data where you can.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+      description: If the pipeline produced a result you believe is wrong, say which gate or tier you disagree with rather than only the conclusion — `findings.tsv` carries the per-gate evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: The command, and the smallest input that shows it
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Pipeline version
+      description: From `nextflow run . --version`, or the commit.
+    validations:
+      required: true
+  - type: dropdown
+    id: route
+    attributes:
+      label: How are the tools installed?
+      options: [conda, mamba, docker, podman, singularity, apptainer, something else]
+    validations:
+      required: true
+  - type: textarea
+    id: checks
+    attributes:
+      label: What the database checks say
+      description: |
+        Most reports of a missing or empty result come down to a database that does not cover its inputs. Please paste the output of whichever are relevant:
+        ```
+        python3 scripts/build_marker_db.py --pack human --check
+        bash scripts/build_sylph_db.sh --pack human --check
+        python3 scripts/check_index_coverage.py --pack human
+        python3 scripts/mask_pack_refs.py --pack human --dry-run
+        ```
+        `check_index_coverage.py` exits 3 on the human pack by design — 19 of 90 watchlist taxa have no node in PlusPF.
+      render: shell
+  - type: textarea
+    id: suite
+    attributes:
+      label: Does the regression suite pass?
+      description: "`python3 tests/test_pipeline.py` — offline, needs no databases, ~30 s. Paste the final count."
+      render: shell

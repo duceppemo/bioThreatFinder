@@ -5279,3 +5279,109 @@ pasting the two download URLs into `assets/databases.manifest.tsv`, and adding t
 `CITATION.cff` and the README is the last step, and the installer refuses to download until
 it is done. Suite **425 passed** with `$BTF_DB` and samtools (20 new `install` checks),
 **364 passed, 0 failed, 14 skipped** on a bare clone.
+
+---
+
+## D54 — The container profiles declared no image at all, and the fix had to be generated rather than written
+
+**Date:** 2026-10-23
+**Evidence:** measured-here (two images built and smoke-tested locally; three defects found by building and parsing rather than reading)
+**Status:** done. No HPC/Apptainer run yet.
+
+`-profile docker` and `-profile singularity` sat in `nextflow.config` for months, and **not
+one process declared a `container`**. A run under either launched tasks with no image. The
+profile looked supported and was absent — the shape this project keeps finding in itself,
+here in the first thing a new user reaches for, because `-profile docker` is the habit
+every nf-core reader brings.
+
+### Generated, because the hand-written version is the one that rots
+
+The obvious fix is a `container` line per process. The obvious fix drifts: a pin moves in a
+module, nobody updates the map, and the conda route and the container route run different
+versions of the same tool — correct one way, wrong the other, and visible only in results.
+
+So `envs/process/*.yml` and `conf/containers.config` are generated from the `conda`
+directive of the processes that use them, by `scripts/sync_container_specs.py`, whose
+`--check` mode fails the suite on drift. Mutation-tested: moving `sylph=1.0.0` to `1.0.1`
+in `modules/local/detect.nf` fails the check and names the stale file.
+
+### Fourteen images, not one
+
+A single image with everything in it reproduces D49 exactly: kraken2 installed beside
+mmseqs2/hmmer/mafft makes the solver resolve **kraken2 2.0.8-beta (2019)**, which has no
+`--report-minimizer-data`, so the index builds, works, and carries none of the evidence
+stage 1 scores on. Per-spec images also build in parallel, and a pin change rebuilds one.
+
+Biocontainers were the alternative and do not fit: eight of the thirteen specs are a single
+tool, but five processes need two or three together (minimap2+samtools, samtools+python,
+mmseqs2+seqkit, hmmer+seqkit), which needs a *mulled* image whose name is a hash of the
+exact package set — one that exists only if somebody already built that combination.
+Building from our own pins is fewer moving parts and a stronger guarantee.
+
+### Three defects, each found by doing rather than reading
+
+1. **`#` is not a comment in a Nextflow config.** The generator's first version led the
+   generated config with one, which would have been a parse error on every containerised
+   run. Found by compiling the profile.
+2. **The CI workflow was invalid YAML and would never have run.** The smoke-test step used
+   an inline Python heredoc inside a `run: |` block, and the `PY` terminator at column 0
+   closes the YAML block scalar. GitHub skips an unparseable workflow *silently*, so a
+   broken build job looks exactly like a passing one — the same failure shape as the empty
+   profile it was written to fix. Found by parsing the file with pyyaml from an unrelated
+   conda environment, since the suite has no YAML dependency. The suite now checks the
+   specific shape that broke: a non-blank, non-comment line at column 0 that is not a
+   top-level key. Mutation-tested.
+3. **A login shell loses the PATH.** `bash -lc "sylph --version"` reports "command not
+   found" in an image where `bash -c "sylph --version"` prints `1.0.0`: the base image's
+   profile scripts reset `PATH` and drop the environment's `bin`. Nextflow runs each task
+   through a non-login `bash -ue`, so the image was right and **my smoke test was wrong —
+   it would have failed every working image.** A guard that cries wolf on a correct
+   installation gets switched off (D47, D52). Found by building the image on this machine,
+   which was only possible because disk was freed mid-change.
+
+Also: `procps` is installed in every image, because Nextflow shells out to `ps` for
+per-task metrics and without it every task still runs while the trace file is silently
+empty.
+
+### Verified
+
+`sylph` (133 MB) and `minimap2-python-samtools` (962 MB) were built and smoke-tested here.
+Every pinned tool runs and reports its pin — `minimap2 2.31-r1302`, `samtools 1.22.1`,
+`Python 3.11.17`, `sylph 1.0.0` — which also confirms the substring match in the CI check
+is the right comparison, since a pin of `1.22` must accept `1.22.1`. All four engine
+profiles parse, the images resolve under them, and none resolves under `-profile conda`.
+The two local images were deleted afterwards.
+
+The tag is the manifest version, written in literally rather than as a param: a tag that
+resolved to an empty string would pull `image:`, which Docker reads as `:latest` — the one
+tag that must never be used here, because it runs whatever was built most recently against
+a pipeline pinned to something else. `container_prefix` is a prefix and not a registry, so
+`--container_prefix biothreatfinder-` runs locally built images; a registry variable with a
+`/` joined onto it cannot express that case.
+
+### `PAVIAN_REPORT` has no image, on purpose
+
+Pavian and two of its dependencies install from GitHub, so no conda spec can declare them.
+It is off by default and documented as host-only. Under a container engine it would run in
+whatever image the executor defaults to, find no R, and fail with an exit code rather than
+a reason — so `--pavian_html` with any container engine is now refused at launch, naming
+the two ways forward. It is the only process in the generated map marked as excluded, and
+the suite asserts that it is the only one.
+
+### Also in this change
+
+**`-profile test` said what it is.** It is not self-contained and cannot be made so by
+adding a samplesheet: stage 1 needs a classifier database and stage 2 the reference pack,
+60 GB that cannot live in a git repository. It used to be a green run that analysed
+nothing. The empty samplesheet is already a hard error; now a launch-time notice names
+what the profile needs and points at the regression suite as the test that needs nothing.
+The notice lives in `main.nf`, not `conf/test.config`, because Nextflow 26's strict config
+syntax accepts no statements in a config file — which the first version found out.
+
+**`SECURITY.md`, `CONTRIBUTING.md`, issue and PR templates.** `SECURITY.md` leads with the
+thing that actually matters for this tool: specimen reads, sample identifiers and a real
+investigation's findings table must never go into a public issue, because a tracker is a
+public record and metagenomic reads carry host sequence. `CONTRIBUTING.md` states the two
+conventions that are not negotiable — a guard must fail loudly without crying wolf, and
+decisions are recorded with their evidence — and the PR checklist asks for a mutation test
+on any new check.

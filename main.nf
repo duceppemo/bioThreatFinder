@@ -677,6 +677,51 @@ workflow {
         """.stripIndent()
     }
 
+    // -profile test EXERCISES THE WORKFLOW; IT DOES NOT STAND ALONE, and saying so at
+    // launch is the difference between "unconfigured" and "broken". The samplesheet is a
+    // header only and stage 1/stage 2 need databases that cannot live in a git
+    // repository, so this used to be a GREEN RUN THAT ANALYSED NOTHING - an empty result
+    // indistinguishable from a clean negative. The empty samplesheet is a hard error
+    // now; this says what the profile actually needs. A warning and not a refusal,
+    // because someone who HAS the databases uses this profile exactly as intended.
+    if (workflow.profile?.split(',')?.contains('test')) {
+        log.warn """
+        -profile test exercises the workflow, it does not stand alone.
+
+          * tests/data/samplesheet_test.csv is a HEADER ONLY. Pass --input with real
+            reads, or this run stops at the first process that needs data.
+          * It still needs the databases under --btf_db: a classifier index for stage 1
+            and the reference pack for stage 2.
+                scripts/install_databases.sh --route minimal
+          * For a test that needs no databases at all, run the regression suite:
+                python3 tests/test_pipeline.py
+        """.stripIndent()
+    }
+
+    // PAVIAN_REPORT IS THE ONE PROCESS THAT CANNOT BE CONTAINERISED, and it has to say so
+    // before a run rather than after. Pavian and two of its dependencies (sankeyD3,
+    // shinyFileTree) install from GitHub, so no conda directive can declare them and
+    // conf/containers.config deliberately gives this process no image. Under a container
+    // engine it would therefore run in whichever image the executor defaults to, find no
+    // R, and fail with an exit code rather than with the reason. Everything else in
+    // pavian/ is still produced; only the rendered HTML needs R.
+    if (params.pavian_html && workflow.containerEngine) {
+        exit 1, """
+        ERROR: --pavian_html is not available under -profile ${workflow.containerEngine}.
+
+        Pavian installs from GitHub, as do two of its dependencies, so it cannot be
+        declared in a conda spec or built into one of this pipeline's images.
+        PAVIAN_REPORT runs in the HOST environment and nowhere else.
+
+        Either:
+          drop --pavian_html - the per-sample reports under pavian/ are still written,
+          and scripts/pavian_report.R renders the HTML afterwards wherever R lives
+        or:
+          run that step with -profile conda (or no container profile) and
+          --pavian_r_lib pointing at an R library that has pavian installed.
+        """.stripIndent()
+    }
+
     // `--skip_metabuli false` IS A SILENT NO-OP ON THE NEXTFLOW CLI, AND THAT HAS
     // ALREADY COST THIS PROJECT A FALSIFICATION TEST. See lib/BtfBool.groovy for the
     // mechanism and the history. params is read-only at runtime - assigning params[k]

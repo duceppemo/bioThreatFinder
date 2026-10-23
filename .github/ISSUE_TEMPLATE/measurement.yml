@@ -1,0 +1,34 @@
+name: A measurement, or a threshold that should move
+description: You have evidence about accuracy, a limit of detection, or a gate
+labels: [measurement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The most useful kind of report this project can get. **No threshold in
+        `packs/*/pack.yaml` is a measured operating point** — they are reasoned defaults,
+        and three are explicitly PROVISIONAL. Evidence is what moves them.
+  - type: textarea
+    id: claim
+    attributes:
+      label: What you measured, and on what
+      description: Organism, matrix, platform and chemistry, read count, and whether the truth is known. ONT especially — the identity floors are calibrated for R10.4.1 and the only data this project has processed is R9.4.1.
+    validations:
+      required: true
+  - type: textarea
+    id: numbers
+    attributes:
+      label: The numbers
+      description: Per-taxon if you have them. Sensitivity and specificity need a denominator; please give it.
+    validations:
+      required: true
+  - type: input
+    id: data
+    attributes:
+      label: Can the data be shared or cited?
+      description: An accession, a DOI, or "no" — "no" is a fine answer and does not make the report useless.
+  - type: textarea
+    id: decision
+    attributes:
+      label: Which decision in docs/decisions.md does this bear on?
+      description: Optional, but it is where the change would be recorded. D10, D11 and D12 are the open threshold questions.

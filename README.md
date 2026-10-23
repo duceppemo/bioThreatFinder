@@ -15,6 +15,14 @@ across human, animal and plant health.
 
 ---
 
+[![tests](https://github.com/duceppemo/bioThreatFinder/actions/workflows/tests.yml/badge.svg)](https://github.com/duceppemo/bioThreatFinder/actions/workflows/tests.yml)
+[![containers](https://github.com/duceppemo/bioThreatFinder/actions/workflows/containers.yml/badge.svg)](https://github.com/duceppemo/bioThreatFinder/actions/workflows/containers.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+> **Research software, not a validated diagnostic assay.** No threshold here is a measured
+> operating point, and nothing this produces should be used to decide that a sample is
+> safe. Read [`DISCLAIMER.md`](DISCLAIMER.md) before using any output.
+
 ## Documentation
 
 | Document | What it is for |
@@ -25,11 +33,13 @@ across human, animal and plant health.
 | [`docs/benchmarking.md`](docs/benchmarking.md) | Benchmark design, the tool bake-off, and what simulation cannot tell you. |
 | [`docs/validation.md`](docs/validation.md) | The route to a defensible result: normative standards, reference materials, EQA, regulatory position. |
 | [`docs/roadmap.md`](docs/roadmap.md) | What is not built, ranked by published effect size. |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to work on this: the two conventions that are not optional — a guard must fail loudly without crying wolf, and decisions are recorded with their evidence. |
+| [`SECURITY.md`](SECURITY.md) | How to report a problem, and why specimen data must never go in a public issue. |
 | [`docs/operations.md`](docs/operations.md) | Building, rebuilding and verifying the databases: every read-only check in one table, the three tool environments and why they are three, the environment traps, and the open questions. Deployment-specific notes are labelled as such. |
 
 ```bash
-python3 tests/test_pipeline.py     # 436 checks with samtools on PATH and $BTF_DB
-                                   # pointing at built databases; 375 pass and 14 skip
+python3 tests/test_pipeline.py     # 465 checks with samtools on PATH and $BTF_DB
+                                   # pointing at built databases; 404 pass and 14 skip
                                    # on a bare clone with neither. ~30 s, no network
 ```
 
@@ -570,6 +580,8 @@ One script, three routes. It downloads only what cannot be re-created and builds
 so nothing large is taken on trust:
 
 ```bash
+# Tools: conda, or containers - `-profile docker|podman|singularity|apptainer` now
+# declare an image per process, built from the same pins the conda route uses.
 conda env create -f envs/btf-refs.yml      # and btf-kraken2.yml, btf-sylph.yml
 export BTF_DB=/fast/disk/bioThreatFinder   # must end in bioThreatFinder
 export BTF_DB_ROOT=/shared/read-only
