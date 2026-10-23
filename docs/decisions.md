@@ -5385,3 +5385,46 @@ public record and metagenomic reads carry host sequence. `CONTRIBUTING.md` state
 conventions that are not negotiable — a guard must fail loudly without crying wolf, and
 decisions are recorded with their evidence — and the PR checklist asks for a mutation test
 on any new check.
+
+---
+
+## D55 — Going public is the moment the mailmap stops being enough
+
+**Date:** 2026-10-23
+**Evidence:** measured-here (counts before and after)
+**Status:** done
+
+D49 chose a `.mailmap` over rewriting history, and gave the reason: it presents one author
+for `log`, `blame` and the contributor list **without changing a single SHA**, so no clone,
+tag or reference breaks. That was the right call for a private repository, where the only
+cost of the old address being in the commit metadata was cosmetic.
+
+Publishing changes the trade. Once the repository is public, a personal address in 26
+commits is in forks, mirrors, and the commit API, and no later decision takes it back. The
+repository was still private, so rewriting broke nobody's clone — which made this the last
+cheap moment to do it, and the decision was taken deliberately rather than by default.
+
+**What was rewritten**, with `git-filter-repo --mailmap --replace-text`:
+
+| | Before | After |
+|---|---|---|
+| authors | 134 institutional, 26 personal, 2 `Claude` | **160 institutional, 2 `Claude`** |
+| committers | mixed | **162 institutional** |
+| the address in file contents | present in `.mailmap` | **absent everywhere** (`git log -S` finds nothing) |
+
+Claude's two authorships were left as they are: they are accurate, and mapping them to a
+person would misattribute the work.
+
+Both halves were needed. A metadata-only rewrite leaves the address visible in `git log -p`
+wherever the mailmap file itself was committed — the file whose whole purpose was to name
+the old addresses. `--replace-text` therefore ran in the same pass, which rewrote those
+mailmap lines into mappings of the institutional address to itself; the file is now a
+single canonical-name line, which is all it was ever load-bearing for.
+
+A full `--all` bundle was taken first, and the suite was re-run afterwards: 465 passed,
+unchanged, as it must be for a rewrite that touched one file's contents and no code.
+
+**What this costs, stated plainly:** every SHA before 2026-10-23 is gone. Every commit hash
+cited in this decision log is a hash in the pre-rewrite history, including the ones in D49's
+own entry, and `git show` will not find them. That is the price that was accepted, and it is
+why D49's reasoning was correct at the time and superseded rather than wrong.

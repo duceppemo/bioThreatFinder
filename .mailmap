@@ -1,13 +1,12 @@
 # Canonical author identity.
 #
-# git reads this for log, shortlog, blame and the GitHub contributor list, so the history
-# presents one author without rewriting a single commit - no SHA changes, no broken clones
-# or references. Early commits were authored under a personal address and a bare handle;
-# both are mapped to the institutional identity used from 2026-10 onward.
+# Only a display name now. The two addresses this file used to map - a personal one and a
+# GitHub noreply - no longer appear anywhere in this repository: D49 added this mailmap so
+# the history would read as one author WITHOUT rewriting commits, and D55 then rewrote them
+# anyway, because the repository was going public and a personal address in 160 commits is
+# not something a later decision can take back.
 #
 # Format: Canonical Name <canonical@email> <other@email>
-# The first line with no second address sets the canonical NAME for that address.
+# A line with no second address sets the canonical NAME for that address.
 
 Marc-Olivier Duceppe <marc-olivier.duceppe@inspection.gc.ca>
-Marc-Olivier Duceppe <marc-olivier.duceppe@inspection.gc.ca> <marc-olivier.duceppe@inspection.gc.ca>
-Marc-Olivier Duceppe <marc-olivier.duceppe@inspection.gc.ca> <marc-olivier.duceppe@inspection.gc.ca>
