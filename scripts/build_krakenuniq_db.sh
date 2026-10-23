@@ -11,7 +11,7 @@
 # Jellyfish 1.x dependency, 12+ hours).
 #
 # Target path (must match screen.krakenuniq_db in packs/*/pack.yaml):
-#   ${BTF_DB}/krakenuniq/standard          (default BTF_DB=/media/8tb/bioThreatFinder)
+#   ${BTF_DB}/krakenuniq/standard          ($BTF_DB, or --btf-db)
 #
 # Why KrakenUniq and not just Kraken2
 # -----------------------------------
@@ -85,7 +85,11 @@ trap '_btf_on_err $LINENO' ERR
 # Project-owned databases live on the FAST NVMe volume. KrakenUniq classification
 # is dominated by random reads into database.kdb, so the difference between NVMe
 # and spinning disk here is not a nicety.
-BTF_DB="/media/8tb/bioThreatFinder"
+# WHERE THE DATABASES LIVE IS NOT THIS SCRIPT'S TO ASSUME. This was a volume on the
+# machine it was written on. $BTF_DB is the same variable the pipeline reads and refuses to
+# start without; empty means "not determined" and the check below refuses rather than
+# guessing.
+BTF_DB="${BTF_DB:-}"
 
 # Library specs are passed straight to krakenuniq-download, whose grammar is
 #   refseq/DOMAIN[/ASS_LEVEL[/COLUMN=value]*]  |  genbank/...  |  contaminants
@@ -146,7 +150,7 @@ CLEAN=0
 # Existing, current, unpacked NCBI taxdump on the shared READ-ONLY volume.
 # Pinned dated snapshot, NOT the shared /media/36tb/db/taxdump that D8 measured
 # at 201 days stale and decided to stop using.
-TAXDUMP_SRC="/media/8tb/bioThreatFinder/taxdump/2026-09-29"
+TAXDUMP_SRC="${BTF_DB:+$BTF_DB/taxdump/2026-09-29}"
 MAX_TAXDUMP_AGE_DAYS=90
 
 # The conda prefix is not necessarily on PATH for non-interactive runs (cron, Nextflow),
@@ -170,10 +174,10 @@ provide: reads piled on one conserved k-mer are separable from reads spread
 across a genome.
 
 Options:
-  --btf-db DIR         Project-owned database root
-                       (default: /media/8tb/bioThreatFinder)
+  --btf-db DIR         Project-owned database root, the path the pipeline reads
+                       as params.btf_db (default: $BTF_DB; required if unset)
   --taxdump DIR        Unpacked NCBI taxdump to COPY nodes.dmp/names.dmp from
-                       (default: /media/36tb/db/taxdump, read-only and shared)
+                       (default: $BTF_DB/taxdump/2026-09-29, the pinned snapshot)
   --threads N          Threads for download and build (default: 32)
   --libraries "A B C"  Space-separated krakenuniq-download library specs.
                        Grammar: refseq/DOMAIN[/ASS_LEVEL[/COL=value]*],
@@ -239,8 +243,8 @@ the LCA pass is CPU-bound. Run it under nohup, tmux or screen. Every step
 carries a stamp file, so an interrupted run resumes instead of re-downloading
 hundreds of GB.
 
-Nothing under /media/36tb/db is ever written, and the stale 2022 Kraken2
-databases at /media/36tb/db/kraken2/ are never touched.
+Nothing under $BTF_DB_ROOT is ever written, and the stale 2022 Kraken2
+databases at $BTF_DB_ROOT/kraken2/ are never touched.
 EOF
 }
 
@@ -299,6 +303,18 @@ done
 (( MINIMIZER < KMER ))  || die "--minimizer ($MINIMIZER) must be STRICTLY less than --kmer ($KMER)"
 (( MINIMIZER >= 1 ))    || die "--minimizer must be >= 1"
 
+[[ -n "$BTF_DB" ]] || die "--btf-db is not set and \$BTF_DB is not in the environment.
+       \$BTF_DB is where the pipeline reads its databases (nextflow.config refuses to
+       start without it).
+         export BTF_DB=/path/to/project/bioThreatFinder
+       or: scripts/build_krakenuniq_db.sh --btf-db DIR"
+
+# --btf-db may have supplied the root that $BTF_DB did not, so the pinned taxdump is
+# derived AFTER parsing. It must not be left empty: the protected-path loop below
+# compares "$DB_DIR" against "$protected"/*, and an empty entry matches every absolute
+# path - which would refuse every build with a blank resource name.
+TAXDUMP_SRC="${TAXDUMP_SRC:-${BTF_DB}/taxdump/2026-09-29}"
+
 DB_DIR="${BTF_DB}/krakenuniq/standard"
 STAMP_DIR="${DB_DIR}/.build_stamps"
 TAX_DIR="${DB_DIR}/taxonomy"
@@ -313,16 +329,23 @@ case "$DB_DIR" in
 esac
 [[ "$DB_DIR" == "${BTF_DB}/krakenuniq/"* ]] \
     || die "refusing to build at '${DB_DIR}' - it is not under ${BTF_DB}/krakenuniq"
-case "$DB_DIR" in
-    /media/36tb/db/*) die "refusing to write under /media/36tb/db - that volume is shared and read-only for this project" ;;
-esac
-# Never write inside the shared taxdump, and never near the stale 2022 Kraken2
-# databases, whatever --btf-db was set to.
+# NEVER WRITE UNDER THE SHARED READ-ONLY ROOT. That root is $BTF_DB_ROOT - the same
+# variable the pipeline reads - and the four names below are the pre-existing resources
+# other work on a deployment may depend on, the stale 2022 Kraken2 databases among them.
+# These were the literal /media/36tb/db paths of the machine this was written on, which
+# made the guard protect somebody else's nothing while not protecting their real shared
+# volume. Applies whatever --btf-db was set to.
+if [[ -n "${BTF_DB_ROOT:-}" ]]; then
+    case "$DB_DIR" in
+        "${BTF_DB_ROOT}"/*) die "refusing to write under ${BTF_DB_ROOT} - that root is shared and read-only for this project" ;;
+    esac
+fi
 for protected in "$TAXDUMP_SRC" \
-                 "/media/36tb/db/taxdump" \
-                 "/media/36tb/db/kraken2" \
-                 "/media/36tb/db/nt" \
-                 "/media/36tb/db/sylph"; do
+                 ${BTF_DB_ROOT:+"${BTF_DB_ROOT}/taxdump"} \
+                 ${BTF_DB_ROOT:+"${BTF_DB_ROOT}/kraken2"} \
+                 ${BTF_DB_ROOT:+"${BTF_DB_ROOT}/nt"} \
+                 ${BTF_DB_ROOT:+"${BTF_DB_ROOT}/sylph"}; do
+    [[ -n "$protected" ]] || continue
     if [[ "$DB_DIR" == "$protected" || "$DB_DIR" == "$protected"/* ]]; then
         die "refusing to write inside the pre-existing shared resource ${protected}"
     fi
@@ -796,7 +819,7 @@ case "$WORK_ON_DISK" in
 esac
 log "work dir     : ${WORK_DIR:-<inside the database directory>}"
 log "format       : Kraken 1 lineage - a Kraken2 DB CANNOT be reused here"
-log "untouched    : /media/36tb/db/** (shared, read-only for this project)"
+log "untouched    : ${BTF_DB_ROOT:-(no \$BTF_DB_ROOT set)}/** (shared, read-only for this project)"
 log "EXPECT THIS TO TAKE MANY HOURS (commonly 12-30 h). Run under nohup, tmux or screen."
 log "======================================================================="
 

@@ -35,7 +35,7 @@ LoD for the high-consequence watchlist still comes from benchmarks/scenarios/hum
 
 Usage:
   fetch_mock_communities.py --scenarios benchmarks/scenarios/real_mock_communities.yaml \\
-                            --out-dir /media/8tb/bioThreatFinder/real/zymo_v1
+                            --out-dir $BTF_DB/real/zymo_v1
   fetch_mock_communities.py ... --only zymo_even
   fetch_mock_communities.py ... --dry-run
 """

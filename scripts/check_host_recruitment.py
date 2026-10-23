@@ -29,10 +29,10 @@ gives the exact denominator. The floor is still computed and printed, as a cross
 the exact count ever falls below it, something upstream is miscounted.
 
     python3 scripts/check_host_recruitment.py \\
-        --batch /media/8tb/bioThreatFinder/simulated/lod_v1 \\
-        --run   /media/8tb/bioThreatFinder/runs/lod_v2_kraken2 \\
+        --batch $BTF_DB/simulated/lod_v1 \\
+        --run   $BTF_DB/runs/lod_v2_kraken2 \\
         --sample negative_host_only_illumina_r1 --bundle 5811 \\
-        --matrix /media/8tb/bioThreatFinder/benchmarks/recruitment_150bp_key.tsv \\
+        --matrix $BTF_DB/benchmarks/recruitment_150bp_key.tsv \\
         --source chm13v2.0.fa.gz
 """
 from __future__ import annotations

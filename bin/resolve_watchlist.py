@@ -17,7 +17,7 @@ species taxid misses most of the signal.
 Usage
 -----
   resolve_watchlist.py --watchlist packs/human/watchlist.tsv \\
-                       --taxdump /media/36tb/db/taxdump \\
+                       --taxdump $BTF_DB/taxdump/2026-09-29 \\
                        --out packs/human/watchlist.resolved.tsv
 """
 

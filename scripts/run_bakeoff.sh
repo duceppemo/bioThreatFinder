@@ -48,7 +48,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 BATCH=""
-SIMDIR="/media/8tb/bioThreatFinder/simulated"
+# $BTF_DB is the variable the pipeline reads; this was one machine's volume.
+SIMDIR="${BTF_DB:+$BTF_DB/simulated}"
 OUTDIR=""
 PROFILE="conda,workstation"
 PACK="human"
@@ -150,6 +151,9 @@ if [[ "$LIST_ONLY" == 1 ]]; then
 fi
 
 [[ -n "$BATCH" ]] || { usage; die "--batch is required"; }
+
+[[ -n "$SIMDIR" ]] || die "--simdir is not set and \$BTF_DB is not in the environment.
+       export BTF_DB=/path/to/project/bioThreatFinder, or pass --simdir DIR."
 
 BATCH_DIR="${SIMDIR}/${BATCH}"
 SAMPLESHEET="${BATCH_DIR}/samplesheet.csv"

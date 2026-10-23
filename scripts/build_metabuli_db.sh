@@ -4,7 +4,7 @@
 #                        stage 1 a JOINT DNA + AMINO-ACID screen.
 #
 # Target path (must match screen.metabuli_db in packs/*/pack.yaml):
-#   ${BTF_DB}/metabuli/<mode>              (default BTF_DB=/media/8tb/bioThreatFinder)
+#   ${BTF_DB}/metabuli/<mode>              ($BTF_DB, or --btf-db)
 #
 # Why Metabuli, given that Kraken2 is already the primary screen
 # --------------------------------------------------------------
@@ -69,10 +69,14 @@ trap '_btf_on_err $LINENO' ERR
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-BTF_DB="/media/8tb/bioThreatFinder"
+# WHERE THE DATABASES LIVE IS NOT THIS SCRIPT'S TO ASSUME. This was a volume on the
+# machine it was written on. $BTF_DB is the same variable the pipeline reads and refuses to
+# start without; empty means "not determined" and the check below refuses rather than
+# guessing.
+BTF_DB="${BTF_DB:-}"
 # Pinned dated snapshot, NOT the shared /media/36tb/db/taxdump that D8 measured
 # at 201 days stale and decided to stop using.
-TAXDUMP_SRC="/media/8tb/bioThreatFinder/taxdump/2026-09-29"
+TAXDUMP_SRC="${BTF_DB:+$BTF_DB/taxdump/2026-09-29}"
 MAX_TAXDUMP_AGE_DAYS=90
 THREADS=32
 
@@ -170,11 +174,11 @@ index is network-bound only and is the same artifact upstream validated. Local
 build is the fallback, and the only route for --mode custom.
 
 Options:
-  --btf-db DIR         Project-owned database root
-                       (default: /media/8tb/bioThreatFinder)
+  --btf-db DIR         Project-owned database root, the path the pipeline reads
+                       as params.btf_db (default: $BTF_DB; required if unset)
   --taxdump DIR        Unpacked NCBI taxdump to COPY nodes/names/merged/
-                       delnodes.dmp from (default: /media/36tb/db/taxdump,
-                       shared and read-only). Local build only.
+                       delnodes.dmp from (default: $BTF_DB/taxdump/2026-09-29,
+                       the pinned snapshot). Local build only.
   --threads N          Threads (default: 32)
   --mode gtdb|refseq|custom
                        Which index to produce, and the subdirectory name.
@@ -228,7 +232,7 @@ VERIFY: argument order, the positional-vs-flag split, and the flag spellings
 been renamed fails loudly; a flag whose MEANING changed does not, and this
 script would rather stop and ask.
 
-Nothing under /media/36tb/db is ever written.
+Nothing under $BTF_DB_ROOT is ever written.
 EOF
 }
 
@@ -280,6 +284,18 @@ esac
 [[ "$MIN_FREE_GIB" =~ ^[0-9]+$ ]] || die "--min-free-gib must be an integer"
 (( THREADS >= 1 )) || die "--threads must be >= 1"
 
+[[ -n "$BTF_DB" ]] || die "--btf-db is not set and \$BTF_DB is not in the environment.
+       \$BTF_DB is where the pipeline reads its databases (nextflow.config refuses to
+       start without it).
+         export BTF_DB=/path/to/project/bioThreatFinder
+       or: scripts/build_metabuli_db.sh --btf-db DIR"
+
+# --btf-db may have supplied the root that $BTF_DB did not, so the pinned taxdump is
+# derived AFTER parsing. It must not be left empty: the protected-path loop below
+# compares "$DB_DIR" against "$protected"/*, and an empty entry matches every absolute
+# path - which would refuse every build with a blank resource name.
+TAXDUMP_SRC="${TAXDUMP_SRC:-${BTF_DB}/taxdump/2026-09-29}"
+
 DB_DIR="${BTF_DB}/metabuli/${MODE}"
 STAMP_DIR="${DB_DIR}/.build_stamps"
 TAX_DIR="${DB_DIR}/taxonomy"
@@ -293,14 +309,22 @@ case "$DB_DIR" in
 esac
 [[ "$DB_DIR" == "${BTF_DB}/metabuli/"* ]] \
     || die "refusing to build at '${DB_DIR}' - it is not under ${BTF_DB}/metabuli"
-case "$DB_DIR" in
-    /media/36tb/db/*) die "refusing to write under /media/36tb/db - that volume is shared and read-only for this project" ;;
-esac
+# NEVER WRITE UNDER THE SHARED READ-ONLY ROOT. That root is $BTF_DB_ROOT - the same
+# variable the pipeline reads - and the four names below are the pre-existing resources
+# other work on a deployment may depend on. These were the literal /media/36tb/db paths of
+# the machine this was written on, which made the guard protect somebody else's nothing
+# while silently not protecting their actual shared volume.
+if [[ -n "${BTF_DB_ROOT:-}" ]]; then
+    case "$DB_DIR" in
+        "${BTF_DB_ROOT}"/*) die "refusing to write under ${BTF_DB_ROOT} - that root is shared and read-only for this project" ;;
+    esac
+fi
 for protected in "$TAXDUMP_SRC" \
-                 "/media/36tb/db/taxdump" \
-                 "/media/36tb/db/kraken2" \
-                 "/media/36tb/db/nt" \
-                 "/media/36tb/db/sylph"; do
+                 ${BTF_DB_ROOT:+"${BTF_DB_ROOT}/taxdump"} \
+                 ${BTF_DB_ROOT:+"${BTF_DB_ROOT}/kraken2"} \
+                 ${BTF_DB_ROOT:+"${BTF_DB_ROOT}/nt"} \
+                 ${BTF_DB_ROOT:+"${BTF_DB_ROOT}/sylph"}; do
+    [[ -n "$protected" ]] || continue
     if [[ "$DB_DIR" == "$protected" || "$DB_DIR" == "$protected"/* ]]; then
         die "refusing to write inside the pre-existing shared resource ${protected}"
     fi
@@ -808,7 +832,7 @@ log "threads      : ${THREADS}"
 log "max-ram      : ${MAX_RAM_GIB} GiB (metabuli's own default is 128)"
 log "taxids       : $( [[ "$MODE" == "gtdb" ]] && echo "GTDB - NOT NCBI; needs translation before the watchlist can be joined" || echo "NCBI - joins packs/*/watchlist.resolved.tsv directly" )"
 log "placement    : NVMe (${BTF_DB}) on purpose - query speed is index-I/O bound"
-log "untouched    : /media/36tb/db/** (shared, read-only for this project)"
+log "untouched    : ${BTF_DB_ROOT:-(no \$BTF_DB_ROOT set)}/** (shared, read-only for this project)"
 log "EXPECT MANY HOURS (a local GTDB-scale build is DAYS). Run under nohup, tmux or screen."
 log "======================================================================="
 

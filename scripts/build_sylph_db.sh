@@ -3,7 +3,7 @@
 # build_sylph_db.sh - build the sylph ANI/containment database for a pack.
 #
 # Target path (must match screen.sylph_db in packs/*/pack.yaml):
-#   ${BTF_DB}/sylph/<pack>_pack_refs.syldb     (default BTF_DB=/media/8tb/bioThreatFinder)
+#   ${BTF_DB}/sylph/<pack>_pack_refs.syldb     ($BTF_DB, or --btf-db)
 #
 # WHY THIS SCRIPT EXISTS, LATE
 # ----------------------------
@@ -91,7 +91,15 @@ trap '_btf_on_err $LINENO' ERR
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-BTF_DB="${BTF_DB:-/media/8tb/bioThreatFinder}"
+# WHERE THE DATABASES LIVE IS NOT THIS SCRIPT'S TO ASSUME.
+#
+# These used to be the two volumes on the machine this was written on, which nobody else
+# has. nextflow.config stopped defaulting to them and refuses to start with either root
+# unset; the build scripts had not, so a clone built against paths that do not exist.
+# $BTF_DB is the same variable the pipeline reads. Empty means "not determined", and the
+# check below refuses rather than guessing.
+# This script already read $BTF_DB; only the fallback volume is gone.
+BTF_DB="${BTF_DB:-}"
 PACK="human"
 REFS_DIR=""
 OUT=""
@@ -210,6 +218,17 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ "$THREADS" =~ ^[0-9]+$ ]] && (( THREADS > 0 )) || die "--threads must be a positive integer, got '${THREADS}'"
+
+# Refuse rather than guess. --refs-dir and --out answer it between them, so a caller who
+# names both needs no root at all.
+if [[ -z "$BTF_DB" && ( -z "${REFS_DIR:-}" || -z "${OUT:-}" ) ]]; then
+    die "--btf-db is not set and \$BTF_DB is not in the environment.
+       \$BTF_DB is where the pipeline reads its databases (nextflow.config refuses to
+       start without it).
+         export BTF_DB=/path/to/project/bioThreatFinder
+       or: scripts/build_sylph_db.sh --pack ${PACK} --btf-db DIR
+       or name both --refs-dir and --out."
+fi
 
 REFS_DIR="${REFS_DIR:-${BTF_DB}/packs/${PACK}/refs}"
 OUT="${OUT:-${BTF_DB}/sylph/${PACK}_pack_refs.syldb}"

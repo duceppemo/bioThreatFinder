@@ -83,7 +83,17 @@ LOG = logging.getLogger("simulate_benchmark")
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_DB_ROOT = Path("/media/36tb/db")
+PINNED_TAXDUMP = "2026-09-29"
+
+# WHERE THE DATABASES LIVE IS NOT THIS SCRIPT'S TO ASSUME. These were the two volumes on
+# the machine this was written on. $BTF_DB is the same variable the pipeline reads and
+# refuses to start without; --db-root is its PARENT, because this script appends
+# bioThreatFinder/ itself. None means "not determined": main() refuses.
+_ENV_BTF_DB = os.environ.get("BTF_DB")
+DEFAULT_BTF_DB = Path(_ENV_BTF_DB) if _ENV_BTF_DB else None
+DEFAULT_DB_ROOT = DEFAULT_BTF_DB.parent if DEFAULT_BTF_DB else None
+DEFAULT_TAXDUMP = (DEFAULT_BTF_DB / "taxdump" / PINNED_TAXDUMP
+                   if DEFAULT_BTF_DB else None)
 # LAST-RESORT place to look for a tool, after $PATH. Overridable, because this used to be
 # one developer's miniconda prefix hardcoded. $CONDA_PREFIX is set inside any activated
 # env, so the common case needs no configuration.
@@ -2523,13 +2533,16 @@ notes:
                    help="output root (default: <db-root>/bioThreatFinder/simulated). "
                         "Simulated FASTQ is large - keep it off the repo volume.")
     p.add_argument("--taxdump", type=Path,
-                   default=Path("/media/8tb/bioThreatFinder/taxdump/2026-09-29"),
+                   default=DEFAULT_TAXDUMP,
                    help="pinned taxonomy snapshot, used ONLY to resolve a scenario "
                         "taxon name that differs from the manifest's current "
-                        "scientific name (default: %(default)s)")
+                        "scientific name (default: $BTF_DB/taxdump/"
+                        f"{PINNED_TAXDUMP}, here {DEFAULT_TAXDUMP or 'unset'})")
     p.add_argument("--db-root", type=Path, default=DEFAULT_DB_ROOT,
-                   help="shared database root, as used by build_pack_refs.py "
-                        "(default: %(default)s)")
+                   help="the volume the pack was built under, as used by "
+                        "build_pack_refs.py; it appends bioThreatFinder/ itself, so this "
+                        "is the PARENT of $BTF_DB (default: $BTF_DB's parent, here "
+                        f"{DEFAULT_DB_ROOT or 'unset'})")
     p.add_argument("--packs-dir", type=Path, default=repo_root / "packs",
                    help="directory containing pack definitions (default: %(default)s)")
     p.add_argument("--pack", default="human",
@@ -2583,7 +2596,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.threads <= 0:
         raise SystemExit("ERROR: --threads must be positive")
 
-    outdir = args.outdir or (args.db_root / "bioThreatFinder" / "simulated")
+    # Refuse rather than guess: --outdir answers it on its own, otherwise the volume has
+    # to be known. The old default was a disk on one machine.
+    #
+    # EXCEPT UNDER --dry-run, which writes nothing and whose job is validating a scenario
+    # file. Requiring a database root to parse YAML would make a read-only check need a
+    # built deployment, and every other check in this project runs from a bare clone. The
+    # placeholder is printed unexpanded, so a dry-run listing says where the paths would
+    # come from instead of inventing somewhere they would not.
+    if args.outdir is None and args.db_root is None:
+        if not args.dry_run:
+            raise SystemExit(
+                "ERROR: no --outdir, no --db-root, and $BTF_DB is not in the "
+                "environment.\n"
+                "    export BTF_DB=/path/to/project/bioThreatFinder\n"
+                "  or: scripts/simulate_benchmark.py --outdir DIR ...")
+        outdir = Path("$BTF_DB/simulated")
+    else:
+        outdir = args.outdir or (args.db_root / "bioThreatFinder" / "simulated")
     batch_dir = outdir / args.batch
     reads_dir = batch_dir / "reads"
     logs_dir = batch_dir / "logs"
@@ -2604,8 +2634,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             f"ERROR: pack {args.pack!r} not found at {pack_dir}\n"
             f"       Available: "
             f"{', '.join(sorted(d.name for d in args.packs_dir.glob('*') if d.is_dir())) or '(none)'}")
+    # Unexpanded under --dry-run with no root, for the same reason as outdir above: the
+    # scenario validation this mode exists for must not need a built deployment.
     refs_manifest = (args.db_root / "bioThreatFinder" / "packs" / args.pack /
-                     "refs" / "manifest.tsv")
+                     "refs" / "manifest.tsv") if args.db_root else Path(
+        f"$BTF_DB/packs/{args.pack}/refs/manifest.tsv")
 
     scenarios = load_scenarios(args.scenarios)
     LOG.info("scenario file: %d scenario(s)", len(scenarios))

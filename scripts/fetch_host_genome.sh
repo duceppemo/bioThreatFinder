@@ -45,7 +45,12 @@ trap '_btf_on_err $LINENO' ERR
 # /media/36tb/db/bioThreatFinder/host/human while pack.yaml points at
 # /media/8tb/bioThreatFinder/host/human - and the cross-check below passed anyway,
 # because it compared BASENAMES.
-DB_ROOT="/media/8tb"
+# WHERE THE DATABASES LIVE IS NOT THIS SCRIPT'S TO ASSUME. This was a volume on the
+# machine it was written on. $BTF_DB is the same variable the pipeline reads and refuses to
+# start without; empty means "not determined" and the check below refuses rather than
+# guessing.
+# --db-root is the PARENT of $BTF_DB: this script appends bioThreatFinder/ itself.
+DB_ROOT="${BTF_DB:+$(dirname "$BTF_DB")}"
 # minimap2 indexing is dominated by a poorly-parallel sort; past ~16 threads the
 # return is negligible while the memory high-water mark keeps climbing. The box
 # has 64 cores but there is no reason to use them all here.
@@ -100,9 +105,9 @@ Positional:
                            those packs have many hosts and no single reference.
 
 Options:
-  --db-root DIR       Shared database root. Artifacts are written under
-                      DIR/bioThreatFinder/host/<domain>/.
-                      (default: /media/36tb/db)
+  --db-root DIR       The volume to write under; bioThreatFinder/host/<domain>/
+                      is appended, so this is the PARENT of $BTF_DB.
+                      (default: $BTF_DB's parent; required if $BTF_DB is unset)
   --threads N         Threads for minimap2 indexing (default: 16)
   --species-list FILE TSV of hosts for animal/plant. See "Species list" below.
   --keep-uncompressed Keep the decompressed FASTA (some tools want plain .fa).
@@ -164,6 +169,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ "$THREADS" =~ ^[0-9]+$ && "$THREADS" -gt 0 ]] || die "--threads must be a positive integer"
+
+[[ -n "$DB_ROOT" ]] || die "--db-root is not set and \$BTF_DB is not in the environment.
+       \$BTF_DB is where the pipeline reads its databases (nextflow.config refuses to
+       start without it); --db-root is its PARENT, because this script appends
+       bioThreatFinder/host/<domain> itself.
+         export BTF_DB=/path/to/project/bioThreatFinder
+       or: scripts/fetch_host_genome.sh ${DOMAIN} --db-root /path/to/project"
 
 HOST_DIR="${DB_ROOT}/bioThreatFinder/host/${DOMAIN}"
 

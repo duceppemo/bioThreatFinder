@@ -69,13 +69,23 @@ LOG = logging.getLogger("build_pack_refs")
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_DB_ROOT = Path("/media/36tb/db")
-# The PINNED dated snapshot, not the shared /media/36tb/db/taxdump. D8 measured that
-# one at 201 days stale (+288,764 taxids) and decided to stop using it; build_marker_db.py
-# already defaults to the pin, and this file disagreeing meant that omitting --taxdump
-# expanded watchlist subtrees against a 6.5-month-old tree. The refs base path has a
-# mismatch guard; the taxdump default had none.
-DEFAULT_TAXDUMP = Path("/media/8tb/bioThreatFinder/taxdump/2026-09-29")
+PINNED_TAXDUMP = "2026-09-29"
+
+# WHERE THE DATABASES LIVE IS NOT THIS SCRIPT'S TO ASSUME. These were /media/36tb/db and
+# /media/8tb/bioThreatFinder, the two volumes on the machine this was written on.
+# nextflow.config stopped defaulting to them and refuses to start with either root unset;
+# the build scripts had not, so a clone built against paths that do not exist. $BTF_DB is
+# the same variable the pipeline reads. None means "not determined": main() refuses.
+_ENV_BTF_DB = os.environ.get("BTF_DB")
+DEFAULT_BTF_DB = Path(_ENV_BTF_DB) if _ENV_BTF_DB else None
+DEFAULT_DB_ROOT = DEFAULT_BTF_DB.parent if DEFAULT_BTF_DB else None
+# The PINNED dated snapshot, not the shared root's taxdump. D8 measured that one at 201
+# days stale (+288,764 taxids) and decided to stop using it; build_marker_db.py already
+# defaults to the pin, and this file disagreeing meant that omitting --taxdump expanded
+# watchlist subtrees against a 6.5-month-old tree. The refs base path has a mismatch
+# guard; the taxdump default had none.
+DEFAULT_TAXDUMP = (DEFAULT_BTF_DB / "taxdump" / PINNED_TAXDUMP
+                   if DEFAULT_BTF_DB else None)
 
 # A LAST-RESORT PLACE TO LOOK FOR A TOOL, AFTER $PATH. Overridable, because it used to be
 # this developer's own miniconda prefix hardcoded - harmless, since the PATH lookup wins
@@ -910,18 +920,22 @@ notes:
                    help="pack name, e.g. human (must exist under --packs-dir)")
     p.add_argument("--packs-dir", type=Path, default=repo_root / "packs",
                    help="directory containing pack definitions (default: %(default)s)")
-    p.add_argument("--btf-db", type=Path, default=None,
-                   help="explicit base for project-owned artifacts, e.g. "
-                        "/media/8tb/bioThreatFinder. Preferred over --db-root, and "
-                        "checked against refs_dir in the pack's pack.yaml - a "
-                        "mismatch makes the pipeline report no_reference for every "
-                        "taxon, which reads as 'checked and clear'.")
+    p.add_argument("--btf-db", type=Path, default=DEFAULT_BTF_DB,
+                   help="base for project-owned artifacts, the same path the pipeline "
+                        "reads as params.btf_db. Preferred over --db-root, and checked "
+                        "against refs_dir in the pack's pack.yaml - a mismatch makes the "
+                        "pipeline report no_reference for every taxon, which reads as "
+                        "'checked and clear'. (default: $BTF_DB, here "
+                        f"{DEFAULT_BTF_DB or 'unset'})")
     p.add_argument("--db-root", type=Path, default=DEFAULT_DB_ROOT,
-                   help="shared database root; retains the implicit "
-                        "/bioThreatFinder suffix (default: %(default)s)")
+                   help="the volume to build under; retains the implicit "
+                        "/bioThreatFinder suffix, so it is the PARENT of --btf-db "
+                        f"(default: $BTF_DB's parent, here {DEFAULT_DB_ROOT or 'unset'})")
     p.add_argument("--taxdump", type=Path, default=DEFAULT_TAXDUMP,
                    help="unpacked NCBI taxdump, used to name neighbour taxids and to "
-                        "expand subtrees for the FTP fallback (default: %(default)s)")
+                        "expand subtrees for the FTP fallback (default: "
+                        f"$BTF_DB/taxdump/{PINNED_TAXDUMP}, here "
+                        f"{DEFAULT_TAXDUMP or 'unset'})")
     p.add_argument("--threads", type=int, default=16,
                    help="threads for minimap2 indexing (default: %(default)s)")
     p.add_argument("--max-per-taxon", type=int, default=1,
@@ -1012,6 +1026,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # Getting this wrong is not a cosmetic error: refs built under the wrong base
     # make the pipeline report no_reference for every watchlist taxon, which reads
     # as "checked and clear" rather than "never built".
+    # Refuse rather than guess. Both defaults come from $BTF_DB now, so both are None
+    # together, and a build that writes to the wrong base is the expensive mistake here:
+    # refs under a base the pipeline does not read make it report no_reference for every
+    # watchlist taxon, which reads as "checked and clear".
+    if args.btf_db is None and args.db_root is None:
+        raise SystemExit(
+            "ERROR: neither --btf-db nor --db-root is set, and\n"
+            "  $BTF_DB is not in the environment. It is where the pipeline reads its\n"
+            "  databases (nextflow.config refuses to start without it), and --db-root is\n"
+            "  its PARENT because it keeps the implicit /bioThreatFinder suffix.\n"
+            "    export BTF_DB=/path/to/project/bioThreatFinder\n"
+            "  or:\n"
+            "    scripts/build_pack_refs.py --pack PACK --btf-db /path/to/project/bioThreatFinder")
     btf_base = args.btf_db if args.btf_db else (args.db_root / "bioThreatFinder")
     refs_dir = btf_base / "packs" / args.pack / "refs"
     comp_dir = refs_dir / "competitive"
@@ -1203,8 +1230,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         LOG.info("[dry-run] nothing downloaded")
         return 0
 
-    check_free_space(btf_base.parent if btf_base.parent.exists() else args.db_root,
-                     args.min_free_gib)
+    # check_free_space walks up to the first existing ancestor, so btf_base alone is a
+    # sufficient probe; args.db_root is only a fallback and can now be None.
+    check_free_space(btf_base.parent if btf_base.parent.exists()
+                     else (args.db_root or btf_base), args.min_free_gib)
     refs_dir.mkdir(parents=True, exist_ok=True)
     comp_dir.mkdir(parents=True, exist_ok=True)
 

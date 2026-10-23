@@ -52,6 +52,34 @@ jobs:
       - name: Run the suite
         run: python3 tests/test_pipeline.py
 
+      # This runner is the clone the scripts used to assume away: no $BTF_DB, no built
+      # databases, none of this developer's volumes. Each build script must say so and
+      # name the variable, rather than writing somewhere plausible or crashing on an
+      # empty path - and CI is the only place that state is the default rather than
+      # something to arrange. The suite's `roots` group checks the sources; this checks
+      # the behaviour.
+      - name: Build scripts refuse with no database root
+        run: |
+          fail=0
+          for cmd in "python3 scripts/build_marker_db.py --pack human" \
+                     "python3 scripts/build_pack_refs.py --pack human" \
+                     "python3 scripts/mask_pack_refs.py --pack human" \
+                     "bash scripts/build_kraken2_db.sh" \
+                     "bash scripts/build_sylph_db.sh --pack human" \
+                     "bash scripts/build_metabuli_db.sh" \
+                     "bash scripts/build_krakenuniq_db.sh" \
+                     "bash scripts/fetch_host_genome.sh human"; do
+            out=$($cmd 2>&1 || true)
+            if printf '%s' "$out" | grep -q 'BTF_DB is not in the environment'; then
+              echo "ok: ${cmd%% *} ${cmd#* } refuses and names \$BTF_DB"
+            else
+              echo "FAIL: $cmd did not refuse naming \$BTF_DB"
+              printf '%s\n' "$out" | tail -3
+              fail=1
+            fi
+          done
+          exit $fail
+
       # The suite prints its own counts; this makes a skipped case visible in the log
       # summary rather than only in the body of the output.
       - name: Report skips

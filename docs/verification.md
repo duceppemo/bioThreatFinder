@@ -11,14 +11,17 @@ python3 tests/test_pipeline.py --list
 python3 tests/test_pipeline.py -k marker
 ```
 
-Needs `samtools` for the coverage cases (skipped with a message if absent) and a taxdump
-for the screen cases (`BTF_TAXDUMP=/path/to/taxdump`, skipped otherwise). Everything else
-is fixture-driven.
+Needs `samtools` for the coverage cases (skipped with a message if absent) and `$BTF_DB`
+pointing at built databases for the cases that compare a shipped artifact against the repo
+— the taxdump, the refs manifest, the sketch, the marker database and the Kraken2
+taxonomy. All of those skip with a message naming what to set. Everything else is
+fixture-driven.
 
-Current state: **378 passed, 0 failed, 0 skipped** (2026-10-22) with `samtools` on
-PATH and `BTF_TAXDUMP` set. The bare `python3 tests/test_pipeline.py` reports
-**359 passed, 3 skipped** - the `coverage` and `statecols` checks need `samtools`, and
-the `screen`/`leadjoin` writers need a taxdump. The per-script `--self-test` suites run
+Current state: **391 passed, 0 failed, 0 skipped** (2026-10-23) with `samtools` on PATH
+and `$BTF_DB` set. On a bare clone with neither, `python3 tests/test_pipeline.py` reports
+**330 passed, 0 failed, 14 skipped** - 3 of those skips want `samtools`, the other 11 want
+built databases. Per-case overrides (`BTF_TAXDUMP`, `BTF_REFS_DIR`, `BTF_MARKER_DB`,
+`BTF_REFS_MANIFEST`) still point one case at a copy elsewhere. The per-script `--self-test` suites run
 as single checks from here, so `selftest:build_marker_db` alone covers 60+ assertions,
 including D30's eleven on the protein query ladder.
 

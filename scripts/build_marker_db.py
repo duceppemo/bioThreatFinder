@@ -172,7 +172,23 @@ LOG = logging.getLogger("build_marker_db")
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_DB_ROOT = Path("/media/36tb/db")
+# PINNED taxonomy snapshot. The date is deliberate - the watchlist resolves against this
+# exact snapshot and NCBI overwrites new_taxdump.tar.gz in place, so it is not re-fetchable.
+PINNED_TAXDUMP = "2026-09-29"
+
+# WHERE THE DATABASES LIVE IS NOT THIS SCRIPT'S TO ASSUME.
+#
+# These two used to be /media/36tb/db and /media/8tb/bioThreatFinder - the two volumes on
+# the machine this was written on, which nobody else has. nextflow.config stopped defaulting
+# to them (it refuses to start with either root unset); the build scripts had not, so a
+# clone's build still pointed at paths that do not exist. $BTF_DB is the same variable the
+# pipeline reads, and --db-root is its PARENT because this script appends bioThreatFinder/
+# itself. None means "not determined": main() refuses rather than guessing.
+_ENV_BTF_DB = os.environ.get("BTF_DB")
+DEFAULT_BTF_DB = Path(_ENV_BTF_DB) if _ENV_BTF_DB else None
+DEFAULT_DB_ROOT = DEFAULT_BTF_DB.parent if DEFAULT_BTF_DB else None
+DEFAULT_TAXDUMP = (DEFAULT_BTF_DB / "taxdump" / PINNED_TAXDUMP
+                   if DEFAULT_BTF_DB else None)
 # LAST-RESORT place to look for a tool, after $PATH. Overridable, because this used to be
 # one developer's miniconda prefix hardcoded. $CONDA_PREFIX is set inside any activated
 # env, so the common case needs no configuration.
@@ -3216,9 +3232,11 @@ notes:
     p.add_argument("--packs-dir", type=Path, default=repo_root / "packs",
                    help="directory containing pack definitions (default: %(default)s)")
     p.add_argument("--db-root", type=Path, default=DEFAULT_DB_ROOT,
-                   help="shared database root (default: %(default)s)")
-    p.add_argument("--taxdump", type=Path,
-                   default=Path("/media/8tb/bioThreatFinder/taxdump/2026-09-29"),
+                   help="the volume this script builds under; it appends "
+                        "bioThreatFinder/packs/<pack>/markers itself, so this is the "
+                        "PARENT of $BTF_DB (default: $BTF_DB's parent, "
+                        f"here {DEFAULT_DB_ROOT or 'unset - $BTF_DB is not set'})")
+    p.add_argument("--taxdump", type=Path, default=DEFAULT_TAXDUMP,
                    help="pinned NCBI taxonomy snapshot, used for rankedlineage.dmp so "
                         "gene_family queries can relax to family level. Should be the "
                         "same snapshot the watchlist was resolved against "
@@ -3322,12 +3340,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not args.pack:
         raise SystemExit("ERROR: --pack is required (or use --self-test)")
 
+    # Refuse rather than guess, and name the two ways to answer. This used to default to a
+    # volume on one particular machine, so a clone's build wrote to a path that did not
+    # exist - or, worse for --check, read one and reported a healthy pack as having no
+    # database. --markers-dir answers the question on its own, so it is accepted instead.
+    if args.db_root is None and not (args.check and args.markers_dir is not None):
+        raise SystemExit(
+            "ERROR: --db-root is not set and $BTF_DB is not in the environment.\n"
+            "  $BTF_DB is where the pipeline reads its databases (nextflow.config refuses\n"
+            "  to start without it). --db-root is its PARENT, because this script appends\n"
+            "  bioThreatFinder/packs/<pack>/markers itself.\n"
+            "    export BTF_DB=/path/to/project/bioThreatFinder\n"
+            "  or:\n"
+            "    scripts/build_marker_db.py --pack PACK --db-root /path/to/project\n"
+            "  To check a marker directory without either, pass --markers-dir DIR --check.")
+
     pack_dir = args.packs_dir / args.pack
     catalogue_path = pack_dir / "markers.tsv"
-    out_dir = args.db_root / "bioThreatFinder" / "packs" / args.pack / "markers"
-    manifest_path = out_dir / "markers.manifest.tsv"
-    todo_path = out_dir / "curation_required.tsv"
-    cache_dir = args.db_root / "bioThreatFinder" / "cache" / "entrez"
+    # db_root is None only on the --markers-dir --check path, which overrides all three
+    # below; the refusal above has already rejected every other way of getting here.
+    base = args.db_root / "bioThreatFinder" if args.db_root else None
+    out_dir = base / "packs" / args.pack / "markers" if base else None
+    manifest_path = out_dir / "markers.manifest.tsv" if out_dir else None
+    todo_path = out_dir / "curation_required.tsv" if out_dir else None
+    cache_dir = base / "cache" / "entrez" if base else None
 
     # --markers-dir judges a directory directly, which is what the launch guard points at:
     # it knows exactly where the database is, so its advice should not depend on a default
@@ -3342,12 +3378,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # Before the taxdump load, which is minutes and gigabytes and which a
     # read-only freshness question has no use for.
     if args.check:
-        # The remediation must be RUNNABLE as printed. --db-root is carried whenever it is
-        # not the default, because the default is the SHARED root while a pack's marker
-        # database is built on the project volume - advice omitting it would send the
-        # operator to rebuild in the wrong place.
+        # The remediation must be RUNNABLE as printed, in a shell that may not have
+        # $BTF_DB exported - so the resolved --db-root is always named rather than left to
+        # a default. It used to be carried only when it differed from the default, which
+        # was correct while the default was a fixed volume and is not now that it comes
+        # from the environment.
         rebuild = f"scripts/build_marker_db.py --pack {args.pack}"
-        if args.db_root != DEFAULT_DB_ROOT:
+        if args.db_root is not None:
             rebuild += f" --db-root {args.db_root}"
         return check_marker_db_freshness(catalogue_path, out_dir, manifest_path, rebuild)
 

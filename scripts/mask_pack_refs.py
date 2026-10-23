@@ -81,7 +81,11 @@ import urllib.request
 from collections import defaultdict
 from pathlib import Path
 
-DEFAULT_BTF_DB = Path("/media/8tb/bioThreatFinder")
+# WHERE THE PACK LIVES IS NOT THIS SCRIPT'S TO ASSUME. This was /media/8tb/bioThreatFinder,
+# a volume on the machine it was written on. $BTF_DB is the same variable the pipeline reads
+# and refuses to start without; None means "not determined", and main() refuses.
+_ENV_BTF_DB = os.environ.get("BTF_DB")
+DEFAULT_BTF_DB = Path(_ENV_BTF_DB) if _ENV_BTF_DB else None
 # VERIFY: UniVec_Core lives here; confirmed reachable 2026-09-29 (HTTP 206).
 UNIVEC_URL = "https://ftp.ncbi.nlm.nih.gov/pub/UniVec/UniVec_Core"
 ALL_SOURCES = ("lowcomplexity", "vector", "host", "crossgroup")
@@ -535,7 +539,10 @@ def main() -> int:
     # NOT required=True: --self-test needs no pack, and argparse enforces required
     # arguments before any of our code runs.
     ap.add_argument("--pack")
-    ap.add_argument("--btf-db", type=Path, default=DEFAULT_BTF_DB)
+    ap.add_argument("--btf-db", type=Path, default=DEFAULT_BTF_DB,
+                    help="base for project-owned artifacts, the path the pipeline "
+                         f"reads as params.btf_db (default: $BTF_DB, here "
+                         f"{DEFAULT_BTF_DB or 'unset'})")
     ap.add_argument("--packs-dir", type=Path,
                     default=Path(__file__).resolve().parent.parent / "packs")
     ap.add_argument("--sources", default=",".join(ALL_SOURCES),
@@ -571,6 +578,17 @@ def main() -> int:
     bad = [s for s in sources if s not in ALL_SOURCES]
     if bad:
         die(f"unknown source(s): {', '.join(bad)}. Valid: {', '.join(ALL_SOURCES)}")
+
+    # Refuse rather than guess. This used to default to one machine's volume, so a clone
+    # masked against a pack that was not there - and a reference with no masking result is
+    # scored against a mask map that does not contain it, which D34 measured as
+    # indistinguishable from examined-and-clean.
+    if args.btf_db is None:
+        die("--btf-db is not set and $BTF_DB is not in the environment.\n"
+            "       $BTF_DB is where the pipeline reads its databases (nextflow.config\n"
+            "       refuses to start without it).\n"
+            "         export BTF_DB=/path/to/project/bioThreatFinder\n"
+            "       or: scripts/mask_pack_refs.py --pack PACK --btf-db DIR")
 
     refs_dir = args.btf_db / "packs" / args.pack / "refs"
     mask_dir = refs_dir / "masked"

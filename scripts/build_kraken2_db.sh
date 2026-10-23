@@ -54,7 +54,15 @@ trap '_btf_on_err $LINENO' ERR
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-DB_ROOT="/media/36tb/db"
+# WHERE THE DATABASES LIVE IS NOT THIS SCRIPT'S TO ASSUME.
+#
+# These used to be the two volumes on the machine this was written on, which nobody else
+# has. nextflow.config stopped defaulting to them and refuses to start with either root
+# unset; the build scripts had not, so a clone built against paths that do not exist.
+# $BTF_DB is the same variable the pipeline reads. Empty means "not determined", and the
+# check below refuses rather than guessing.
+# --db-root is the PARENT of $BTF_DB: this script appends bioThreatFinder/ itself.
+DB_ROOT="${BTF_DB:+$(dirname "$BTF_DB")}"
 # PlusPF = Kraken2 "standard" (archaea, bacteria, viral, plasmid, human,
 # UniVec_Core) + protozoa + fungi. The protozoa and fungi libraries are the
 # whole point for this pipeline: the human watchlist carries 20 parasites and 13
@@ -87,7 +95,7 @@ FORCE=0
 # differ, taxids disagree and watchlist lookups miss, giving an empty result that is
 # indistinguishable from a clean negative. The shared /media/36tb/db/taxdump was
 # 6.5 months stale and is used by other work on this machine, so it is left alone.
-TAXDUMP_SRC="/media/8tb/bioThreatFinder/taxdump/2026-09-29"
+TAXDUMP_SRC="${BTF_DB:+$BTF_DB/taxdump/2026-09-29}"
 
 # Pre-flight free-space requirement, GiB.
 #   library/    ~300-400 GiB of downloaded FASTA (bacteria dominates)
@@ -107,7 +115,9 @@ Builds a fresh Kraken2 PlusPF-style database at
 and Bracken k-mer distributions for 100/150/250 bp reads.
 
 Options:
-  --db-root DIR        Shared database root (default: /media/36tb/db)
+  --db-root DIR        The volume to build under; bioThreatFinder/kraken2/pluspf is
+                       appended, so this is the PARENT of $BTF_DB
+                       (default: $BTF_DB's parent; required if $BTF_DB is unset)
   --threads N          Threads for download and build (default: 32)
   --libraries "A B C"  Space-separated kraken2-build library names
                        (default: "archaea bacteria viral plasmid fungi protozoa human UniVec_Core")
@@ -125,11 +135,11 @@ Options:
                        outage. 'auto' probes and falls back to ftp.
   --use-ftp            Shorthand for --transport ftp.
   --taxdump DIR        Pinned NCBI taxonomy snapshot to reuse
-                       (default: /media/8tb/bioThreatFinder/taxdump/2026-09-29).
+                       (default: $BTF_DB/taxdump/2026-09-29).
                        MUST be the same snapshot the watchlist was resolved
                        against, or taxids will silently disagree.
   --download-taxonomy  Force kraken2-build --download-taxonomy instead of
-                       reusing /media/36tb/db/taxdump
+                       reusing the pinned snapshot
   --with-maps          Also download the accession2taxid maps (~25 GB). Needed
                        only if you will --add-to-library your own sequences
                        whose headers carry no taxid.
@@ -198,6 +208,18 @@ done
 [[ "$KMER"      =~ ^[0-9]+$ ]] || die "--kmer must be an integer"
 [[ "$MINIMIZER" =~ ^[0-9]+$ ]] || die "--minimizer must be an integer"
 (( MINIMIZER <= KMER )) || die "--minimizer ($MINIMIZER) must be <= --kmer ($KMER)"
+
+[[ -n "$DB_ROOT" ]] || die "--db-root is not set and \$BTF_DB is not in the environment.
+       \$BTF_DB is where the pipeline reads its databases (nextflow.config refuses to
+       start without it); --db-root is its PARENT, because this script appends
+       bioThreatFinder/kraken2/pluspf itself.
+         export BTF_DB=/path/to/project/bioThreatFinder
+       or: scripts/build_kraken2_db.sh --db-root /path/to/project"
+# --db-root may have supplied the root that $BTF_DB did not, so the pinned taxdump is
+# derived AFTER parsing rather than left empty. The index and the watchlist must resolve
+# against the SAME snapshot, so a wrong one here is silent: taxids disagree and every
+# watchlist lookup misses, which is indistinguishable from a clean negative.
+TAXDUMP_SRC="${TAXDUMP_SRC:-${DB_ROOT}/bioThreatFinder/taxdump/2026-09-29}"
 
 DB_DIR="${DB_ROOT}/bioThreatFinder/kraken2/pluspf"
 STAMP_DIR="${DB_DIR}/.build_stamps"

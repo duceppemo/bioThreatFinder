@@ -74,8 +74,8 @@ STAGES
              pipeline, which is what actually decides
 
     python3 scripts/measure_reference_span.py --stage frame,fetch,span,cover \\
-        --pack-refs /media/8tb/bioThreatFinder/packs/human/refs \\
-        --work /media/8tb/bioThreatFinder/cache/ani_frame --group bacteria
+        --pack-refs $BTF_DB/packs/human/refs \\
+        --work $BTF_DB/cache/ani_frame --group bacteria
 
     python3 scripts/measure_reference_span.py --stage verdict \\
         --pack-refs ... --work ... --out docs/reference_span.tsv

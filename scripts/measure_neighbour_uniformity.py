@@ -34,7 +34,7 @@ target holds 2,336 reads and the absent neighbour 2,731, counts close enough tha
 ratio attributes the sample to the neighbour; their uniformities are 0.86 and 0.12.
 
     python3 scripts/measure_neighbour_uniformity.py \\
-        --run /media/8tb/bioThreatFinder/runs/lod_v4 --bundle 632 --read-len 150
+        --run $BTF_DB/runs/lod_v4 --bundle 632 --read-len 150
 
 Read length is REQUIRED and not defaulted: the expectation is linear in it, so a wrong
 value rescales every uniformity reported. D13 and D14 both record figures that were wrong

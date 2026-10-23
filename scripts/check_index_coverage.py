@@ -37,7 +37,7 @@ A node present is not SEQUENCE present: a node can exist because an ancestor or 
 carried a genome. So an absent taxid PROVES the arm cannot report that taxon, while a
 present one is necessary but not sufficient. The verdict is worded accordingly.
 
-    scripts/check_index_coverage.py --pack human --btf-db /media/8tb/bioThreatFinder
+    scripts/check_index_coverage.py --pack human --btf-db $BTF_DB
       exit 0  every watchlist taxon has a node
       exit 3  at least one cannot be reported by this arm
       exit 1  could not tell (no index, unreadable, layout does not add up)
@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import struct
 import sys
 from pathlib import Path
@@ -118,7 +119,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--pack", default="human")
     ap.add_argument("--packs-dir", type=Path,
                     default=Path(__file__).resolve().parent.parent / "packs")
-    ap.add_argument("--btf-db", type=Path, default=Path("/media/8tb/bioThreatFinder"))
+    # Not this script's to assume: $BTF_DB is the variable the pipeline reads and
+    # refuses to start without. It used to default to one machine's volume.
+    _env = os.environ.get("BTF_DB")
+    ap.add_argument("--btf-db", type=Path, default=Path(_env) if _env else None,
+                    help="base for project-owned artifacts (default: $BTF_DB, "
+                         f"here {_env or 'unset'})")
     ap.add_argument("--kraken2-db", type=Path, default=None,
                     help="the index directory holding taxo.k2d "
                          "[<btf-db>/kraken2/pluspf]")
@@ -131,6 +137,13 @@ def main(argv: list[str] | None = None) -> int:
     watchlist = args.packs_dir / args.pack / "watchlist.resolved.tsv"
     if not watchlist.exists():
         print(f"UNDETERMINED: no resolved watchlist at {watchlist}")
+        return EXIT_UNDETERMINED
+    # UNDETERMINED, not a verdict: a check that cannot find the index has not learned
+    # that the index lacks a taxon. Exit 1 keeps "could not tell" distinct from "no".
+    if args.kraken2_db is None and args.btf_db is None:
+        print("UNDETERMINED: no --kraken2-db or --btf-db, and $BTF_DB is not set.\n"
+              "  export BTF_DB=/path/to/project/bioThreatFinder, or pass --kraken2-db "
+              "DIR.")
         return EXIT_UNDETERMINED
     k2_dir = args.kraken2_db or (args.btf_db / "kraken2" / "pluspf")
     taxo = k2_dir / "taxo.k2d"

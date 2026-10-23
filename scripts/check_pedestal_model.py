@@ -29,9 +29,9 @@ WHAT IT REFUSES TO DO
   entire non-host remainder. The host arm is reported as an OBSERVED rate, never inverted.
 
     python3 scripts/check_pedestal_model.py \\
-        --matrix /media/8tb/bioThreatFinder/benchmarks/recruitment_150bp_key.tsv \\
-        --batch  /media/8tb/bioThreatFinder/simulated/lod_v1 \\
-        --run    /media/8tb/bioThreatFinder/runs/lod_v2_kraken2 \\
+        --matrix $BTF_DB/benchmarks/recruitment_150bp_key.tsv \\
+        --batch  $BTF_DB/simulated/lod_v1 \\
+        --run    $BTF_DB/runs/lod_v2_kraken2 \\
         --source 562_Escherichia_coli.fna.gz --bundle 632 --neighbour 630
 """
 from __future__ import annotations

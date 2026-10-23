@@ -28,8 +28,9 @@ across human, animal and plant health.
 | [`docs/operations.md`](docs/operations.md) | Building, rebuilding and verifying the databases: every read-only check in one table, the three tool environments and why they are three, the environment traps, and the open questions. Deployment-specific notes are labelled as such. |
 
 ```bash
-python3 tests/test_pipeline.py     # 378 checks with samtools on PATH; without it
-                                   # 362 register, 359 pass, 3 skip. ~30 s, no databases
+python3 tests/test_pipeline.py     # 391 checks with samtools on PATH and $BTF_DB
+                                   # pointing at built databases; 330 pass and 14 skip
+                                   # on a bare clone with neither. ~30 s, no network
 ```
 
 ## Validation status — read this before using any output
@@ -580,11 +581,10 @@ conda env create -f envs/btf-sylph.yml
 #     btf_db holds project-owned artifacts and wants the fastest disk you have.
 export BTF_DB_ROOT=/path/to/shared      # or pass --db_root
 export BTF_DB=/path/to/project/bioThreatFinder   # or pass --btf_db
-#     The build scripts spell this two ways and only one of them is $BTF_DB: --btf-db is
-#     $BTF_DB itself, while --db-root is its PARENT, because those scripts append
-#     bioThreatFinder/ themselves. --db-root defaults to the SHARED root, so passing
-#     $BTF_DB_ROOT to it is the mistake, not the fix. See docs/operations.md.
-BTF_VOL=$(dirname "$BTF_DB")
+#     The path must END IN bioThreatFinder: the build scripts that take --db-root append
+#     that segment themselves. Every build script below derives its own default from
+#     $BTF_DB and REFUSES to run when it is unset, rather than writing somewhere
+#     plausible - they used to default to this developer's volumes (D51).
 
 # 1. Pin a taxonomy snapshot, then resolve the watchlist against it.
 #    resolve_watchlist.py refuses a snapshot older than 90 days with
@@ -599,29 +599,28 @@ python3 bin/resolve_watchlist.py \
     --out packs/human/watchlist.resolved.tsv \
     --descendants-out packs/human/watchlist.descendants.tsv
 
-# 2. Build databases. --btf-db / --taxdump must match nextflow.config, and the
-#    scripts refuse to run if they do not.
+# 2. Build databases. Each writes under $BTF_DB; --taxdump must be the snapshot the
+#    watchlist was resolved against, and the scripts refuse to run if it is not.
 conda activate btf-refs
-bash    scripts/fetch_host_genome.sh human --db-root "$BTF_VOL" --threads 24
-python3 scripts/build_pack_refs.py  --pack human --btf-db "$BTF_DB" --threads 24
-python3 scripts/mask_pack_refs.py   --pack human --btf-db "$BTF_DB" --threads 24
-python3 scripts/build_marker_db.py  --pack human --db-root "$BTF_VOL" --taxdump "$TAX" --threads 24
+bash    scripts/fetch_host_genome.sh human --threads 24
+python3 scripts/build_pack_refs.py  --pack human --taxdump "$TAX" --threads 24
+python3 scripts/mask_pack_refs.py   --pack human --threads 24
+python3 scripts/build_marker_db.py  --pack human --taxdump "$TAX" --threads 24
 # Same question for the marker database, whose input is packs/human/markers.tsv (D47).
 # Writes nothing; exits 0 fresh, 3 stale and names the markers, 1 could not tell.
-# Keep --db-root: it defaults to the SHARED root, where this pack has no marker database,
-# so a bare --check reports a healthy pack as missing one. --markers-dir DIR is the other
-# way to say it, and checks a backup in place.
-python3 scripts/build_marker_db.py  --pack human --db-root "$BTF_VOL" --check
+# --markers-dir DIR is the other way to ask, and checks a backup in place with no
+# environment at all.
+python3 scripts/build_marker_db.py  --pack human --check
 # sylph is an ON-BY-DEFAULT arm and it sketches THIS PACK'S refs, not GTDB. Rebuild it
 # whenever build_pack_refs.py adds a reference, or the new refs are invisible to the arm.
 # Takes ~6 s for 375 genomes; --force is required to overwrite an existing sketch.
 conda activate btf-sylph
-bash    scripts/build_sylph_db.sh   --pack human --btf-db "$BTF_DB" --threads 24
+bash    scripts/build_sylph_db.sh   --pack human --threads 24
 # Ask later whether it is still current rather than remembering to rebuild it (D46).
 # Writes nothing; exits 0 fresh, 3 stale and names the genomes, 1 could not tell.
-bash    scripts/build_sylph_db.sh   --pack human --btf-db "$BTF_DB" --check
+bash    scripts/build_sylph_db.sh   --pack human --check
 conda activate btf-kraken2
-bash    scripts/build_kraken2_db.sh --db-root "$BTF_VOL" --taxdump "$TAX" --threads 40
+bash    scripts/build_kraken2_db.sh --taxdump "$TAX" --threads 40
 
 # 3. Run
 nextflow run . -profile conda,workstation \

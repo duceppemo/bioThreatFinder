@@ -11,28 +11,30 @@ development machine — a 503 GB Ubuntu workstation with `/media/8tb` (NVMe) and
 `/media/36tb` (bulk) — and may not hold on yours. Nothing in a host-specific section is
 configuration the pipeline reads.
 
-**Paths, and a name collision that has cost real time.** The pipeline requires two roots
-and refuses to start without them, naming both: `$BTF_DB_ROOT` (`--db_root`) for large
-shared read-only resources, and `$BTF_DB` (`--btf_db`) for project-owned artifacts on the
-fastest disk available. On the development host they are `BTF_DB_ROOT=/media/36tb/db` and
+**Two roots, set once.** The pipeline requires both and refuses to start without them,
+naming both: `$BTF_DB_ROOT` (`--db_root`) for large shared read-only resources, and
+`$BTF_DB` (`--btf_db`) for project-owned artifacts on the fastest disk available. On the
+development host they are `BTF_DB_ROOT=/media/36tb/db` and
 `BTF_DB=/media/8tb/bioThreatFinder`.
 
-The build scripts use **three** spellings and only two of them agree:
+```bash
+export BTF_DB_ROOT=/path/to/shared
+export BTF_DB=/path/to/project/bioThreatFinder     # the last segment is required
+```
 
-| In a build script | Means | On this host |
+**Every build script and every check below derives its own paths from `$BTF_DB`, and
+refuses to run when it is unset** (D51) — they used to default to the two volumes above,
+so a clone built against paths it did not have. Two flags still override, and they do not
+mean the same thing:
+
+| In a build script | Means | Here |
 |---|---|---|
 | `--btf-db` | exactly `$BTF_DB` — the base that `packs/` hangs off, **not** the volume. `/media/8tb` gives `/media/8tb/packs/...` and the script dies with "no refs manifest" | `/media/8tb/bioThreatFinder` |
 | `--db-root` | the **parent** of `$BTF_DB`: these scripts append `bioThreatFinder/` themselves | `/media/8tb` |
-| `--db-root`'s default | `/media/36tb/db`, which happens to be `$BTF_DB_ROOT` — **so passing `$BTF_DB_ROOT` to `--db-root` is the bug, not the fix** | — |
 
-Commands below therefore use `$BTF_VOL`, and a deployment's `$BTF_DB` must end in
-`bioThreatFinder` for the `--db-root` scripts to land in the same place the pipeline reads:
-
-```bash
-BTF_VOL=$(dirname "$BTF_DB")
-```
-
-`build_sylph_db.sh` is the only one that reads `$BTF_DB` from the environment on its own.
+`$BTF_DB` must end in `bioThreatFinder` for that second form to land where the pipeline
+reads. Neither flag is needed once the variable is exported, and **`--db-root` is not
+`$BTF_DB_ROOT`** — passing the shared root to it is the mistake it used to default to.
 Environments are entered with `conda activate <name>` from `envs/*.yml`.
 
 ## Read-only checks, all of them
@@ -45,13 +47,13 @@ table was run against the shipped databases on 2026-10-22.
 | Check | Command | Exit | What it answers |
 |---|---|---|---|
 | Competitive bundles (D45) | applied by `build_pack_refs.py` itself when it decides what to rebuild | — | is each bundle's recorded input set, and each input's mtime, still what it was built from |
-| sylph sketch (D46) | `bash scripts/build_sylph_db.sh --pack human --btf-db "$BTF_DB" --check` | 0/3/1 | does the sketch cover every pack reference |
-| Marker database (D47) | `python3 scripts/build_marker_db.py --pack human --db-root "$BTF_VOL" --check` | 0/3/1 | does the database cover `markers.tsv`, on every tier it claims |
+| sylph sketch (D46) | `bash scripts/build_sylph_db.sh --pack human --check` | 0/3/1 | does the sketch cover every pack reference |
+| Marker database (D47) | `python3 scripts/build_marker_db.py --pack human --check` | 0/3/1 | does the database cover `markers.tsv`, on every tier it claims |
 | Kraken2 index (D48) | `python3 scripts/check_index_coverage.py --pack human` | 0/3/1 — **3 today**, by design, see D48 | can the index report every watchlist taxon **at all** |
-| Masking completeness (D34) | `python3 scripts/mask_pack_refs.py --pack human --btf-db "$BTF_DB" --dry-run` | 0, or 1 if a reference has no result | does every reference have a masking result |
+| Masking completeness (D34) | `python3 scripts/mask_pack_refs.py --pack human --dry-run` | 0, or 1 if a reference has no result | does every reference have a masking result |
 | Threshold coherence | `python3 scripts/check_threshold_coherence.py` | report, always 0 | which per-taxon gates can never bind |
 | Conda specs | `bash scripts/check_conda_specs.sh` | 0 or nonzero | does every per-process pin still solve (network, minutes) |
-| The suite | `python3 tests/test_pipeline.py` | 0 or nonzero | 378 checks with samtools on `PATH`; without it 362 register, 359 pass, 3 skip. Offline, no databases, ~30 s |
+| The suite | `python3 tests/test_pipeline.py` | 0 or nonzero | 391 checks with samtools on `PATH` and `$BTF_DB` set; 330 pass and 14 skip on a bare clone with neither. No network, ~30 s |
 
 **Why there are this many.** Well over thirty bugs found in this project so far share one
 shape: *produces an empty or degraded result indistinguishable from a clean negative.* A
@@ -109,11 +111,11 @@ Both the Kraken2 and the marker build are resumable and skip completed work:
 
 ```bash
 conda activate btf-kraken2
-bash scripts/build_kraken2_db.sh --db-root "$BTF_VOL" \
-     --taxdump "$BTF_DB/taxdump/2026-09-29" --threads 40
+bash scripts/build_kraken2_db.sh --taxdump "$BTF_DB/taxdump/2026-09-29" --threads 40
 
 conda activate btf-refs
-python3 scripts/build_marker_db.py --pack human --db-root "$BTF_VOL" --threads 24
+python3 scripts/build_marker_db.py --pack human --taxdump "$BTF_DB/taxdump/2026-09-29" \
+     --threads 24
 ```
 
 A long build should not be a child of an interactive session — see **Environment facts**
@@ -148,6 +150,29 @@ node has no `sylph inspect`.
 ships `.so.5`). Do **not** fix it by removing the package — kraken2 declares wget as a
 dependency and conda uninstalls kraken2 and bracken with it. The build script shims
 `/usr/bin/wget` instead.
+
+## Database roots: what refuses, and what that buys
+
+Every script that writes or reads a built database derives its paths from `$BTF_DB` and
+**refuses to run when it cannot** (D51). The refusal names the variable, the flag and a
+runnable example, because the failure it replaces was not a crash:
+
+| Was | Is |
+|---|---|
+| a build wrote to `/media/8tb/...` on a machine that has no such volume | refusal naming `$BTF_DB`, before anything is downloaded |
+| `--check` read a root that was not yours and reported a **healthy pack as having no database** | the default is the pack you built, so the bare form is correct |
+| an empty root silently joined into `/bioThreatFinder/packs/human/refs` — a real-looking path that exists nowhere | refused, with the two ways to answer |
+
+Three checks take the artifact's path directly and so work with **no environment at all**:
+`build_marker_db.py --markers-dir`, `check_index_coverage.py --kraken2-db`, and
+`build_sylph_db.sh --refs-dir` + `--out`. That is deliberate: a check that needs a
+configured deployment is a check nobody runs on a fresh clone, and these are the ones a
+launch warning prints for someone to paste.
+
+`tests/test_pipeline.py -k roots` pins both halves — no host path in any script, and a
+refusal that names `$BTF_DB` in each of the eight builders. The first version of that scan
+only looked at assignments, and a mutation test walked through it: a default reached
+through a conditional expression is still a default.
 
 ## The built databases — reference state
 
@@ -381,14 +406,19 @@ Four comparisons, and **the mtime/set relationship is inverted from the sketch's
 | index vs source | an index older than the FASTA/HMM it was built from |
 
 ```bash
-# --db-root MATTERS: it defaults to the shared root, where this pack has no marker
-# database, so a bare --check reports a healthy pack as having none.
-python3 scripts/build_marker_db.py --pack human --db-root "$BTF_VOL" --check
+python3 scripts/build_marker_db.py --pack human --check
 
-# Or point it straight at a directory, which also checks a backup in place:
+# Or point it straight at a directory, which also checks a backup in place and needs no
+# environment at all:
 python3 scripts/build_marker_db.py --pack human --check \
         --markers-dir "$BTF_DB/packs/human/markers"
 ```
+
+**`--db-root` used to matter here and no longer does.** It defaulted to the shared root,
+where this pack has no marker database, so a bare `--check` reported a healthy pack as
+having none — exit 3 from the command the launch warning had just printed. Its default now
+derives from `$BTF_DB` (D51), so the bare form is correct; the warning still prints
+`--markers-dir`, because that works with no environment at all.
 
 Checked at launch in `main.nf` `warnIfMarkerDbStale()` (the two TSVs only — cheap, and it
 catches the operator-caused shape), in full by `--check`, and the suite runs the full check
@@ -406,9 +436,11 @@ against the shipped database on every commit. **Three things worth not rediscove
   stale on 116 of 166 markers**. A guard that cries stale on a good database gets switched
   off, so that version is worse than none.
 - **The guard's own advice did not work, for the same reason the `--db-root` note above
-  exists.** It printed `--pack human --check`, which on a healthy pack exits 3 with "no
+  exists.** It printed `--pack human --check`, which on a healthy pack exited 3 with "no
   marker database" because of that default. The warning now passes `--markers-dir <the
-  directory it judged>`, and that printed command was run verbatim to confirm it.
+  directory it judged>`, and that printed command was run verbatim to confirm it. D51
+  then removed the underlying trap by deriving the default from `$BTF_DB`, which is the
+  difference between a documented workaround and a fixed default.
 
 Verified against the retained pre-D40 database (`backups/markers-pre-D40-rebuild-20261021`,
 163 rows): against the current 166-row catalogue it names exactly `salm_invA`, `salm_ttrC`,

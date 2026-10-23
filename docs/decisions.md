@@ -5083,3 +5083,94 @@ Links were repointed in `README.md`, `docs/roadmap.md`, `docs/verification.md`,
 mentions in this file were repointed too: the file is the same file renamed, so the path is
 the only thing that changed, and a dead link in a decision log is worse than an edited
 filename in one.
+
+---
+
+## D51 — The config refused without its roots while every build script quietly assumed one machine's disks
+
+**Date:** 2026-10-23
+**Evidence:** measured-here (18 defaults counted, every refusal exercised, the invariant mutation-tested)
+**Status:** done
+
+D49 made `nextflow.config` require both database roots and made `main.nf` refuse at launch
+naming them. That was half the job, and the louder half. **Eleven scripts still carried
+eighteen defaults pointing at `/media/8tb` and `/media/36tb/db`** — the two volumes on the
+machine this project was written on. `build_sylph_db.sh` alone read `$BTF_DB`, and then
+only as a fallback.
+
+### Why this is not cosmetic, and the two failure shapes
+
+For a **build** the failure is loud: a path that does not exist, reported before anything
+is written. Annoying, not dangerous.
+
+For a **check** it is the shape this project keeps finding. `build_marker_db.py --check`
+defaulted `--db-root` to the shared root, where no pack has a marker database — so on a
+healthy deployment it answered **"no marker database", exit 3**, from the very command
+D47's launch warning printed for the operator to paste. D47 worked around that by making
+the warning print `--markers-dir` instead. That was the right fix for the warning and the
+wrong fix for the default, and the trap stayed in the README, in `operations.md` and in a
+test comment, each explaining why the obvious invocation is wrong.
+
+The third shape appeared while fixing it: an *empty* root joins into
+`/bioThreatFinder/packs/human/refs` — an absolute path that looks entirely plausible and
+exists nowhere. `${BTF_DB:+...}` yielding the empty string also broke the two opt-in
+builders' protected-path guard, where `[[ "$DB_DIR" == "$protected"/* ]]` with an empty
+`protected` matches **every** absolute path, so the guard refused every build with a blank
+resource name. Found by running it, not by reading it.
+
+### What it is now
+
+Every script derives its paths from `$BTF_DB` — the same variable the pipeline reads — and
+refuses when it cannot, naming the variable, the flag and a runnable example. `--btf-db`
+is `$BTF_DB`; `--db-root` is its **parent**, because those scripts append
+`bioThreatFinder/` themselves, so `$BTF_DB` has to end in that segment. Neither flag is
+needed once the variable is exported, which is what the README's quick start now shows.
+
+Three checks still take the artifact's path directly and need **no environment at all**:
+`build_marker_db.py --markers-dir`, `check_index_coverage.py --kraken2-db`, and
+`build_sylph_db.sh --refs-dir`/`--out`. A check that needs a configured deployment is a
+check nobody runs on a fresh clone — and these are the ones a launch warning prints.
+
+Two guards were generalised rather than left as literals. The opt-in Metabuli and
+KrakenUniq builders refused to write under `/media/36tb/db` and protected four
+pre-existing resources there by name. On anybody else's machine that guard protected
+nothing while *not* protecting their actual shared volume; both now key on `$BTF_DB_ROOT`,
+and skip empty entries.
+
+The taxdump defaults are derived **after** argument parsing, because `--btf-db` can supply
+the root that `$BTF_DB` did not. Deriving at assignment time left `TAXDUMP_SRC` empty for
+exactly the clone user this change is for.
+
+`simulate_benchmark.py --dry-run` is exempt: it writes nothing and its job is validating a
+scenario file, so requiring a built deployment to parse YAML would make a read-only check
+need a deployment. It prints `$BTF_DB/simulated/...` unexpanded, which says where the paths
+would come from instead of inventing somewhere they would not. The suite caught that one —
+the `hopguard` cases drive `--dry-run` with no root and went red.
+
+### The invariant, and the version of it that did not work
+
+`tests/test_pipeline.py -k roots` (13 checks) pins both halves: no host path in any
+non-comment line of `scripts/`, `bin/`, `nextflow.config` or the suite itself, and a
+refusal naming `$BTF_DB` in each of the eight builders.
+
+**The first version passed a mutation it should have caught.** It matched assignments and
+argparse defaults — anchored on `=`, `default=`, `:-` — and
+`default=Path(_env) if _env else Path("/media/8tb/bioThreatFinder")` is a default that no
+such pattern sees. The scan is now any absolute path under a deployment volume or a home
+directory on a non-comment line, which is coarser and actually holds; comments keep the
+history of why the volumes were split. Three mutations now fail it: that conditional
+default, a shell `${BTF_DB:-/media/...}` fallback returning, and a refusal reworded so it
+no longer names the variable.
+
+### Measured
+
+The suite is **391 passed with samtools and `$BTF_DB` set**, and on a bare clone with
+neither, **330 passed, 0 failed, 14 skipped** — the skips being the cases that compare a
+shipped artifact against the repo, which now say `set $BTF_DB` rather than naming a volume
+the reader does not have. Those cases used to hardcode `/media/8tb` too, so on anyone
+else's clone they skipped with the reason "no built pack" when the real reason was "the
+path in the test is not yours".
+
+CI gained a step that runs all eight builders with no environment and requires each to
+refuse: the GitHub runner is exactly the clone these scripts used to assume away, and it is
+the only place where that state is the default rather than something to arrange.

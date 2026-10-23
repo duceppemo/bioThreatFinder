@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import sys
 from pathlib import Path
 
@@ -109,9 +110,13 @@ def main(argv=None) -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--pack", default="human")
     ap.add_argument("--packs-dir", type=Path, default=REPO / "packs")
-    ap.add_argument("--refs-manifest", type=Path,
-                    default=Path("/media/8tb/bioThreatFinder/packs/human/refs/manifest.tsv"),
-                    help="built refs manifest, for real genome sizes")
+    # Derived from $BTF_DB and from --pack, rather than one machine's volume with the
+    # pack name baked in: the old default named packs/human whatever --pack said.
+    _env = os.environ.get("BTF_DB")
+    ap.add_argument("--refs-manifest", type=Path, default=None,
+                    help="built refs manifest, for real genome sizes (default: "
+                         f"$BTF_DB/packs/<pack>/refs/manifest.tsv, here "
+                         f"{_env + '/packs/<pack>/refs/manifest.tsv' if _env else 'unset'})")
     ap.add_argument("--read-length", type=int, default=150,
                     help="the read length the LoD claim is made at [150]")
     ap.add_argument("--tolerance", type=float, default=1.5,
@@ -125,10 +130,20 @@ def main(argv=None) -> int:
     if not wl.is_file():
         sys.stderr.write(f"ERROR: no watchlist at {wl}\n")
         return 2
-    sizes = read_genome_sizes(args.refs_manifest)
+    refs_manifest = args.refs_manifest
+    if refs_manifest is None:
+        btf_db = os.environ.get("BTF_DB")
+        if not btf_db:
+            sys.stderr.write(
+                "ERROR: no --refs-manifest and $BTF_DB is not in the environment.\n"
+                "       export BTF_DB=/path/to/project/bioThreatFinder, or pass\n"
+                "       --refs-manifest PATH.\n")
+            return 2
+        refs_manifest = (Path(btf_db) / "packs" / args.pack / "refs" / "manifest.tsv")
+    sizes = read_genome_sizes(refs_manifest)
     if not sizes:
         sys.stderr.write(
-            f"ERROR: no genome sizes from {args.refs_manifest}.\n"
+            f"ERROR: no genome sizes from {refs_manifest}.\n"
             f"       Without real genome sizes nothing here can be computed, and\n"
             f"       guessing them would produce a confident wrong answer.\n"
             f"       Build the pack refs first, or pass --refs-manifest.\n")

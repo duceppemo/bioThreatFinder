@@ -40,6 +40,42 @@ BIN = REPO / "bin"
 SCRIPTS = REPO / "scripts"
 PACK = REPO / "packs" / "human"
 
+# WHERE THE BUILT DATABASES ARE, IF THEY ARE ANYWHERE.
+#
+# The cases that compare a shipped artifact against the repo used to name
+# /media/8tb/bioThreatFinder directly - this machine's volume, so on anyone else's clone
+# they skipped for the reason "no built pack" when the real reason was "the path in the
+# test is not yours". $BTF_DB is the same variable nextflow.config reads and refuses to
+# start without. None means no built databases are reachable, and those cases skip, which
+# is what keeps the suite runnable on a bare clone and in CI.
+_ENV_BTF_DB = os.environ.get("BTF_DB")
+BTF_DB = Path(_ENV_BTF_DB) if _ENV_BTF_DB else None
+
+
+def btf_path(*parts: str, env: str | None = None) -> Path | None:
+    """A path under the built database root, or None when it cannot be located.
+
+    `env` keeps the per-case override that predates $BTF_DB (BTF_REFS_DIR and friends),
+    which is still the way to point one case at a copy somewhere else.
+    """
+    if env:
+        override = os.environ.get(env)
+        if override:
+            return Path(override)
+    return BTF_DB.joinpath(*parts) if BTF_DB else None
+
+
+def taxdump_path() -> Path | None:
+    """The pinned taxonomy snapshot, or None when none is reachable.
+
+    $BTF_TAXDUMP stays the per-case override; the fallback is derived from $BTF_DB rather
+    than from the volume this suite was written on.
+    """
+    override = os.environ.get("BTF_TAXDUMP")
+    if override:
+        return Path(override)
+    return btf_path("taxdump", "2026-09-29")
+
 COV_COLS = [
     # "platform" is here because score_evidence.py selects the read-identity floor by
     # platform as well as group. It was missing, and cov_row() silently dropped unknown
@@ -560,10 +596,11 @@ def test_screen(tmp: Path) -> None:
     desc = tmp / "desc.tsv"
     p = run([sys.executable, BIN / "resolve_watchlist.py",
              "--watchlist", PACK / "watchlist.tsv",
-             "--taxdump", os.environ.get("BTF_TAXDUMP", "/media/8tb/bioThreatFinder/taxdump/2026-09-29"),
+             "--taxdump", taxdump_path() or "/nonexistent",
              "--out", tmp / "wl.tsv", "--descendants-out", desc])
     if p.returncode != 0 or not desc.exists():
-        skip("screen:multi-classifier", "no usable taxdump (set BTF_TAXDUMP)")
+        skip("screen:multi-classifier",
+             "no usable taxdump (set $BTF_DB or BTF_TAXDUMP)")
         skip("screen:unclassified fraction", "no usable taxdump")
         return
     wl = tmp / "wl.tsv"
@@ -907,12 +944,11 @@ def test_pack_integrity(tmp: Path) -> None:
         # factor, the counts are pinned here: a pack edit then shows up as coherence
         # improving or regressing instead of silently staying broken.
         import subprocess
-        refs_manifest = Path(os.environ.get(
-            "BTF_REFS_MANIFEST",
-            "/media/8tb/bioThreatFinder/packs/human/refs/manifest.tsv"))
-        if not refs_manifest.is_file():
+        refs_manifest = btf_path("packs", "human", "refs", "manifest.tsv",
+                                 env="BTF_REFS_MANIFEST")
+        if refs_manifest is None or not refs_manifest.is_file():
             skip("pack:read/breadth gate coherence is tracked",
-                 "no built refs manifest (set BTF_REFS_MANIFEST)")
+                 "no built refs manifest (set $BTF_DB or BTF_REFS_MANIFEST)")
         else:
             cp = subprocess.run(
                 [sys.executable, str(SCRIPTS / "check_threshold_coherence.py"),
@@ -1192,13 +1228,15 @@ def test_shared_assembly_masking(tmp: Path) -> None:
     is an artifact of the pack rather than of how the script was called.
 
     Skips rather than fails when the built artifacts are absent, since the suite is
-    meant to run offline on a checkout without /media/8tb.
+    meant to run offline on a checkout with no built databases.
     """
     import csv as _csv
-    refs_manifest = pathlib.Path(
-        "/media/8tb/bioThreatFinder/packs/human/refs/manifest.tsv")
-    mask_manifest = pathlib.Path(
-        "/media/8tb/bioThreatFinder/packs/human/refs/masked/mask_manifest.tsv")
+    refs_manifest = btf_path("packs", "human", "refs", "manifest.tsv")
+    mask_manifest = btf_path("packs", "human", "refs", "masked", "mask_manifest.tsv")
+    if refs_manifest is None or mask_manifest is None:
+        skip("shared_assembly:both shared-assembly pairs carry real masking results",
+             "$BTF_DB is not set, so no built pack can be located")
+        return
     if not mask_manifest.exists():
         skip("shared_assembly:pairs agree", f"no built artifacts at {mask_manifest}")
         return
@@ -2602,11 +2640,11 @@ def test_lead_join_seam(tmp: Path) -> None:
     real = tmp / "desc_real.tsv"
     proc = run([sys.executable, BIN / "resolve_watchlist.py",
                 "--watchlist", PACK / "watchlist.tsv",
-                "--taxdump", os.environ.get(
-                    "BTF_TAXDUMP", "/media/8tb/bioThreatFinder/taxdump/2026-09-29"),
+                "--taxdump", taxdump_path() or "/nonexistent",
                 "--out", tmp / "wl_rt.tsv", "--descendants-out", real])
     if proc.returncode != 0 or not real.exists():
-        skip("leadjoin:the real writer round-trips", "no usable taxdump (set BTF_TAXDUMP)")
+        skip("leadjoin:the real writer round-trips",
+             "no usable taxdump (set $BTF_DB or BTF_TAXDUMP)")
         skip("leadjoin:descendant names are real scientific names", "no usable taxdump")
         return
     rt = eb.load_covers(real)
@@ -3205,12 +3243,11 @@ def test_marker_gene_identity(tmp: Path) -> None:
            "caf1 must win over caf1A, or the operon decides which genes a marker holds")
 
     # ---- the invariant, against the marker database that actually shipped ----
-    db = Path(os.environ.get("BTF_MARKER_DB",
-                             "/media/8tb/bioThreatFinder/packs/human/markers"))
-    man = db / "markers.manifest.tsv"
-    if not man.is_file():
+    db = btf_path("packs", "human", "markers", env="BTF_MARKER_DB")
+    man = db / "markers.manifest.tsv" if db else None
+    if man is None or not man.is_file():
         skip("markergene:built references name the declared gene",
-             f"no marker database at {db} (set BTF_MARKER_DB)")
+             f"no marker database at {db} (set $BTF_DB or BTF_MARKER_DB)")
         return
 
     cat: dict = {}
@@ -3552,12 +3589,11 @@ def test_refs_manifest_integrity(tmp: Path) -> None:
     adding a reference left the manifest saying two and the aligner using one - a
     disagreement invisible from either side alone. Existence is not freshness.
     """
-    refs = Path(os.environ.get("BTF_REFS_DIR",
-                               "/media/8tb/bioThreatFinder/packs/human/refs"))
-    man = refs / "manifest.tsv"
-    if not man.is_file():
+    refs = btf_path("packs", "human", "refs", env="BTF_REFS_DIR")
+    man = refs / "manifest.tsv" if refs else None
+    if man is None or not man.is_file():
         skip("refs:every (taxid, accession) pair appears once",
-             f"no reference pack at {refs} (set BTF_REFS_DIR)")
+             f"no reference pack at {refs} (set $BTF_DB or BTF_REFS_DIR)")
         return
 
     rows = [r for r in csv.DictReader(man.open(), delimiter="\t")]
@@ -4014,10 +4050,9 @@ def test_sketch_freshness(tmp: Path) -> None:
     # This is the comparison that did not exist. It needs no sylph, so it runs here on any
     # machine that has the built pack, which is the whole point: the suite is now the
     # freshness check nobody was performing.
-    refs_manifest = pathlib.Path(
-        "/media/8tb/bioThreatFinder/packs/human/refs/manifest.tsv")
-    sketch = pathlib.Path("/media/8tb/bioThreatFinder/sylph/human_pack_refs.syldb")
-    if not (refs_manifest.exists() and sketch.exists()):
+    refs_manifest = btf_path("packs", "human", "refs", "manifest.tsv")
+    sketch = btf_path("sylph", "human_pack_refs.syldb")
+    if refs_manifest is None or not (refs_manifest.exists() and sketch.exists()):
         skip("sketch:the shipped sketch is current", f"no built artifacts at {sketch}")
         return
     with refs_manifest.open() as fh:
@@ -4311,12 +4346,13 @@ def test_marker_db_freshness(tmp: Path) -> None:
 
     # AND THE LAUNCH GUARD'S OWN ADVICE HAS TO WORK WHEN PASTED.
     #
-    # --db-root defaults to the SHARED db root (/media/36tb/db) while a pack's marker
-    # database is built on the project volume, so `--pack human --check` on its own reports
-    # a healthy pack as having NO DATABASE AT ALL - exit 3, from the command the warning
-    # just told the operator to run. A guard whose own instruction cries stale on a good
-    # database is how both get ignored. The guard therefore passes --markers-dir, which it
-    # can because it knows exactly which directory it judged.
+    # --db-root used to default to the SHARED db root while a pack's marker database is
+    # built on the project volume, so `--pack human --check` on its own reported a healthy
+    # pack as having NO DATABASE AT ALL - exit 3, from the command the warning had just
+    # told the operator to run. A guard whose own instruction cries stale on a good
+    # database is how both get ignored. The default now derives from $BTF_DB and is
+    # correct, but the guard still passes --markers-dir, which it can because it knows
+    # exactly which directory it judged - and which works with no environment at all.
     record("markerdb:the launch guard's --check advice names the directory it judged",
            "--markers-dir ${markersDir} --check" in main_text,
            "the printed --check command must not rely on the default --db-root, which "
@@ -4342,17 +4378,80 @@ def test_marker_db_freshness(tmp: Path) -> None:
     # wherever the built pack is - which makes the suite the freshness check for the two
     # build-integrity comparisons the launch guard deliberately leaves to --check.
     shipped_cat = REPO / "packs" / "human" / "markers.tsv"
-    shipped_db = pathlib.Path("/media/8tb/bioThreatFinder/packs/human/markers")
-    if not (shipped_cat.exists() and (shipped_db / "markers.manifest.tsv").exists()):
+    shipped_db = btf_path("packs", "human", "markers")
+    if shipped_db is None or not (
+            shipped_cat.exists() and (shipped_db / "markers.manifest.tsv").exists()):
         skip("markerdb:the shipped marker database is current",
              f"no built marker database at {shipped_db}")
         return
+    # --db-root is the PARENT of $BTF_DB: the script appends bioThreatFinder/ itself.
     proc = run([sys.executable, "-I", builder, "--pack", "human",
-                "--packs-dir", REPO / "packs", "--db-root", "/media/8tb", "--check"])
+                "--packs-dir", REPO / "packs", "--db-root", BTF_DB.parent, "--check"])
     record("markerdb:the shipped marker database is current",
            proc.returncode == 0,
            f"exit {proc.returncode} (3 = stale, 1 = undetermined): "
            f"{(proc.stdout + proc.stderr).strip()[:400]}")
+
+
+def test_no_host_paths(tmp: Path) -> None:
+    """D51. No script may name a path on the machine it was written on.
+
+    nextflow.config was fixed first: both database roots default to null and main.nf
+    refuses to start naming them. The build scripts were not, so a clone's build still
+    pointed at this developer's own two volumes. The failure was loud for a build (a path
+    that does not exist) and quiet for a check: a `--check` reading a root that is not
+    yours reports a healthy pack as having no database at all.
+
+    Scanned: every non-comment line of scripts/, bin/, nextflow.config and this file, for
+    an absolute path under a deployment volume or a home directory. The first version of
+    this check looked only at assignments and argparse defaults, and a mutation test
+    walked straight through it - a default reached through a conditional expression is a
+    default that no `=`-anchored pattern sees. Comments are exempt, because the history of
+    why those volumes were split is worth keeping; /usr/bin/wget and /opt/conda/bin do not
+    match and are legitimate last-resort tool paths.
+    """
+    volumes = re.compile(r"""(/(?:media|mnt|home|Users|data)/[^"'\s),;]*)""")
+    scanned, offenders = 0, []
+    for d, globs in ((SCRIPTS, ("*.py", "*.sh")), (BIN, ("*.py", "*.sh")),
+                     (REPO, ("nextflow.config",)), (REPO / "tests", ("*.py",))):
+        for pattern in globs:
+            for f in sorted(d.glob(pattern)):
+                scanned += 1
+                for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+                    stripped = line.lstrip()
+                    if stripped.startswith(("#", "//", "*")):
+                        continue
+                    hit = volumes.search(line)
+                    if hit:
+                        offenders.append(f"{f.relative_to(REPO)}:{n}: {hit.group(1)}")
+
+    record("roots:no script defaults to a path on one particular machine",
+           not offenders, f"{len(offenders)} default(s): " + "; ".join(offenders[:6]))
+    record("roots:the scan actually looked at the scripts", scanned >= 20,
+           f"only {scanned} file(s) scanned - the glob is wrong, so a pass means nothing")
+
+    # THE POSITIVE HALF. A missing default must become a refusal that names the variable,
+    # not a crash on None or an empty path silently joined into something plausible:
+    # "/bioThreatFinder/packs/human/refs" is a real-looking path that exists nowhere.
+    for name in ("build_marker_db.py", "build_pack_refs.py", "mask_pack_refs.py",
+                 "build_kraken2_db.sh", "build_sylph_db.sh", "build_metabuli_db.sh",
+                 "build_krakenuniq_db.sh", "fetch_host_genome.sh"):
+        body = (SCRIPTS / name).read_text(encoding="utf-8")
+        record(f"roots:{name} refuses with no root rather than guessing",
+               "$BTF_DB is not in the environment" in body
+               or "\\$BTF_DB is not in the environment" in body,
+               "the refusal must name $BTF_DB, which is the variable the pipeline reads")
+
+    # And the three read-only checks keep working with no environment at all, because
+    # each takes the artifact's path directly. A check that needs a configured deployment
+    # is a check nobody runs on a fresh clone.
+    for name, flag in (("build_marker_db.py", "--markers-dir"),
+                       ("check_index_coverage.py", "--kraken2-db"),
+                       ("build_sylph_db.sh", "--refs-dir")):
+        body = (SCRIPTS / name).read_text(encoding="utf-8")
+        record(f"roots:{name} can be pointed at an artifact without a root",
+               flag in body,
+               f"{flag} is how this check runs with no $BTF_DB and no deployment")
 
 
 def test_env_specs(tmp: Path) -> None:
@@ -4441,9 +4540,9 @@ def test_index_coverage(tmp: Path) -> None:
     record("idxcover:a present node is not claimed to be present sequence",
            "necessary but not sufficient" in text)
 
-    taxo = pathlib.Path("/media/8tb/bioThreatFinder/kraken2/pluspf/taxo.k2d")
+    taxo = btf_path("kraken2", "pluspf", "taxo.k2d")
     watchlist = REPO / "packs" / "human" / "watchlist.resolved.tsv"
-    if not (taxo.exists() and watchlist.exists()):
+    if taxo is None or not (taxo.exists() and watchlist.exists()):
         skip("idxcover:the shipped index's watchlist coverage", f"no index at {taxo}")
         return
 
@@ -4518,6 +4617,7 @@ CASES = {
     "markerdb": test_marker_db_freshness,
     "idxcover": test_index_coverage,
     "envs": test_env_specs,
+    "roots": test_no_host_paths,
 }
 
 
