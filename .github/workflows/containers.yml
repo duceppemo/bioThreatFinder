@@ -175,3 +175,50 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/biothreatfinder-${{ matrix.spec }}:${{ steps.ver.outputs.version }}
           cache-from: type=gha,scope=${{ matrix.spec }}
+
+  anonymous-pull:
+    name: the images are pullable WITHOUT credentials
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      # GHCR PUBLISHES EVERY NEW PACKAGE AS PRIVATE, and there is no REST endpoint to
+      # change that - it is a web-UI setting per package. So a tagged release can end with
+      # fourteen images built, smoke-tested and pushed, and `-profile docker` still failing
+      # for everyone else with `unauthorized`. That is the empty-profile failure again,
+      # one layer further out: the config names an image, the image exists, and nobody
+      # but the owner can fetch it.
+      #
+      # This pulls each image with NO credentials, which is what a user has. It is the
+      # only way to check visibility from CI, and it fails loudly with the fix.
+      - uses: actions/checkout@v4
+      - name: Read the pipeline version
+        id: ver
+        run: echo "version=$(grep -oP "version\s*=\s*'\K[^']+" nextflow.config | head -1)" >> "$GITHUB_OUTPUT"
+      - name: Pull every image as an anonymous user
+        run: |
+          docker logout ghcr.io || true
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          fail=0
+          for spec in $(ls envs/process/*.yml | xargs -n1 basename | sed 's/\.yml$//'); do
+            img="ghcr.io/$owner/biothreatfinder-$spec:${{ steps.ver.outputs.version }}"
+            if docker manifest inspect "$img" >/dev/null 2>&1; then
+              echo "ok: $img is public"
+            else
+              echo "FAIL: $img cannot be pulled without credentials"
+              fail=1
+            fi
+          done
+          if [ "$fail" != 0 ]; then
+            cat <<'MSG'
+
+          One or more images are PRIVATE, which is GHCR's default for a new package.
+          Every container profile will fail for anyone who is not the owner.
+
+          There is no API for this. For each package at
+            https://github.com/users/OWNER/packages?repo_name=bioThreatFinder
+          open it, then Package settings -> Danger Zone -> Change visibility -> Public.
+          Do it once per package; later versions of the same package stay public.
+          MSG
+            exit 1
+          fi

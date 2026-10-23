@@ -211,6 +211,16 @@ resolve it to `latest`. CI builds all fourteen on a version tag and smoke-tests 
 pinned tool against the version it reports; on a pull request it builds and tests without
 pushing, so the recipe is verified before it can be published.
 
+**One manual step per package, once.** GHCR publishes every new package as **private** and
+offers no API to change it — so a tagged release can end with fourteen images built,
+tested and pushed while `-profile docker` still fails for everyone else with
+`unauthorized`. That is the empty-profile failure one layer further out: the config names
+an image, the image exists, and only the owner can fetch it. CI's `anonymous-pull` job
+pulls each image **with no credentials** after pushing and fails with the fix if any is
+private: open the package under
+`https://github.com/users/<owner>/packages?repo_name=bioThreatFinder`, then *Package
+settings → Change visibility → Public*. Later versions of the same package stay public.
+
 **`PAVIAN_REPORT` has no image, deliberately.** Pavian and two of its dependencies install
 from GitHub, so no conda spec can declare them; it is off by default and runs in the host
 environment. `--pavian_html` under a container engine is refused at launch rather than
