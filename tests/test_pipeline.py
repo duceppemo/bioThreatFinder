@@ -4393,6 +4393,114 @@ def test_marker_db_freshness(tmp: Path) -> None:
            f"{(proc.stdout + proc.stderr).strip()[:400]}")
 
 
+def test_install_route(tmp: Path) -> None:
+    """D53. A clone has to be able to get the databases, and to know what it got.
+
+    The deployment decision: publish only what cannot be re-created, build the rest. That
+    makes the published set small - a pinned taxonomy snapshot and the curated marker
+    database, 166 MB of archive - and it makes the INSTALLER the thing that has to be
+    right, because it is the only part of this project that every user runs before
+    anything else works.
+    """
+    installer = SCRIPTS / "install_databases.sh"
+    packager = SCRIPTS / "package_databases.sh"
+    manifest = REPO / "assets" / "databases.manifest.tsv"
+    disclaimer = REPO / "DISCLAIMER.md"
+
+    for f in (installer, packager, manifest, disclaimer):
+        record(f"install:{f.name} exists", f.exists(), f"missing {f}")
+    if not all(f.exists() for f in (installer, packager, manifest, disclaimer)):
+        return
+
+    inst = installer.read_text(encoding="utf-8")
+    pack_src = packager.read_text(encoding="utf-8")
+
+    # ---- the manifest is a table, not a paragraph ----
+    body = [ln for ln in manifest.read_text(encoding="utf-8").splitlines()
+            if ln.strip() and not ln.startswith("#")]
+    header = body[0].split("\t")
+    rows = [dict(zip(header, ln.split("\t"))) for ln in body[1:]]
+    want_cols = {"artifact", "route", "filename", "bytes", "sha256", "unpack_to", "url"}
+    record("install:the manifest carries every column the installer reads",
+           want_cols <= set(header), f"missing {sorted(want_cols - set(header))}")
+    record("install:every manifest row is complete",
+           all(all(r.get(c) for c in want_cols) for r in rows),
+           "a blank cell is read as an empty path or an unverified archive")
+    known_routes = {"minimal", "standard", "full"}
+    record("install:every manifest row names a route the installer knows",
+           all(r.get("route") in known_routes for r in rows),
+           f"routes in the manifest: {sorted({r.get('route') for r in rows})}")
+
+    # Only the un-re-creatable artifacts belong here. The 43 GB reference pack is pinned
+    # by packs/*/refs.lock.tsv instead (D52), because a lock is auditable and an archive
+    # is not - and publishing the Kraken2 index would be 261 GB of unauditable bytes.
+    record("install:only the artifacts that cannot be re-created are published",
+           {r["artifact"] for r in rows} == {"taxdump", "markers"},
+           f"published set is {sorted(r['artifact'] for r in rows)}; refs are locked, "
+           f"not archived, and the big indexes are built")
+
+    # ---- the two refusals, run rather than read ----
+    env = {k: v for k, v in os.environ.items() if k != "BTF_DB"}
+    proc = subprocess.run(["bash", str(installer)], capture_output=True, text=True,
+                          env=env)
+    record("install:refuses with no $BTF_DB and names it",
+           proc.returncode != 0 and "BTF_DB" in (proc.stderr + proc.stdout),
+           f"exit {proc.returncode}: {(proc.stderr or proc.stdout)[:160]}")
+
+    # $BTF_DB MUST END IN bioThreatFinder. The build scripts that take --db-root append
+    # that segment themselves, so any other basename puts the builders and the pipeline
+    # in two different trees - and refs under a base the pipeline does not read make
+    # every watchlist taxon report no_reference, which reads as "checked and clear".
+    proc = subprocess.run(["bash", str(installer), "--btf-db", str(tmp / "wrong")],
+                          capture_output=True, text=True, env={**env, "BTF_DB": ""})
+    record("install:refuses a $BTF_DB that does not end in bioThreatFinder",
+           proc.returncode != 0 and "bioThreatFinder" in (proc.stderr + proc.stdout),
+           f"exit {proc.returncode}: {(proc.stderr or proc.stdout)[:160]}")
+
+    # ---- verification is not optional ----
+    # A truncated taxdump does not fail loudly later: resolve_watchlist.py resolves fewer
+    # taxa and reports success. So the checksum is verified BEFORE anything is unpacked,
+    # and a mismatch is fatal. Tested live on 2026-10-23 by appending a byte to the
+    # marker archive: refused, with both checksums named, and nothing written.
+    record("install:the archive checksum is verified before unpacking",
+           "sha256sum" in inst and "checksum mismatch" in inst
+           and inst.index("checksum mismatch") < inst.index("tar xzf"),
+           "unpacking an unverified archive puts a silently degraded database in place")
+    record("install:a PENDING url is refused rather than guessed at",
+           "PENDING" in inst and "--from-dir" in inst,
+           "the manifest ships with no URL until the deposit exists; the installer must "
+           "say so and offer the local route")
+
+    # ---- dependency order, which is not arbitrary ----
+    # The sketch records the genome set it covers (D46), so a sketch built before the
+    # refs silently omits whatever arrives later. Masking needs the host genome for its
+    # host pass (D13). Both orderings were learned from a failure.
+    order = [inst.index(f"build_{s}\n") for s in
+             ("refs", "host", "masking", "sketch")]
+    record("install:refs then host then masking then sketch",
+           order == sorted(order),
+           "a sketch built before the refs omits them and reports nothing wrong")
+
+    # ---- the disclaimer travels with the data ----
+    # The user's condition for publishing. An archive that arrives without it reads as a
+    # curated reference resource, which it is not.
+    dis = disclaimer.read_text(encoding="utf-8")
+    for phrase in ("not a validated", "measured operating point", "not authoritative",
+                   "indistinguishable from a clean"):
+        record(f"install:the disclaimer states '{phrase}'", phrase in dis)
+    record("install:every published archive carries the disclaimer",
+           "DISCLAIMER.md" in pack_src and 'cp "${REPO_DIR}/DISCLAIMER.md"' in pack_src,
+           "the archives outlive the README they were downloaded from")
+    record("install:the README points at the disclaimer",
+           "DISCLAIMER.md" in (REPO / "README.md").read_text(encoding="utf-8"))
+
+    # ---- and a stale database must not be published ----
+    record("install:the packager refuses to publish a stale marker database",
+           "--check" in pack_src and "does not pass its own freshness check" in pack_src,
+           "a reader cannot tell a stale archive from a fresh one, and the manifest is "
+           "authoritative for tested-vs-untested (D47)")
+
+
 def test_refs_lock(tmp: Path) -> None:
     """D52. The pack is reproducible only if the assemblies are pinned, not re-chosen.
 
@@ -4741,6 +4849,7 @@ CASES = {
     "envs": test_env_specs,
     "roots": test_no_host_paths,
     "lock": test_refs_lock,
+    "install": test_install_route,
 }
 
 

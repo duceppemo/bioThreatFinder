@@ -52,7 +52,7 @@ table was run against the shipped databases on 2026-10-22.
 | Masking completeness (D34) | `python3 scripts/mask_pack_refs.py --pack human --dry-run` | 0, or 1 if a reference has no result | does every reference have a masking result |
 | Threshold coherence | `python3 scripts/check_threshold_coherence.py` | report, always 0 | which per-taxon gates can never bind |
 | Conda specs | `bash scripts/check_conda_specs.sh` | 0 or nonzero | does every per-process pin still solve (network, minutes) |
-| The suite | `python3 tests/test_pipeline.py` | 0 or nonzero | 391 checks with samtools on `PATH` and `$BTF_DB` set; 330 pass and 14 skip on a bare clone with neither. No network, ~30 s |
+| The suite | `python3 tests/test_pipeline.py` | 0 or nonzero | 425 checks with samtools on `PATH` and `$BTF_DB` set; 364 pass and 14 skip on a bare clone with neither. No network, ~30 s |
 
 **Why there are this many.** Well over thirty bugs found in this project so far share one
 shape: *produces an empty or degraded result indistinguishable from a clean negative.* A
@@ -149,6 +149,38 @@ node has no `sylph inspect`.
 ships `.so.5`). Do **not** fix it by removing the package — kraken2 declares wget as a
 dependency and conda uninstalls kraken2 and bracken with it. The build script shims
 `/usr/bin/wget` instead.
+
+## Installing from nothing
+
+`scripts/install_databases.sh --route minimal|standard|full` is the whole route. It
+downloads the two artifacts that cannot be re-created, verifies each sha256 **before
+unpacking** — a truncated taxdump does not fail loudly later, it resolves fewer taxa and
+reports success — and then builds everything else in dependency order, resumably.
+
+| Route | Adds | Total |
+|---|---|---|
+| `minimal` | taxonomy + markers (downloaded), reference pack from the lock, host genome, masking, sylph sketch | ~62 GB |
+| `standard` | Kraken2 PlusPF | ~323 GB |
+| `full` | Metabuli | ~433 GB |
+
+**Published: 166 MB.** `btf-taxdump-2026-09-29.tar.gz` (155 MB; the 2.2 GB of `.dmp` text
+compresses 14×) and `btf-markers-human-<date>.tar.gz` (11 MB). Both carry `DISCLAIMER.md`
+and a `BTF_PROVENANCE.txt` inside, because an archive outlives the page it was downloaded
+from. `scripts/package_databases.sh` builds them, refuses to package a marker database that
+fails its own `--check`, and writes the sizes and checksums into
+`assets/databases.manifest.tsv`.
+
+**Not published, on purpose.** The 43 GB reference pack is pinned by
+`packs/<pack>/refs.lock.tsv` instead — every accession plus the md5 of its *decompressed*
+sequence (D52). A clone builds the pack the measurements were made on and can prove it,
+which an archive cannot be audited for. The Kraken2 and Metabuli indexes are built; the
+upstream prebuilt PlusPF is **not** equivalent, since the capped variants use
+`--max-db-size` and any upstream index carries its own taxonomy snapshot rather than the
+pinned one everything else keys to.
+
+The order of the build steps is not arbitrary: the sketch records the genome set it covers,
+so one built before the references silently omits them (D46), and masking needs the host
+genome for its host pass (D13).
 
 ## Database roots: what refuses, and what that buys
 

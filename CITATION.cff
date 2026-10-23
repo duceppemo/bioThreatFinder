@@ -1,8 +1,10 @@
 cff-version: 1.2.0
 message: >-
-  If you use this software, please cite it. Note the validation status in the README:
-  this is research software, not a validated assay, and no threshold in packs/*/pack.yaml
-  is a measured operating point.
+  If you use this software, please cite it, and read DISCLAIMER.md before using any
+  output: this is research software, not a validated diagnostic assay, no threshold in
+  packs/*/pack.yaml is a measured operating point, and nothing it produces should be used
+  to decide that a sample is safe. The published databases are derived data - a dated
+  snapshot of public NCBI records - and are out of date by design.
 title: bioThreatFinder
 abstract: >-
   A Nextflow pipeline for metagenomic screening and in-silico confirmation of

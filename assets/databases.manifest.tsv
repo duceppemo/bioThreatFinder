@@ -1,0 +1,31 @@
+# bioThreatFinder published database artifacts.
+#
+# WHAT IS IN HERE AND WHY SO LITTLE. Only artifacts that CANNOT be re-created are
+# published; everything else is built by scripts/install_databases.sh from sources that
+# pin what they fetch. Publishing a 261 GB Kraken2 index would be a worse answer than a
+# build script, because the script is auditable and the archive is not.
+#
+#   taxdump   NCBI OVERWRITES new_taxdump.tar.gz IN PLACE. The pinned 2026-09-29 snapshot
+#             cannot be fetched from NCBI any more, and every taxid in every result keys
+#             to it: the watchlist is resolved against it, the Kraken2 index is built
+#             against it, and a different snapshot silently moves clade membership (D8
+#             measured a 6.5-month-old copy at +288,764 taxids). This is the one artifact
+#             whose publication is load-bearing rather than convenient.
+#   markers   61 MB of curated work. Reproducible in principle from markers.tsv, but it
+#             needs NCBI Entrez over hours, the retrieval route per marker is a curation
+#             decision, and 16 of 166 markers are known-unbuildable for reasons recorded
+#             in the catalogue. Shipping the built database means a clone gets the marker
+#             tier that the measurements in docs/ were made with, not a near miss.
+#
+# The reference pack (43 GB) is NOT here on purpose: packs/human/refs.lock.tsv pins every
+# accession and the md5 of its decompressed sequence, so a clone builds the same pack and
+# can prove it (D52). The host genome comes from NCBI by accession. See
+# docs/operations.md for sizes and docs/decisions.md D52 for why a lock, not an archive.
+#
+# sha256 is of the ARCHIVE as uploaded. unpack_to is relative to $BTF_DB.
+# url is filled in by scripts/package_databases.sh after the Zenodo deposit exists;
+# until then scripts/install_databases.sh --from-dir DIR installs the same archives from
+# a local directory, which is also how the installer is tested.
+artifact	route	filename	bytes	sha256	unpack_to	url	needed_for
+taxdump	minimal	btf-taxdump-2026-09-29.tar.gz	162048582	e0cfc92ac3f5298887e4a622e8ace15381b1487b1bed00be132d5e97aab503da	taxdump	PENDING	watchlist resolution, every classifier's taxonomy, assertNcbiTaxonomy
+markers	minimal	btf-markers-human-2026-10-21.tar.gz	10822381	767afac16666585531a24f9522e8fadf2186fddc4d2d8667a84656e81aa81f30	packs/human	PENDING	the marker evidence tier (vaccine and veto rules, confirm_requires)

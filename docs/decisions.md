@@ -5174,3 +5174,108 @@ path in the test is not yours".
 CI gained a step that runs all eight builders with no environment and requires each to
 refuse: the GitHub runner is exactly the clone these scripts used to assume away, and it is
 the only place where that state is the default rather than something to arrange.
+
+---
+
+## D53 — The install route: 166 MB published, everything else built and provable, and a disclaimer that travels with the data
+
+**Date:** 2026-10-23
+**Evidence:** measured-here (archives built and installed into a clean root; four installer behaviours exercised)
+**Status:** done. The Zenodo deposit itself is pending an account action.
+
+Three decisions settled the deployment question: **Zenodo**, publication is acceptable
+**with proper disclaimers**, and **build what you need** rather than publishing the
+reference pack. D52 supplied the precondition for the third — without a lock, "build it
+yourself" builds something else. This is the route itself.
+
+### The split, and what it turned out to cost
+
+| | Published | Built |
+|---|---|---|
+| taxonomy snapshot | **155 MB** archive | — |
+| marker database | **11 MB** archive | — |
+| reference pack (43 GB) | — | from `refs.lock.tsv` |
+| host genome (17 GB) | — | from NCBI by accession |
+| Kraken2 (261 GB), Metabuli (110 GB) | — | from the build scripts |
+
+**166 MB total.** The estimate going in was 2.6 GB; the taxdump is 2.2 GB of `.dmp` text
+and gzip compresses it **14×**. That makes the repository question nearly moot — this fits
+anywhere, and the Zenodo per-record limits were never going to bind.
+
+`tar.gz`, not `tar.zst`, deliberately. zstd is better and faster on this content, and the
+install side would then need zstd installed before it could obtain a database. The whole
+point of the route is that it works on a machine with nothing on it; `tar xzf` needs
+nothing.
+
+### Why only these two
+
+The taxonomy snapshot is the one artifact whose publication is **load-bearing**: NCBI
+overwrites `new_taxdump.tar.gz` in place, so the pinned 2026-09-29 snapshot cannot be
+fetched from NCBI any more, and every taxid in every result keys to it. The marker database
+is 61 MB of curation, including sixteen markers whose unbuildability is itself a recorded
+finding — a rebuild gets a near miss, not this database.
+
+Everything else is **built, and provably the same**. That is a stronger guarantee than an
+archive, not a weaker one: the lock pins each accession and the md5 of its decompressed
+sequence, and the build fails by name if either does not hold. A 261 GB archive can only be
+taken on trust.
+
+### What the installer has to get right
+
+`scripts/install_databases.sh --route minimal|standard|full`. Exercised rather than
+reasoned, on 2026-10-23:
+
+- **The checksum is verified before anything is unpacked**, and a mismatch is fatal.
+  Tested by appending one byte to the marker archive: refused, both checksums named,
+  nothing written. This matters because the failure it prevents is quiet — a truncated
+  taxdump does not crash `resolve_watchlist.py`, it resolves fewer taxa and reports
+  success, which is this project's recurring shape.
+- **It is idempotent.** A stamp beside each unpacked artifact records the sha256 and
+  filename; a second run reports "already installed" for both.
+- **The installed archive is usable, checked by its own standard.** The marker database
+  unpacked into a clean, empty root answers `build_marker_db.py --check` with FRESH,
+  166/166 — so the archive is the database D47's check describes, not a lookalike.
+- **It refuses before it guesses.** No `$BTF_DB`, or a `$BTF_DB` whose last segment is not
+  `bioThreatFinder` (the `--db-root` scripts append that themselves, so any other name
+  splits the builders from the pipeline), or a manifest whose url is still `PENDING`. The
+  last names `--from-dir`, which is also how the installer was tested before any deposit
+  existed.
+- **The build order is not arbitrary**: refs, host, masking, sketch. A sketch built before
+  the references silently omits them (D46) and masking needs the host genome for its host
+  pass (D13). Both orderings were learned from a failure, so both are pinned by a test.
+
+`minimal` is **not** small and not crippled: ~62 GB, because stage 2 maps against the
+reference pack and sylph profiles it. What it omits is the 261 GB Kraken2 index — and D48
+found 19 of 90 watchlist taxa have no node in that index at all, so sylph is already the
+only stage-1 arm that can see them. Describing the sylph-only configuration as degraded
+would be the inaccurate claim.
+
+### The disclaimer, which was the condition
+
+`DISCLAIMER.md` states what is not established: no threshold is a measured operating point;
+sensitivity and specificity are not characterised for any intended use; the watchlist is
+not an authoritative legal source; the marker tier addresses gaps for which no published
+method exists, which is why it is unvalidated; 19 of 90 taxa are reachable on one arm only
+and 31 of 90 cannot reach the top tier at all; and a negative is weaker than it looks,
+because the failure this project keeps finding in itself is a result *indistinguishable
+from a clean negative*. It ends where it has to: nothing here should be used to decide that
+a sample is safe.
+
+It is **inside every archive**, not only in the repository, along with a `BTF_PROVENANCE.txt`
+naming the snapshot date and the commit that packaged it. An archive outlives the page it
+was downloaded from, and derived data with no provenance beside it reads as a curated
+reference resource — which these are not. The same text is condensed into the Zenodo record
+description that `package_databases.sh` emits, and `CITATION.cff` now points at the file so
+a citation cannot be made without encountering it.
+
+`package_databases.sh` also **refuses to publish a marker database that fails its own
+freshness check**. A reader cannot tell a stale archive from a fresh one, and
+`markers.manifest.tsv` is authoritative for tested-versus-untested (D47).
+
+### Remaining, and it needs an account rather than a commit
+
+The manifest ships with `url` as `PENDING` for both artifacts. Depositing them on Zenodo,
+pasting the two download URLs into `assets/databases.manifest.tsv`, and adding the DOI to
+`CITATION.cff` and the README is the last step, and the installer refuses to download until
+it is done. Suite **425 passed** with `$BTF_DB` and samtools (20 new `install` checks),
+**364 passed, 0 failed, 14 skipped** on a bare clone.

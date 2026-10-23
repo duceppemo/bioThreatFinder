@@ -28,8 +28,8 @@ across human, animal and plant health.
 | [`docs/operations.md`](docs/operations.md) | Building, rebuilding and verifying the databases: every read-only check in one table, the three tool environments and why they are three, the environment traps, and the open questions. Deployment-specific notes are labelled as such. |
 
 ```bash
-python3 tests/test_pipeline.py     # 391 checks with samtools on PATH and $BTF_DB
-                                   # pointing at built databases; 330 pass and 14 skip
+python3 tests/test_pipeline.py     # 425 checks with samtools on PATH and $BTF_DB
+                                   # pointing at built databases; 364 pass and 14 skip
                                    # on a bare clone with neither. ~30 s, no network
 ```
 
@@ -564,7 +564,40 @@ dangerous:
 - Vaccine and attenuated strains (vaccinia, BCG, Sabin, 17D, RB51, TC-83) are
   routine confounders and need explicit discrimination from wild type.
 
+## Install
+
+One script, three routes. It downloads only what cannot be re-created and builds the rest,
+so nothing large is taken on trust:
+
+```bash
+conda env create -f envs/btf-refs.yml      # and btf-kraken2.yml, btf-sylph.yml
+export BTF_DB=/fast/disk/bioThreatFinder   # must end in bioThreatFinder
+export BTF_DB_ROOT=/shared/read-only
+
+scripts/install_databases.sh --route minimal     # ~62 GB, sylph stage 1
+scripts/install_databases.sh --route standard    # + Kraken2 PlusPF, ~323 GB
+scripts/install_databases.sh --route full        # + Metabuli, ~433 GB
+```
+
+| | Downloaded | Built here |
+|---|---|---|
+| **what** | the pinned taxonomy snapshot and the curated marker database — **166 MB of archive** | the 43 GB reference pack, the host genome, the classifier indexes |
+| **why that split** | NCBI overwrites `new_taxdump.tar.gz` **in place**, so the pinned snapshot is gone upstream and every taxid the pipeline reports keys to it. The marker database is curation, not compute | [`packs/human/refs.lock.tsv`](packs/human/refs.lock.tsv) pins every accession **and** the checksum of its decompressed sequence, so a clone builds the pack the measurements were made on and can prove it (D52). A lock is auditable; a 261 GB archive is not |
+| **verified by** | sha256, before anything is unpacked | the lock's per-reference checksum, then the read-only database checks in [`docs/operations.md`](docs/operations.md) |
+
+**`minimal` is not small and not crippled.** Stage 2 maps against the reference pack and
+sylph profiles it, so neither the pack nor the host genome is optional. What it leaves out
+is the 261 GB Kraken2 index — and D48 found 19 of 90 watchlist taxa have no node in that
+index at all, so sylph is already the only stage-1 arm that can see them.
+
+**Before using any output, read [`DISCLAIMER.md`](DISCLAIMER.md).** No threshold here is a
+measured operating point, and nothing this produces should be used to decide that a sample
+is safe.
+
 ## Quick start
+
+The install script runs these steps for you; this is what it does, and how to run any one
+of them by hand.
 
 ```bash
 # 0. Tool environments. THREE of them, and the split is not tidiness: putting
