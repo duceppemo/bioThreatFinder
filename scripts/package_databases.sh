@@ -203,9 +203,8 @@ cat <<EOF
 
 Next, by hand, because it needs an account:
 
-1. Create ONE Zenodo record per archive, or one record holding both (50 GB and 100 files
-   per record is the limit; these are well inside it). Attach DISCLAIMER.md to the record
-   as well as inside the archives, and paste the "Description" block below.
+1. Create ONE record holding both files. Attach DISCLAIMER.md to the record as well as
+   inside the archives.
 2. Put each file's download URL into the url column of
    ${MANIFEST}
    and commit that - the installer refuses to download while it says PENDING.
@@ -214,27 +213,13 @@ Next, by hand, because it needs an account:
 Then any clone installs with:
    scripts/install_databases.sh --route minimal
 
---------------------------- Zenodo description --------------------------------
-bioThreatFinder published databases: a pinned NCBI taxonomy snapshot and the curated
-marker-gene database for the human domain pack.
+Record metadata - title, keywords, licence, related identifiers and the full
+description - is ready to paste in:
 
-These are the two artifacts of the bioThreatFinder pipeline that cannot be re-created from
-public sources: NCBI overwrites new_taxdump.tar.gz in place, so the pinned snapshot is
-gone upstream, and every taxid the pipeline reports keys to it. Everything else - the
-43 GB reference pack, the host genome, the Kraken2 and Metabuli indexes - is rebuilt by
-the pipeline's own scripts, with each reference pinned by accession and by the checksum of
-its decompressed sequence.
+    assets/zenodo_record.md
 
-DISCLAIMER: bioThreatFinder is research software, not a validated diagnostic assay. No
-threshold in it is a measured operating point; sensitivity and specificity are not
-characterised for any intended use; the watchlist is not an authoritative legal source;
-and the marker tier addresses gaps for which no published method exists, which is also why
-it is unvalidated. These archives are derived data redistributed from public NCBI records
-for reproducibility, not a curated reference resource, and they are out of date by design.
-No output of this software should be used to decide that a sample is safe. See
-DISCLAIMER.md, included.
-
-Software: https://github.com/duceppemo/bioThreatFinder
-Install:  scripts/install_databases.sh --route minimal
--------------------------------------------------------------------------------
+ONE record holding both files, not two: they install together and version together.
+Cite the CONCEPT doi in CITATION.cff and the README; put the VERSION record's file
+URLs in the manifest, because the installer verifies the sha256 it recorded and
+"latest" would eventually stop matching.
 EOF

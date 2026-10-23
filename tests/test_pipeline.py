@@ -4495,6 +4495,51 @@ def test_install_route(tmp: Path) -> None:
            "DISCLAIMER.md" in (REPO / "README.md").read_text(encoding="utf-8"))
 
     # ---- and a stale database must not be published ----
+    # ---- the record's metadata is written down, not improvised at deposit time ----
+    rec = REPO / "assets" / "zenodo_record.md"
+    record("install:the deposit metadata is committed", rec.is_file(),
+           "title, keywords, licence and description decided once, in the repo, rather "
+           "than retyped into a web form from memory")
+    if rec.is_file():
+        rec_text = rec.read_text(encoding="utf-8")
+        for needed in ("Title", "Keywords", "License", "Related identifiers",
+                       "Description", "Disclaimer"):
+            record(f"install:the deposit metadata covers {needed}", needed in rec_text)
+        # The version DOI pins exact files; the concept DOI follows "latest". The
+        # installer verifies a recorded sha256, so a concept-DOI url would eventually
+        # fetch an archive the manifest does not describe and fail a checksum nobody
+        # changed.
+        record("install:the metadata says which DOI goes where",
+               "concept" in rec_text.lower() and "version" in rec_text.lower()
+               and "?download=1" in rec_text,
+               "the manifest needs version-pinned file URLs; the README cites the "
+               "concept DOI")
+        record("install:the packager points at the metadata rather than duplicating it",
+               "assets/zenodo_record.md" in pack_src,
+               "two copies of a description drift, and the one in the script is the one "
+               "nobody edits")
+
+    # ---- the version the record will name must be the version the software reports ----
+    nf_cfg = (REPO / "nextflow.config").read_text(encoding="utf-8")
+    cff = (REPO / "CITATION.cff").read_text(encoding="utf-8")
+    m_version = re.search(r"version\s*=\s*'([^']+)'", nf_cfg)
+    c_version = re.search(r"^version:\s*(\S+)", cff, re.M)
+    record("install:CITATION.cff and nextflow.config agree on the version",
+           bool(m_version) and bool(c_version)
+           and m_version.group(1) == c_version.group(1),
+           f"manifest={m_version.group(1) if m_version else None} "
+           f"citation={c_version.group(1) if c_version else None} - a DOI that names a "
+           f"version the software does not report is worse than no version")
+
+    # conf/base.config uses `resourceLimits`, which arrived in Nextflow 24.04, and the
+    # config was migrated to the strict syntax 24+ enforces. A floor below that lets a
+    # user start and then fail to PARSE, which reads as a broken pipeline.
+    floor = re.search(r"nextflowVersion\s*=\s*'>=(\d+)\.(\d+)", nf_cfg)
+    record("install:the declared Nextflow floor is one that can actually parse this",
+           bool(floor) and (int(floor.group(1)), int(floor.group(2))) >= (24, 4),
+           f"declared {floor.group(0) if floor else 'nothing'}, but resourceLimits needs "
+           f"24.04 and the DSL is strict-syntax")
+
     record("install:the packager refuses to publish a stale marker database",
            "--check" in pack_src and "does not pass its own freshness check" in pack_src,
            "a reader cannot tell a stale archive from a fresh one, and the manifest is "

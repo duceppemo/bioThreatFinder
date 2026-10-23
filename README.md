@@ -28,8 +28,8 @@ across human, animal and plant health.
 | [`docs/operations.md`](docs/operations.md) | Building, rebuilding and verifying the databases: every read-only check in one table, the three tool environments and why they are three, the environment traps, and the open questions. Deployment-specific notes are labelled as such. |
 
 ```bash
-python3 tests/test_pipeline.py     # 425 checks with samtools on PATH and $BTF_DB
-                                   # pointing at built databases; 364 pass and 14 skip
+python3 tests/test_pipeline.py     # 436 checks with samtools on PATH and $BTF_DB
+                                   # pointing at built databases; 375 pass and 14 skip
                                    # on a bare clone with neither. ~30 s, no network
 ```
 

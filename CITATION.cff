@@ -15,6 +15,8 @@ abstract: >-
   than to the watchlist taxon. A marker-gene tier gates the top evidence tier
   where the chromosome is not the actionable signal.
 type: software
+version: 0.4.0
+date-released: '2026-10-23'
 authors:
   - given-names: Marc-Olivier
     family-names: Duceppe
