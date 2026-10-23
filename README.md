@@ -597,6 +597,14 @@ scripts/install_databases.sh --route full        # + Metabuli, ~433 GB
 | **why that split** | NCBI overwrites `new_taxdump.tar.gz` **in place**, so the pinned snapshot is gone upstream and every taxid the pipeline reports keys to it. The marker database is curation, not compute | [`packs/human/refs.lock.tsv`](packs/human/refs.lock.tsv) pins every accession **and** the checksum of its decompressed sequence, so a clone builds the pack the measurements were made on and can prove it (D52). A lock is auditable; a 261 GB archive is not |
 | **verified by** | sha256, before anything is unpacked | the lock's per-reference checksum, then the read-only database checks in [`docs/operations.md`](docs/operations.md) |
 
+**If the download URLs are not published yet**, the installer says so and names the two
+alternatives: install the archives from a local copy with `--from-dir` (the sha256 is
+checked either way, so a copy from anywhere is as trustworthy as a download), or build both
+from scratch. The second has one real cost: the marker database rebuilds over NCBI Entrez
+in hours, but **the taxonomy snapshot cannot be rebuilt at all** — NCBI overwrites
+`new_taxdump.tar.gz` in place. Taking today's snapshot instead works, and means your taxids
+are not the ones every figure in `docs/` was measured against.
+
 **`minimal` is not small and not crippled.** Stage 2 maps against the reference pack and
 sylph profiles it, so neither the pack nor the host genome is optional. What it leaves out
 is the 261 GB Kraken2 index — and D48 found 19 of 90 watchlist taxa have no node in that

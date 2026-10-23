@@ -172,9 +172,31 @@ install_published() {
                 fi
                 die \
 "${artifact}: this manifest has no URL yet - the Zenodo deposit is not published.
-       Until it is, install the archives from a local copy:
-         scripts/install_databases.sh --from-dir DIR ...
-       and see assets/databases.manifest.tsv for what the two archives are."
+
+       Three ways forward, in order of preference:
+
+       1. If you have the archives (from a colleague, or a mirror):
+            scripts/install_databases.sh --from-dir DIR ...
+          The sha256 in assets/databases.manifest.tsv is checked either way, so a
+          copy from anywhere is as trustworthy as a download.
+
+       2. BUILD BOTH FROM SCRATCH, accepting one real difference. The marker
+          database rebuilds from packs/<pack>/markers.tsv over NCBI Entrez - hours,
+          and 16 of 166 markers are known-unbuildable for recorded reasons:
+            python3 scripts/build_marker_db.py --pack ${PACK} --taxdump DIR
+          The taxonomy snapshot CANNOT be rebuilt: NCBI overwrites
+          new_taxdump.tar.gz in place, so the pinned 2026-09-29 snapshot is gone
+          upstream. Take TODAY'S snapshot instead and re-resolve the watchlist
+          against it - see step 1 of the README's quick start.
+          WHAT THAT COSTS: your taxids are not the published ones. Clade
+          membership moves between snapshots (a copy 6.5 months older measured
+          +288,764 taxids), so every identity, breadth and limit-of-detection
+          figure in docs/ describes a slightly different deployment than yours.
+          Everything downstream must then use YOUR snapshot - the Kraken2 index
+          especially, or the index and the watchlist disagree silently.
+
+       3. Ask: the deposit is the project's own next step, and these two archives
+          are 166 MB in total."
             fi
             src="${BTF_DB}/.btf_downloads/${filename}"
             run mkdir -p "${BTF_DB}/.btf_downloads"
