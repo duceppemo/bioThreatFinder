@@ -83,13 +83,13 @@ fraction too ([Outputs](Outputs)).
 ## The regression suite
 
 ```bash
-python3 tests/test_pipeline.py          # 475 checks, offline, no databases, ~30 s
+python3 tests/test_pipeline.py          # 477 checks, offline, no databases, ~30 s
 python3 tests/test_pipeline.py --list   # the groups
 ```
 
 It asserts **designed behaviour, not accuracy** — a failure means the logic changed; it does
 not mean the pipeline got less accurate, because nothing in it measures accuracy. On a bare
-clone 414 pass and 14 skip, naming what to set. CI runs it on two Python versions, compiles
+clone 416 pass and 14 skip, naming what to set. CI runs it on two Python versions, compiles
 `main.nf`, and builds and smoke-tests the container images.
 
 New checks are **mutation-tested**: break the thing the check is for, and watch it fail.

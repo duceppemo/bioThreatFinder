@@ -1,3 +1,8 @@
+<a href="Home"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/duceppemo/bioThreatFinder/main/assets/logo/bioThreatFinder-mark-dark.svg">
+  <img alt="bioThreatFinder" src="https://raw.githubusercontent.com/duceppemo/bioThreatFinder/main/assets/logo/bioThreatFinder-mark.svg" width="28" align="left">
+</picture></a>
+
 **[bioThreatFinder](Home)**
 
 - [Installation](Installation)

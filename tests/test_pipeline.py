@@ -4453,6 +4453,29 @@ def test_wiki(tmp: Path) -> None:
            "a relative link resolves against the wiki, not the repo: "
            + "; ".join(rel[:4]))
 
+    # IMAGES BREAK THE SAME WAY LINKS DO, and the markdown-link check above cannot see
+    # them because they are HTML: a wiki page is served from github.com/.../wiki, so a
+    # relative src resolves against the wiki and renders as a broken image. Every image
+    # must be an absolute raw.githubusercontent.com URL - which also has to be a real
+    # path, since a typo there is a broken image nobody notices in review.
+    img = re.compile(r'(?:src|srcset)="([^"]+)"')
+    bad_src, missing_asset = [], []
+    for f in sorted(wiki.glob("*.md")):
+        for src in img.findall(f.read_text(encoding="utf-8")):
+            if not src.startswith("https://"):
+                bad_src.append(f"{f.name} -> {src}")
+                continue
+            marker = "/main/"
+            if "raw.githubusercontent.com" in src and marker in src:
+                rel = src.split(marker, 1)[1]
+                if not (REPO / rel).is_file():
+                    missing_asset.append(f"{f.name} -> {rel}")
+    record("wiki:every image is an absolute URL", not bad_src,
+           "a relative src resolves against the wiki, not the repo: "
+           + "; ".join(bad_src[:4]))
+    record("wiki:every image URL points at a file that exists in the repo",
+           not missing_asset, "; ".join(missing_asset[:4]))
+
     # And the sync has to be wired, or the pages are a directory nobody sees.
     wf = REPO / ".github" / "workflows" / "wiki.yml"
     record("wiki:a workflow syncs docs/wiki to the GitHub wiki", wf.is_file())
