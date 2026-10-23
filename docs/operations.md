@@ -163,7 +163,10 @@ reports success — and then builds everything else in dependency order, resumab
 | `standard` | Kraken2 PlusPF | ~323 GB |
 | `full` | Metabuli | ~433 GB |
 
-**Published: 166 MB.** `btf-taxdump-2026-09-29.tar.gz` (155 MB; the 2.2 GB of `.dmp` text
+**Published: 166 MB**, at [doi:10.5281/zenodo.23602998](https://doi.org/10.5281/zenodo.23602998)
+(concept DOI — always the latest version; the manifest's urls point at the version record
+`23602999`, because the installer verifies a recorded sha256 and "latest" would one day
+stop matching it). `btf-taxdump-2026-09-29.tar.gz` (155 MB; the 2.2 GB of `.dmp` text
 compresses 14×) and `btf-markers-human-<date>.tar.gz` (11 MB). Both carry `DISCLAIMER.md`
 and a `BTF_PROVENANCE.txt` inside, because an archive outlives the page it was downloaded
 from. `scripts/package_databases.sh` builds them, refuses to package a marker database that

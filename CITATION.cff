@@ -24,6 +24,25 @@ authors:
     affiliation: Canadian Food Inspection Agency
 license: MIT
 repository-code: https://github.com/duceppemo/bioThreatFinder
+references:
+  - type: data
+    title: >-
+      bioThreatFinder databases: a pinned NCBI taxonomy snapshot (2026-09-29) and a
+      curated marker-gene database for high-consequence pathogen screening
+    doi: 10.5281/zenodo.23602998
+    version: '2026-10-23'
+    year: 2026
+    license: CC-BY-4.0
+    notes: >-
+      The two artifacts that cannot be re-created from public sources. Cited separately
+      from the software because they are derived data with their own provenance: a dated
+      snapshot of public NCBI records, out of date by design. This is the CONCEPT DOI,
+      which always resolves to the latest version.
+    authors:
+      - given-names: Marc-Olivier
+        family-names: Duceppe
+        email: marc-olivier.duceppe@inspection.gc.ca
+        affiliation: Canadian Food Inspection Agency
 keywords:
   - metagenomics
   - biosurveillance

@@ -23,9 +23,16 @@
 # docs/operations.md for sizes and docs/decisions.md D52 for why a lock, not an archive.
 #
 # sha256 is of the ARCHIVE as uploaded. unpack_to is relative to $BTF_DB.
-# url is filled in by scripts/package_databases.sh after the Zenodo deposit exists;
-# until then scripts/install_databases.sh --from-dir DIR installs the same archives from
-# a local directory, which is also how the installer is tested.
+#
+# Deposited 2026-10-23: https://doi.org/10.5281/zenodo.23602998
+#   concept DOI 10.5281/zenodo.23602998 - always the latest version; cite this one
+#   version DOI 10.5281/zenodo.23602999 - the exact files below
+# The urls point at the VERSION record, deliberately. The installer verifies the sha256
+# recorded here, and a concept-DOI url follows "latest" - so one day it would fetch an
+# archive this manifest does not describe and fail a checksum nobody changed.
+#
+# scripts/install_databases.sh --from-dir DIR installs the same archives from a local
+# directory instead, verifying the same checksums.
 artifact	route	filename	bytes	sha256	unpack_to	url	needed_for
-taxdump	minimal	btf-taxdump-2026-09-29.tar.gz	162048582	e0cfc92ac3f5298887e4a622e8ace15381b1487b1bed00be132d5e97aab503da	taxdump	PENDING	watchlist resolution, every classifier's taxonomy, assertNcbiTaxonomy
-markers	minimal	btf-markers-human-2026-10-21.tar.gz	10822381	767afac16666585531a24f9522e8fadf2186fddc4d2d8667a84656e81aa81f30	packs/human	PENDING	the marker evidence tier (vaccine and veto rules, confirm_requires)
+taxdump	minimal	btf-taxdump-2026-09-29.tar.gz	162048582	e0cfc92ac3f5298887e4a622e8ace15381b1487b1bed00be132d5e97aab503da	taxdump	https://zenodo.org/records/23602999/files/btf-taxdump-2026-09-29.tar.gz?download=1	watchlist resolution, every classifier's taxonomy, assertNcbiTaxonomy
+markers	minimal	btf-markers-human-2026-10-21.tar.gz	10822381	767afac16666585531a24f9522e8fadf2186fddc4d2d8667a84656e81aa81f30	packs/human	https://zenodo.org/records/23602999/files/btf-markers-human-2026-10-21.tar.gz?download=1	the marker evidence tier (vaccine and veto rules, confirm_requires)
