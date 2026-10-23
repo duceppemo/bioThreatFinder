@@ -5428,3 +5428,72 @@ unchanged, as it must be for a rewrite that touched one file's contents and no c
 cited in this decision log is a hash in the pre-rewrite history, including the ones in D49's
 own entry, and `git show` will not find them. That is the price that was accepted, and it is
 why D49's reasoning was correct at the time and superseded rather than wrong.
+
+---
+
+## D56 — A 63 KB README is a reference manual nobody reads to the end
+
+**Date:** 2026-10-23
+**Evidence:** reasoned (the split), measured-here (the checks that keep it honest)
+**Status:** done
+
+The README was **63 KB across 18 top-level sections** — the workflow diagram, the evidence
+tiers, every classifier arm's rationale, the marker tier's three-valued logic, the masking
+measurements, the output format, the Pavian conversion table, requirements, benchmarking
+and status. All of it true and most of it load-bearing somewhere, but a front page that
+long is one nobody reads past the install block, and prose goes stale invisibly because no
+test touches it.
+
+Split to match the convention used across this author's other repositories: a **lite
+README** (7.6 KB — badges, what it is, quick start, where the documentation is, citation,
+licence) and **wiki pages maintained in the repository** under `docs/wiki`, synced to the
+GitHub wiki by `.github/workflows/wiki.yml`. The wiki is a publishing target, not the
+source, so the pages go through the same review as the code and cannot drift out of a
+release; anything edited on github.com is overwritten by the next sync.
+
+### The split that matters more than the page count
+
+Two audiences were being served by one file:
+
+- **`docs/wiki/`** is for whoever *runs* this: Installation, Usage, Methods, Databases,
+  Outputs, Validation, FAQ, Development.
+- **`docs/*.md`** stays where it is, for whoever *maintains* it: `decisions.md`,
+  `operations.md`, `verification.md`, `benchmarking.md`, `validation.md`, `samplesheet.md`,
+  `roadmap.md`. These are cited by number from code comments and from each other, and
+  moving them would break hundreds of cross-references for no gain.
+
+The wiki links out to those rather than restating them, which is the only arrangement where
+a fact has one home.
+
+### The FAQ earns its place
+
+It is not padding. It answers the questions this project has already created for itself:
+why `check_index_coverage.py` exits 3 by design, why `--skip_metabuli false` was once a
+silent no-op, why a GTDB index is refused rather than warned about, why a clean findings
+table is not a clean sample, and what to read when a finding says `supported` and you
+expected `confirmed_in_silico`. Each entry is a trap someone would otherwise file as a bug.
+
+### Checked, because prose rots quietly
+
+Nine checks (`-k wiki`), two of them mutation-tested:
+
+- every page the sidebar and the README promise **exists** — a sidebar entry pointing at a
+  page nobody wrote renders as a live link to an empty editor, which is the documentation
+  version of a profile that declares no container;
+- no wiki-internal link names a missing page, and every `.../wiki/Name` URL in the README
+  resolves;
+- **links to repository files are absolute**, because a relative link inside a wiki page
+  resolves against the wiki and not the repo — the single mistake that makes a wiki feel
+  broken;
+- the sync mirrors **deletions** (`rsync --delete`), or a removed page stays live forever;
+- and the README stays under 16 KB, which is crude but is the only thing that notices the
+  manual creeping back.
+
+Suite **475 passed** with `$BTF_DB` and samtools; **414 passed, 0 failed, 14 skipped** on a
+bare clone.
+
+### One manual step, once
+
+The wiki repository does not exist until a first page is created in the web UI, so the
+first run of the sync workflow fails at its checkout step until someone clicks *Create the
+first page* and saves anything. Every run after that overwrites it.

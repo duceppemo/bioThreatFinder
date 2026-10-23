@@ -4393,6 +4393,78 @@ def test_marker_db_freshness(tmp: Path) -> None:
            f"{(proc.stdout + proc.stderr).strip()[:400]}")
 
 
+def test_wiki(tmp: Path) -> None:
+    """D56. The wiki is maintained in the repository, so it can be checked like code.
+
+    The README was 63 KB and 18 sections: a reference manual on the front page, which
+    nobody reads to the end and which goes stale invisibly because no test touches prose.
+    It is now a lite README plus wiki pages under docs/wiki, synced to the GitHub wiki by
+    a workflow.
+
+    That split only helps if the pages and their links actually exist. A sidebar entry
+    pointing at a page nobody wrote renders as a live link to an empty page - the
+    documentation version of a profile that declares no container.
+    """
+    wiki = REPO / "docs" / "wiki"
+    record("wiki:the wiki sources are in the repository", wiki.is_dir(),
+           "docs/wiki is the source; the GitHub wiki is a publishing target")
+    if not wiki.is_dir():
+        return
+
+    pages = {p.stem for p in wiki.glob("*.md")}
+    expected = {"Home", "Installation", "Usage", "Methods", "Databases", "Outputs",
+                "Validation", "FAQ", "Development", "_Sidebar"}
+    record("wiki:every page the sidebar and README promise exists",
+           expected <= pages, f"missing {sorted(expected - pages)}")
+
+    # EVERY WIKI-INTERNAL LINK MUST RESOLVE. In a GitHub wiki, [Name](Name) is a page
+    # reference, and one naming a page that does not exist is a live link to an empty
+    # editor - it looks like documentation and is not.
+    link = re.compile(r"\[[^\]]+\]\((?!https?:|#|mailto:)([^)#]+)(?:#[^)]*)?\)")
+    broken = []
+    for f in sorted(wiki.glob("*.md")):
+        for target in link.findall(f.read_text(encoding="utf-8")):
+            if target.split("/")[0] not in pages:
+                broken.append(f"{f.name} -> {target}")
+    record("wiki:no page links to a wiki page that does not exist", not broken,
+           "; ".join(broken[:6]))
+
+    # The README's own wiki links have to resolve too, and they are absolute URLs, so a
+    # typo is invisible until someone clicks it.
+    readme = (REPO / "README.md").read_text(encoding="utf-8")
+    url_link = re.compile(r"bioThreatFinder/wiki/([A-Za-z_][\w-]*)")
+    bad = sorted({n for n in url_link.findall(readme) if n not in pages})
+    record("wiki:every wiki link in the README resolves", not bad, f"{bad}")
+
+    # A LITE README IS THE POINT. 63 KB of reference material on the front page is what
+    # this change was for; a size check is crude but it is the only thing that notices
+    # the manual creeping back.
+    record("wiki:the README stayed lite", len(readme) < 16000,
+           f"{len(readme)} bytes - reference material belongs in docs/wiki, not here")
+
+    # Relative links out of a wiki page do NOT work on github.com/.../wiki, so links to
+    # repository files must be absolute. This is the mistake that makes a wiki feel broken.
+    repo_rel = re.compile(r"\[[^\]]+\]\((?!https?:|#|mailto:)((?:docs|scripts|bin|packs|envs|conf|modules|assets|tests)/[^)]+)\)")
+    rel = []
+    for f in sorted(wiki.glob("*.md")):
+        for target in repo_rel.findall(f.read_text(encoding="utf-8")):
+            rel.append(f"{f.name} -> {target}")
+    record("wiki:links to repository files are absolute URLs", not rel,
+           "a relative link resolves against the wiki, not the repo: "
+           + "; ".join(rel[:4]))
+
+    # And the sync has to be wired, or the pages are a directory nobody sees.
+    wf = REPO / ".github" / "workflows" / "wiki.yml"
+    record("wiki:a workflow syncs docs/wiki to the GitHub wiki", wf.is_file())
+    if wf.is_file():
+        body = wf.read_text(encoding="utf-8")
+        record("wiki:the sync is triggered by changes to the pages",
+               "docs/wiki/**" in body)
+        record("wiki:the sync mirrors deletions too",
+               "--delete" in body,
+               "without --delete a removed page stays live on the wiki forever")
+
+
 def test_containers(tmp: Path) -> None:
     """D54. The container profiles declared no image at all until v0.4.0.
 
@@ -5045,6 +5117,7 @@ CASES = {
     "lock": test_refs_lock,
     "install": test_install_route,
     "container": test_containers,
+    "wiki": test_wiki,
 }
 
 
