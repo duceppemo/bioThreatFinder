@@ -4393,6 +4393,114 @@ def test_marker_db_freshness(tmp: Path) -> None:
            f"{(proc.stdout + proc.stderr).strip()[:400]}")
 
 
+def test_refs_lock(tmp: Path) -> None:
+    """D52. The pack is reproducible only if the assemblies are pinned, not re-chosen.
+
+    `build_pack_refs.py` resolved each taxon to whatever NCBI called latest that day,
+    ranked on NCBI metadata. The RULE is deterministic; the CATALOGUE is not. So two
+    people built two different reference packs from the same watchlist with no error on
+    either side - and then the sylph sketch covers different genomes, stage 2 aligns
+    against different assemblies, and D42's measurement (one reference moving identity
+    0.9641 -> 0.9947) says how much that can matter.
+
+    `packs/<pack>/refs.lock.tsv` is the lockfile, and these checks are about the
+    properties that make it one rather than a comment.
+
+    THESE ARE OFFLINE CHECKS, so some of them read the source for a code path rather
+    than exercising it - the suite has no network and the behaviour needs NCBI. The four
+    behaviours were each verified live against NCBI on 2026-10-23, recorded in D52: the
+    locked accession is fetched rather than the ranked one, the content checksum holds
+    across download routes, a corrupted checksum fails the build, and an accession NCBI
+    no longer serves fails it by name. The greps here are what stops those paths being
+    deleted between those runs.
+    """
+    lock = PACK / "refs.lock.tsv"
+    record("lock:the human pack ships a reference lock", lock.is_file(),
+           f"no {lock} - a clone cannot reproduce the measured pack without it")
+    if not lock.is_file():
+        return
+
+    text = lock.read_text(encoding="utf-8")
+    body = [ln for ln in text.splitlines() if ln and not ln.startswith("#")]
+    header = body[0].split("\t")
+    rows = [dict(zip(header, ln.split("\t"))) for ln in body[1:]]
+
+    for col in ("taxid", "accession", "seq_md5"):
+        record(f"lock:carries a {col} column", col in header, f"header: {header}")
+    if not {"taxid", "accession", "seq_md5"} <= set(header):
+        return
+
+    # A LOCK WHOSE CHECKSUM IS THE GZIP CONTAINER IS NOT A LOCK. The first version
+    # recorded the md5 of the .fna.gz, and the first locked build it was tested on
+    # reported that NCBI had replaced the assembly: identical sequence, different gzip
+    # stream, because one copy came through `datasets` and the other through FTP. It
+    # would have cried wolf at every user who took a different route, which is how a
+    # guard gets switched off (D47). The column name is load-bearing.
+    src = (SCRIPTS / "build_pack_refs.py").read_text(encoding="utf-8")
+    record("lock:the checksum is of the DECOMPRESSED sequence, not the gzip container",
+           "def seq_md5_of(" in src and "gzip.open(path" in src
+           and 'lock_md5 = {rec["accession"]: rec.get("seq_md5"' in src,
+           "verifying the container md5 reports a replaced assembly for byte-identical "
+           "sequence fetched by another route")
+
+    with_acc = [r for r in rows if (r.get("accession") or "").strip()]
+    absent = [r for r in rows if not (r.get("accession") or "").strip()]
+    record("lock:every locked assembly carries a checksum",
+           all(len((r.get("seq_md5") or "").strip()) == 32 for r in with_acc),
+           f"{sum(1 for r in with_acc if len((r.get('seq_md5') or '').strip()) != 32)}"
+           f" row(s) pin an accession but not its bytes")
+
+    # The four near neighbours that do not exist ANYWHERE are carried as accession-less
+    # rows. That is a different fact from "the lock predates this taxon", and the run
+    # must not warn about drift for taxa it has already established cannot drift.
+    record("lock:records the taxa that have no assembly anywhere", len(absent) >= 1,
+           "the pack carries 4 near neighbours that exist nowhere; a lock silent about "
+           "them cannot distinguish them from taxa it simply predates")
+    record("lock:separates locked-absent from not-in-the-lock",
+           "lock_absent" in src and "locked as having NO assembly anywhere" in src)
+
+    # Every target in the resolved watchlist should be locked, or the clone resolves it
+    # to latest - which is the drift the lock exists to stop.
+    resolved = PACK / "watchlist.resolved.tsv"
+    if resolved.is_file():
+        with resolved.open(newline="") as fh:
+            want = {r["taxid"].strip() for r in csv.DictReader(fh, delimiter="\t")
+                    if (r.get("taxid") or "").strip().isdigit()}
+        locked_tids = {(r.get("taxid") or "").strip() for r in rows}
+        missing = sorted(want - locked_tids)
+        record("lock:every watchlist target is in the lock", not missing,
+               f"{len(missing)} target(s) would resolve to NCBI's latest: "
+               f"{', '.join(missing[:8])}")
+
+    # No absolute path: the lock is the one artifact from a built pack that is committed,
+    # and the manifest it is derived from carries this machine's paths in a `path`
+    # column. Dropping that column is the whole difference between the two files.
+    record("lock:carries no filesystem path", "path" not in header and "/" not in
+           "".join(r.get("accession", "") for r in rows),
+           "a committed lock must not carry the builder's filesystem")
+
+    # AND THE LOCK MUST OUTRANK WHAT IS ON DISK. Without that, a built pack satisfies
+    # --max-per-taxon from its existing files and the lock is read and ignored, so
+    # pulling a corrected lock changes nothing and says nothing: D45's "existence is not
+    # freshness" in the lock's dimension. Found because the unsatisfiable-lock test
+    # exited 0 while the superseded genome sat on disk.
+    record("lock:a reference the lock does not name is not counted as already built",
+           'task.get("locked") and held and held not in task["locked"]' in src,
+           "the resume path must consult the lock, or an updated lock is inert")
+    record("lock:an unsatisfiable lock fails the build",
+           "THIS PACK IS NOT THE" in src
+           and "if lock_unsatisfied or lock_md5_mismatch:" in src,
+           "a lock that silently falls back to `latest` is worse than no lock")
+    # --max-per-taxon must not trim a locked taxon: D42's second Listeria assembly is
+    # exactly the row a default of 1 would drop.
+    record("lock:the lock sets how many assemblies a taxon has, not --max-per-taxon",
+           "if locked:\n            want = len(locked)" in src
+           or "want = len(locked)" in src)
+    record("lock:--extra-refs and --from-lock are refused together",
+           "--extra-refs with --from-lock" in src,
+           "an extra alongside a lock is either redundant or a silent departure from it")
+
+
 def test_no_host_paths(tmp: Path) -> None:
     """D51. No script may name a path on the machine it was written on.
 
@@ -4632,6 +4740,7 @@ CASES = {
     "idxcover": test_index_coverage,
     "envs": test_env_specs,
     "roots": test_no_host_paths,
+    "lock": test_refs_lock,
 }
 
 

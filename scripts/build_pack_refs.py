@@ -169,6 +169,32 @@ def md5_of(path: Path, chunk: int = 1 << 20) -> str:
     return h.hexdigest()
 
 
+def seq_md5_of(path: Path, chunk: int = 1 << 20) -> str:
+    """md5 of the DECOMPRESSED bytes - the reference's identity, not its container.
+
+    MEASURED, AFTER GETTING THIS WRONG ONCE. The lock first verified the md5 of the
+    .fna.gz, and the first locked build it was tested on reported that NCBI had replaced
+    the file: `GCA_031118305.1` came back with a different md5. The sequence was
+    identical (`eccc0071a5b3` both times). What differed was the gzip stream, because
+    one copy arrived through `datasets` and the other through FTP, and those re-compress
+    differently.
+
+    So the container md5 is route-dependent. It answers "is this the file I downloaded",
+    which is what the resume check needs, and it CANNOT answer "is this the reference the
+    measurements were made on" - it would have reported a replaced assembly to every
+    user who took a different download route than the lock's author. D47's lesson,
+    arriving in a new place: a guard that cries wolf on a good database gets switched off.
+    """
+    h = hashlib.md5()
+    with gzip.open(path, "rb") as fh:
+        while True:
+            block = fh.read(chunk)
+            if not block:
+                break
+            h.update(block)
+    return h.hexdigest()
+
+
 def which(name: str) -> Optional[str]:
     """PATH first, then the shared conda prefix (not always on PATH under
     Nextflow/cron), then the minimap2 that ships with the ONT dorado server."""
@@ -590,8 +616,112 @@ def load_extra_refs(path: Optional[Path]) -> Dict[int, List[str]]:
     return out
 
 
+LOCK_COLUMNS = ["taxid", "name", "group", "role", "accession", "assembly_level",
+                "genome_size", "n_contigs", "seq_md5"]
+
+
+def load_lock(path: Optional[Path]) -> Tuple[Dict[int, List[dict]], set]:
+    """(taxid -> [locked assembly records], taxids locked as having no assembly).
+
+    WHY A LOCK IS NOT OPTIONAL FOR A PUBLISHED TOOL. This script resolves a taxon to
+    "whatever NCBI calls latest today", ranked on NCBI metadata. The RULE is
+    deterministic; the CATALOGUE is not. Two people therefore build two different
+    reference packs from the same watchlist, with no error on either side - and then the
+    sylph sketch covers different genomes (D46), stage 2 aligns against different
+    assemblies, and every identity and breadth figure in docs/ describes a deployment
+    nobody else has. D42 is the measured version of that risk: changing ONE reference
+    moved read identity 0.9641 -> 0.9947 and breadth 0.877 -> 0.982, which is the
+    difference between a call and a miss.
+
+    The manifest already recorded accession AND md5, but it recorded them AFTER the fact:
+    it verifies what you got, not that you got what the measurements were made on. The
+    lock is that same information used as an input.
+
+    Accepts the lock emitted by --write-lock, or any TSV with `taxid` and `accession`
+    columns - the refs manifest itself qualifies, minus its absolute `path` column.
+    """
+    out: Dict[int, List[dict]] = {}
+    absent: set = set()
+    if not path:
+        return out, absent
+    if not path.is_file():
+        raise SystemExit(f"ERROR: --from-lock: no such file: {path}")
+    with path.open(newline="") as fh:
+        # The lock leads with its own usage comments, and DictReader would take the
+        # first of them as the header - so the file it writes would be a file it could
+        # not read. Caught by round-tripping it rather than by reading the code.
+        body = (ln for ln in fh if not ln.startswith("#"))
+        rdr = csv.DictReader(body, delimiter="\t")
+        if not rdr.fieldnames or "taxid" not in rdr.fieldnames \
+                or "accession" not in rdr.fieldnames:
+            raise SystemExit(
+                f"ERROR: --from-lock: {path} has no taxid/accession columns. "
+                f"Write one with --write-lock.")
+        for row in rdr:
+            tid = (row.get("taxid") or "").strip()
+            acc = (row.get("accession") or "").strip()
+            if not tid.isdigit():
+                continue
+            # A row with no accession is the lock's record of a taxon whose genome does
+            # not exist ANYWHERE - four of them in the human pack, carried with empty
+            # paths on purpose so the weakened discrimination is visible. That is a
+            # different fact from "the lock predates this taxon", and conflating them
+            # made the run warn about drift for four taxa it had already established
+            # have nothing to drift to.
+            if not acc:
+                absent.add(int(tid))
+                continue
+            out.setdefault(int(tid), []).append({
+                k: (row.get(k) or "").strip() for k in LOCK_COLUMNS if k in row})
+    return out, absent - set(out)
+
+
+def write_lock(path: Path, rows: Iterable[dict]) -> int:
+    """The lock, from manifest rows.
+
+    Drops `path`, which is one machine's filesystem, and replaces the manifest's
+    container md5 with the decompressed one - see seq_md5_of(). That means gunzipping
+    every reference once, a few minutes over a 43 GB pack, which is the right price for
+    a checksum that means the same thing on every machine.
+    """
+    keep, unreadable = [], []
+    for r in rows:
+        row = {k: (r.get(k) or "") for k in LOCK_COLUMNS}
+        src = Path(r.get("path") or "")
+        if row["accession"] and src.is_file():
+            try:
+                row["seq_md5"] = seq_md5_of(src)
+            except (OSError, EOFError, gzip.BadGzipFile) as exc:
+                unreadable.append(f"{row['accession']} ({exc})")
+                row["seq_md5"] = ""
+        elif row["accession"]:
+            unreadable.append(f"{row['accession']} (no file at {src or 'unrecorded path'})")
+            row["seq_md5"] = ""
+        keep.append(row)
+    if unreadable:
+        # A lock row with no checksum still pins the ACCESSION, which is most of the
+        # value, so this is a warning rather than a refusal - but it is said, because a
+        # blank column is otherwise indistinguishable from a verified one.
+        LOG.warning("%d lock row(s) have no content checksum; the accession is still "
+                    "pinned but the bytes are not: %s", len(unreadable),
+                    ", ".join(unreadable[:5]) + (" ..." if len(unreadable) > 5 else ""))
+    keep.sort(key=lambda r: (int(r["taxid"] or 0), r["accession"]))
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", newline="") as fh:
+        fh.write("# bioThreatFinder reference lock. Build the pack this was measured on:\n")
+        fh.write("#   scripts/build_pack_refs.py --pack <pack> --from-lock <this file>\n")
+        fh.write("# Regenerate after deliberately changing the pack:\n")
+        fh.write("#   scripts/build_pack_refs.py --pack <pack> --write-lock <this file> --dry-run\n")
+        w = csv.DictWriter(fh, fieldnames=LOCK_COLUMNS, delimiter="\t",
+                           lineterminator="\n", extrasaction="ignore")
+        w.writeheader()
+        w.writerows(keep)
+    tmp.replace(path)
+    return len(keep)
+
+
 def pinned_candidates(datasets_bin: str, accessions: Sequence[str],
-                      timeout: int = 600) -> List[Candidate]:
+                      timeout: int = 600, why: str = "--extra-refs") -> List[Candidate]:
     """Candidate records for accessions named explicitly, in the order given.
 
     A pinned accession is usually NOT among the top `want` the subtree query returns -
@@ -633,8 +763,11 @@ def pinned_candidates(datasets_bin: str, accessions: Sequence[str],
         )
     for acc in accessions:
         if acc not in found:
-            LOG.warning("--extra-refs: %s was not found at NCBI; it will not be added",
-                        acc)
+            # `why` names the flag that asked for this accession. It said --extra-refs
+            # unconditionally, so a lock failure was reported against a flag the
+            # operator had not passed - and the first thing a wrong flag name costs is
+            # the half hour spent looking in the wrong file.
+            LOG.warning("%s: %s was not found at NCBI", why, acc)
     # Pinned order is the cover's order, which is by how many known assemblies each
     # one rescues. Do NOT re-sort by sort_key: that would undo the measurement.
     return [found[a] for a in accessions if a in found]
@@ -945,6 +1078,17 @@ notes:
                         "Viruses need more: intra-species diversity is high enough that "
                         "one RefSeq genome can lose reads from a divergent lineage "
                         "(e.g. Influenza A, Lassa, the hantaviruses).")
+    p.add_argument("--from-lock", type=Path, default=None,
+                   help="build exactly the assemblies this lock names, verifying each "
+                        "md5, instead of resolving each taxon to whatever NCBI calls "
+                        "latest today. This is how a clone reproduces the pack the "
+                        "measurements in docs/ were made on; without it the rule is "
+                        "deterministic but the catalogue is not. Refuses at the end, "
+                        "naming them, if any locked accession cannot be fetched.")
+    p.add_argument("--write-lock", type=Path, default=None,
+                   help="write a lock from the pack's manifest and exit-code as usual. "
+                        "With --dry-run this converts an existing manifest without "
+                        "downloading anything.")
     p.add_argument("--extra-refs", type=Path, default=None,
                    help="TSV naming additional assemblies to carry for a taxon, from a "
                         "MEASURED cover: either the report of "
@@ -1073,7 +1217,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             t = line.strip()
             if t.startswith("btf_db") and "=" in t:
                 val = t.split("=", 1)[1].split("//")[0].strip().strip('"\'')
-                if val and not val.startswith("$") and val != "null":
+                # nextflow.config reads this root from the environment (D49), so the
+                # value here is usually the GROOVY EXPRESSION rather than a path. Taking
+                # it literally made this guard compare a real directory against the text
+                # "System.getenv('BTF_DB')" and refuse EVERY build, on every machine -
+                # which is what it did between D49 and D52, unnoticed, because the suite
+                # never invokes a build and the pack was already on disk.
+                env_ref = re.match(r"System\.getenv\(\s*['\"]([A-Za-z_][A-Za-z0-9_]*)"
+                                   r"['\"]\s*\)", val)
+                if env_ref:
+                    from_env = os.environ.get(env_ref.group(1))
+                    if from_env:
+                        pipeline_base = Path(from_env)
+                    else:
+                        LOG.warning("params.btf_db resolves from $%s, which is not set; "
+                                    "cannot verify the pipeline will read where this "
+                                    "writes", env_ref.group(1))
+                elif val and not val.startswith("$") and val != "null":
                     pipeline_base = Path(val)
                 break
 
@@ -1131,6 +1291,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     targets: List[dict] = []          # ordered target records
 
     extra_refs = load_extra_refs(args.extra_refs)
+    lock, lock_absent = load_lock(args.from_lock)
+    lock_md5 = {rec["accession"]: rec.get("seq_md5", "")
+                for recs in lock.values() for rec in recs}
+    if args.extra_refs and lock:
+        raise SystemExit(
+            "ERROR: --extra-refs with --from-lock. The lock already names every "
+            "assembly to fetch, so an extra would be either redundant or a silent "
+            "departure from the locked pack. Add it to the lock instead.")
 
     for r in rows:
         tid = int(r["taxid"].strip())
@@ -1141,9 +1309,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         pinned = extra_refs.get(tid, [])
         if pinned:
             want = max(want, 1 + len(pinned))
+        # The lock is stronger than either: it says how many assemblies this taxon HAS
+        # in the pack being reproduced, so --max-per-taxon must not trim it. D42's
+        # second Listeria assembly is exactly the row a default of 1 would drop.
+        locked = [rec["accession"] for rec in lock.get(tid, [])]
+        if locked:
+            want = len(locked)
         tasks[tid] = {"taxid": tid, "name": (r.get("name") or "").strip(),
                       "group": group, "role": "target", "want": want,
-                      "pinned": pinned}
+                      "pinned": pinned, "locked": locked}
         neighbours = parse_neighbours(r.get("near_neighbour_taxids", ""))
         targets.append({"taxid": tid, "name": (r.get("name") or "").strip(),
                         "group": group, "neighbours": neighbours})
@@ -1163,10 +1337,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             n_pinned = extra_refs.get(ntid, [])
             if n_pinned:
                 n_want = max(n_want, 1 + len(n_pinned))
+            n_locked = [rec["accession"] for rec in lock.get(ntid, [])]
+            if n_locked:
+                n_want = len(n_locked)
             tasks[ntid] = {"taxid": ntid, "name": name,
                            "group": known_groups.get(key) or t["group"],
                            "role": "near_neighbour",
-                           "want": n_want, "pinned": n_pinned}
+                           "want": n_want, "pinned": n_pinned, "locked": n_locked}
 
     n_targets = len(targets)
     n_neighbours = sum(1 for v in tasks.values() if v["role"] == "near_neighbour")
@@ -1176,6 +1353,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     LOG.info("plan: assembly levels %s%s; %d genome(s) per taxon (%d for viruses)",
              ",".join(levels), "" if args.no_relax else " (relaxable)",
              args.max_per_taxon, args.max_per_taxon_virus)
+    if lock:
+        n_locked = sum(len(v) for v in lock.values())
+        LOG.info("plan: LOCKED to %d assembly/ies across %d taxon(s) from %s - no "
+                 "subtree query, no ranking, md5 verified against the lock",
+                 n_locked, len(lock), args.from_lock)
+        if lock_absent:
+            LOG.info("plan: %d taxon(s) are locked as having NO assembly anywhere, and "
+                     "are not looked for: %s", len(lock_absent),
+                     ", ".join(str(x) for x in sorted(lock_absent)))
+        unlocked = sorted(tid for tid, task in tasks.items()
+                          if not task.get("locked") and tid not in lock_absent)
+        if unlocked:
+            # Not fatal: a watchlist can gain a taxon the lock predates. But it is
+            # resolved to "latest", which is the thing the lock exists to avoid, so it
+            # is named rather than silently mixed in.
+            LOG.warning("plan: %d taxon(s) are NOT in the lock and will resolve to "
+                        "whatever NCBI calls latest: %s", len(unlocked),
+                        ", ".join(str(x) for x in unlocked[:12])
+                        + (" ..." if len(unlocked) > 12 else ""))
     if extra_refs:
         n_pin = sum(len(v) for v in extra_refs.values())
         LOG.info("plan: %d pinned extra reference(s) across %d taxon(s) from %s",
@@ -1227,6 +1423,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                      "" if args.skip_index else " + " + ", ".join(
                          f"{t['taxid']}.{p}.mmi" for p in presets))
         LOG.info("[dry-run] manifest would be written to %s", manifest_path)
+        # --write-lock is a CONVERSION, not a build: it reads the manifest already on
+        # disk and emits the lock. That has to work in --dry-run, because regenerating
+        # the lock for a pack that is already built must not re-download 43 GB to do it.
+        if args.write_lock:
+            existing = load_manifest(manifest_path)
+            if not existing:
+                raise SystemExit(
+                    f"ERROR: --write-lock --dry-run needs a built pack's manifest, and "
+                    f"{manifest_path} has no rows. Build the pack first, or drop "
+                    f"--dry-run to build and lock in one run.")
+            n = write_lock(args.write_lock, existing.values())
+            LOG.info("lock written from the existing manifest: %s (%d assembly row(s))",
+                     args.write_lock, n)
+            return 0
         LOG.info("[dry-run] nothing downloaded")
         return 0
 
@@ -1286,6 +1496,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # taxid -> list of local FASTA paths successfully present
     genomes_by_taxid: Dict[int, List[Path]] = {}
     failed_taxa: List[dict] = []
+    # (taxid, name, accession) the lock named and NCBI would not give us. Collected
+    # rather than raised, so one suppressed assembly does not abandon a 43 GB build.
+    lock_unsatisfied: List[Tuple[int, str, str]] = []
+    lock_md5_mismatch: List[Tuple[str, str, str]] = []
 
     # ---- download loop --------------------------------------------------
     ordered = sorted(tasks.values(), key=lambda t: (t["role"] != "target", t["taxid"]))
@@ -1314,6 +1528,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             for (mtid, macc), row in prior.items():
                 if mtid != str(tid) or not row.get("path"):
                     continue
+                # THE LOCK OUTRANKS WHAT IS ON DISK. Without this, a pack that is
+                # already built satisfies `want` from its existing files and the lock is
+                # read and ignored - so pulling an updated lock, or correcting one,
+                # changed nothing and said nothing. That is D45's shape in a new
+                # dimension: existence is not conformance. Measured while testing the
+                # unsatisfiable case, which exited 0 because the superseded genome was
+                # still on disk and still counted.
+                held = (row.get("accession") or "").strip()
+                if task.get("locked") and held and held not in task["locked"]:
+                    LOG.info("  taxid %s: %s is on disk but the lock does not name it "
+                             "- ignoring it for this build", tid, held)
+                    continue
                 p = Path(row["path"])
                 if not p.is_file() or p.stat().st_size == 0:
                     continue
@@ -1330,33 +1556,59 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     break
 
         if len(got) < want:
-            use_levels = list(levels)
             cands: List[Candidate] = []
-            for attempt in range(2):
-                if datasets_bin:
-                    cands = datasets_candidates(datasets_bin, tid, use_levels, want)
-                if not cands:
-                    cands = ftp_candidates(tid, group, use_levels, cache_dir, curl_bin,
-                                           taxdump, args.dry_run)
-                if cands or args.no_relax or attempt == 1:
-                    break
-                # Relax rather than report a spurious zero: many eukaryotic
-                # parasite references are scaffold- or contig-level only.
-                use_levels = list(ASSEMBLY_LEVELS)
-                LOG.info("  no assembly at level(s) %s; relaxing to any level",
-                         ",".join(levels))
 
-            # A pinned accession is deliberately not among the top-ranked candidates,
-            # and it must survive the --assembly-level filter too: the cover chose it
-            # on measured distance, which does not care whether NCBI calls the
-            # assembly complete or chromosome.
-            pinned_accs = [a for a in task.get("pinned", []) if a not in taken_acc]
-            if pinned_accs and datasets_bin:
-                pins = pinned_candidates(datasets_bin, pinned_accs)
-                if pins:
-                    LOG.info("  pinned by measured cover: %s",
-                             ", ".join(c.accession for c in pins))
-                cands = order_candidates(cands, pins)
+            if task.get("locked"):
+                # THE LOCK REPLACES RESOLUTION, it does not rank alongside it. Querying
+                # the subtree and then preferring the locked accession would still fall
+                # back to "latest" whenever the lock could not be satisfied, which is the
+                # one outcome a lock exists to prevent: a pack that looks built and is
+                # not the built pack. Unsatisfied accessions are collected and the run
+                # fails at the END, after doing everything it can do.
+                accs = [a for a in task["locked"] if a not in taken_acc]
+                if accs and datasets_bin:
+                    cands = pinned_candidates(datasets_bin, accs, why="--from-lock")
+                if accs and not cands:
+                    # No `datasets`, or it could not see them. The FTP route lists the
+                    # whole subtree, so filter it to the locked accessions rather than
+                    # accepting its ranking.
+                    want_acc = set(accs)
+                    cands = [c for c in ftp_candidates(tid, group, [], cache_dir,
+                                                       curl_bin, taxdump, args.dry_run)
+                             if c.accession in want_acc]
+                resolved = {c.accession for c in cands}
+                for miss in sorted(a for a in accs if a not in resolved):
+                    lock_unsatisfied.append((tid, name, miss))
+                if cands:
+                    LOG.info("  locked: %s", ", ".join(c.accession for c in cands))
+
+            else:
+                use_levels = list(levels)
+                for attempt in range(2):
+                    if datasets_bin:
+                        cands = datasets_candidates(datasets_bin, tid, use_levels, want)
+                    if not cands:
+                        cands = ftp_candidates(tid, group, use_levels, cache_dir,
+                                               curl_bin, taxdump, args.dry_run)
+                    if cands or args.no_relax or attempt == 1:
+                        break
+                    # Relax rather than report a spurious zero: many eukaryotic
+                    # parasite references are scaffold- or contig-level only.
+                    use_levels = list(ASSEMBLY_LEVELS)
+                    LOG.info("  no assembly at level(s) %s; relaxing to any level",
+                             ",".join(levels))
+
+                # A pinned accession is deliberately not among the top-ranked
+                # candidates, and it must survive the --assembly-level filter too: the
+                # cover chose it on measured distance, which does not care whether NCBI
+                # calls the assembly complete or chromosome.
+                pinned_accs = [a for a in task.get("pinned", []) if a not in taken_acc]
+                if pinned_accs and datasets_bin:
+                    pins = pinned_candidates(datasets_bin, pinned_accs)
+                    if pins:
+                        LOG.info("  pinned by measured cover: %s",
+                                 ", ".join(c.accession for c in pins))
+                    cands = order_candidates(cands, pins)
 
             already = {Path(p).name for p in got}
             for cand in cands:
@@ -1409,6 +1661,27 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     LOG.warning("  taxid %s: %s contains no sequences; discarding", tid, dest.name)
                     dest.unlink(missing_ok=True)
                     continue
+                # THE LOCK'S CHECKSUM IS CHECKED, not merely recorded. It is the md5 of
+                # the DECOMPRESSED sequence, because the gzip container differs between
+                # download routes for byte-identical sequence - see seq_md5_of(). A
+                # genuine mismatch means NCBI re-released the assembly under the same
+                # accession, which a lock exists to notice. Fatal at the end rather than
+                # here, and the file is kept so the difference can be examined.
+                got_md5 = md5_of(dest)
+                locked_md5 = (lock_md5.get(cand.accession) or "").strip()
+                if locked_md5:
+                    try:
+                        got_seq = seq_md5_of(dest)
+                    except (OSError, EOFError, gzip.BadGzipFile) as exc:
+                        LOG.warning("  taxid %s: cannot read %s to verify the lock (%s)",
+                                    tid, dest.name, exc)
+                        got_seq = ""
+                    if got_seq and got_seq != locked_md5:
+                        lock_md5_mismatch.append((cand.accession, locked_md5, got_seq))
+                        LOG.error("  taxid %s: %s sequence md5 %s does not match the "
+                                  "lock's %s", tid, cand.accession, got_seq[:12],
+                                  locked_md5[:12])
+
                 got.append(dest)
                 already.add(dest.name)
                 manifest_rows.append({
@@ -1416,7 +1689,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     "accession": cand.accession,
                     "assembly_level": cand.level or "unknown",
                     "genome_size": str(size), "n_contigs": str(contigs),
-                    "path": str(dest), "md5": md5_of(dest),
+                    "path": str(dest), "md5": got_md5,
                     "downloaded_utc": utc_now(),
                 })
 
@@ -1668,8 +1941,46 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     LOG.info("free space remaining: %s", _human(shutil.disk_usage(btf_base).free))
     LOG.info("===============================================================")
 
+    # ---- the lock's verdict ---------------------------------------------
+    #
+    # A lock that could not be satisfied must not look like a successful build. The
+    # pack is REAL - every genome here was fetched and verified - but it is not the
+    # pack the lock names, and every identity, breadth and LoD figure measured on that
+    # pack describes a slightly different deployment. Said once, loudly, with the
+    # accessions, because the remedy is a judgement: supersede the lock deliberately,
+    # or find out what NCBI did with the assembly.
+    if lock_unsatisfied:
+        LOG.error("")
+        LOG.error("%d locked accession(s) could not be fetched. THIS PACK IS NOT THE "
+                  "LOCKED PACK:", len(lock_unsatisfied))
+        for tid, nm, acc in lock_unsatisfied:
+            LOG.error("  taxid %s (%s): %s", tid, nm, acc)
+        LOG.error("NCBI suppresses and replaces assemblies. Check each accession, then "
+                  "either restore it or regenerate the lock on purpose with "
+                  "--write-lock - do not leave the pack and the lock disagreeing.")
+    if lock_md5_mismatch:
+        LOG.error("")
+        LOG.error("%d locked accession(s) served DIFFERENT SEQUENCE than the lock "
+                  "records:", len(lock_md5_mismatch))
+        for acc, want_md5, got in lock_md5_mismatch:
+            LOG.error("  %s: lock %s, downloaded %s", acc, want_md5, got)
+        LOG.error("NCBI re-released the assembly under the same accession. This is the "
+                  "decompressed sequence, not the gzip container, so it is a real "
+                  "difference in the reference. The downloads are kept so it can be "
+                  "examined; then supersede the lock on purpose or restore the "
+                  "assembly.")
+
+    if args.write_lock:
+        n = write_lock(args.write_lock, merged_manifest())
+        LOG.info("lock written: %s (%d assembly row(s))", args.write_lock, n)
+        LOG.info("Commit it: a clone builds the pack the measurements were made on with "
+                 "--from-lock, and gets a different pack without it.")
+
     # Non-zero if any target cannot be confirmed at all: that is a pack-level
-    # defect a human must look at, and a CI/Nextflow wrapper should notice.
+    # defect a human must look at, and a CI/Nextflow wrapper should notice. A lock
+    # that did not hold is the same kind of defect.
+    if lock_unsatisfied or lock_md5_mismatch:
+        return 1
     return 1 if unbuildable else 0
 
 

@@ -1,0 +1,384 @@
+# bioThreatFinder reference lock. Build the pack this was measured on:
+#   scripts/build_pack_refs.py --pack <pack> --from-lock <this file>
+# Regenerate after deliberately changing the pack:
+#   scripts/build_pack_refs.py --pack <pack> --write-lock <this file> --dry-run
+taxid	name	group	role	accession	assembly_level	genome_size	n_contigs	seq_md5
+172	Leptospira biflexa	bacteria	near_neighbour	GCF_000017685.1	complete	3951448	3	e34ef7c0acfbd0c70119a10278f04f50
+173	Leptospira interrogans	bacteria	target	GCF_002073495.2	complete	4630763	2	45938e28e59ee9618b53dee26925d599
+174	Leptospira borgpetersenii	bacteria	near_neighbour	GCF_003516145.1	complete	3992782	2	a02e0180048b097f59ea3aa740f3c4d7
+235	Brucella abortus	bacteria	target	GCF_000008145.1	complete	3286445	2	61c43bbb21a40258da9b34362abc575c
+263	Francisella tularensis	bacteria	target	GCF_000833355.1	complete	1870206	1	38a7642f32e42bcb044ff81a471262aa
+264	Francisella tularensis subsp. novicida	bacteria	near_neighbour	GCF_000833355.1	complete	1870206	1	38a7642f32e42bcb044ff81a471262aa
+292	Burkholderia cepacia	bacteria	near_neighbour	GCF_009586235.1	complete	8366868	3	e715de0302bcb253c38f76a60621c744
+446	Legionella pneumophila	bacteria	target	GCF_001941585.1	complete	3409143	1	2c567414dfac74ad945771b914fb440f
+450	Legionella longbeachae	bacteria	near_neighbour	GCF_000091785.1	complete	4149158	2	ff434a7c4a2b4b56f59f320f705bf4bc
+485	Neisseria gonorrhoeae	bacteria	near_neighbour	GCF_013030075.1	complete	2171755	2	bb5924106943da27f0f6f79b9413d13e
+486	Neisseria lactamica	bacteria	near_neighbour	GCF_003351565.1	complete	2200224	1	e19edf6b880ab7c8eecd01e2fe424bfc
+487	Neisseria meningitidis	bacteria	target	GCF_022869645.1	complete	2181327	1	a591502aa8462e919747521f12d8f45c
+489	Neisseria polysaccharea	bacteria	near_neighbour	GCF_003355195.1	complete	2024930	1	9fb628a02591dd419a1414187efa27ac
+518	Bordetella bronchiseptica	bacteria	near_neighbour	GCF_900636925.1	complete	5199761	1	b482d3b1eb6feecdcda2537bec665446
+519	Bordetella parapertussis	bacteria	near_neighbour	GCF_020735925.1	complete	4775567	1	76e47dde5b44d6bd153905ffc8d76023
+520	Bordetella pertussis	bacteria	target	GCF_004008975.1	complete	4088701	1	dd0b8a50a91113da71eaed90e209a621
+529	Brucella anthropi	bacteria	near_neighbour	GCF_015326295.1	complete	4858647	3	8f42dd714f31b4990be43004fe6827c8
+544	Citrobacter	bacteria	near_neighbour	GCF_041320245.1	complete	5773871	4	2386e3ca3651511f7321eb516fde6fd9
+546	Citrobacter freundii	bacteria	near_neighbour	GCF_904859905.1	complete	5171093	3	2820caa10ede6fb9b6d04fa493a492b6
+562	Escherichia coli	bacteria	target	GCF_000008865.2	complete	5594605	3	521db62f069023b018d21843b2cb0242
+620	Shigella	bacteria	near_neighbour	GCF_022354085.1	complete	5192674	2	56d1a26a7d835c8f49ac73e508dac5d8
+622	Shigella dysenteriae	bacteria	target	GCF_022354085.1	complete	5192674	2	56d1a26a7d835c8f49ac73e508dac5d8
+623	Shigella flexneri	bacteria	near_neighbour	GCF_000006925.2	complete	4828820	2	af0144f745f9ec7ddfcd77757fa82a72
+624	Shigella sonnei	bacteria	near_neighbour	GCF_002950395.1	complete	4994001	2	35e164cc8aef99d9bd17bf1aac2ed30a
+630	Yersinia enterocolitica	bacteria	near_neighbour	GCF_000253175.1	complete	4625880	2	ed6f439b17cfd3aeb42374d2a918f2c7
+632	Yersinia pestis	bacteria	target	GCF_000009065.1	complete	4829855	4	d28257f5f8fda3894c6a0ff38cc51d22
+633	Yersinia pseudotuberculosis	bacteria	near_neighbour	GCF_900637475.1	complete	4610200	1	619df25500b94f9819d78cb263efaca3
+666	Vibrio cholerae	bacteria	target	GCF_008369605.1	complete	4138412	3	38bcaaddf23252e49adfcf697ada0bec
+670	Vibrio parahaemolyticus	bacteria	near_neighbour	GCF_000196095.1	complete	5165770	2	cb81da9ba4c1056d43baf01cdead0a21
+674	Vibrio mimicus	bacteria	near_neighbour	GCF_001558475.2	complete	4438697	2	b325059b9310a36afb48f91270a858e0
+726	Haemophilus haemolyticus	bacteria	near_neighbour	GCF_900477945.1	complete	1934644	1	f22a07f9aafad4774db9ad98ff2cc37b
+727	Haemophilus influenzae	bacteria	target	GCF_020736045.1	complete	1890662	1	e06ade7321eaad74ddbfc8969f0ece71
+729	Haemophilus parainfluenzae	bacteria	near_neighbour	GCF_016127215.1	complete	2141704	1	a18ac41a9343b410543410d9d37909b1
+777	Coxiella burnetii	bacteria	target	GCF_000007765.2	complete	2032807	2	37fbd12d503f062ecebe2deee697fa24
+780	Rickettsia	bacteria	near_neighbour	GCF_936269705.1	complete	2623967	1	7e3a85e97b65c7c9621d54165f216953
+782	Rickettsia prowazekii	bacteria	target	GCF_000277165.1	complete	1109804	1	e8c9add4df79ce0bba9d343a63f7bde8
+783	Rickettsia rickettsii	bacteria	near_neighbour	GCF_000018225.1	complete	1257710	1	05f23938e9760408263ccdde95eaf894
+784	Orientia tsutsugamushi	bacteria	target	GCF_900327255.1	complete	2078193	1	6e341c4d8790d251ea9fd37a0e10b24d
+785	Rickettsia typhi	bacteria	near_neighbour	GCF_000008045.1	complete	1111496	1	4900a4e9fdbc133d744fda87e8dd2fc2
+813	Chlamydia trachomatis	bacteria	near_neighbour	GCF_000008725.1	complete	1042519	1	90dfc991beefffbf4b576c99c8603ad1
+1311	Streptococcus agalactiae	bacteria	near_neighbour	GCF_949788565.1	complete	2015582	2	701c6961fd1a1ce833c5de1f7d17c753
+1314	Streptococcus pyogenes	bacteria	target	GCF_900475035.1	complete	1746380	1	a250bdb95e0b3dad7e59f654c801ef34
+1334	Streptococcus dysgalactiae	bacteria	near_neighbour	GCF_016128095.1	complete	2174327	2	dc66fa77eaccb5ab8825546706c3ed5c
+1392	Bacillus anthracis	bacteria	target	GCF_000008445.1	complete	5503926	3	97ede05a1b95dd829a6a386afd3c4fec
+1396	Bacillus cereus	bacteria	near_neighbour	GCF_006094295.1	complete	5431377	2	5256b56eee4523c468e2ee8d87127ce4
+1405	Bacillus mycoides	bacteria	near_neighbour	GCF_018739485.1	complete	5697065	2	d43cad340371c496708455465e4c94e2
+1428	Bacillus thuringiensis	bacteria	near_neighbour	GCF_000161615.1	chromosome	6260142	1	62923e02b0677f4df8eaa5686cdbd041
+1491	Clostridium botulinum	bacteria	target	GCF_000063585.1	complete	3903260	2	c653983b7a03f337c7be2a858a4150f4
+1492	Clostridium butyricum	bacteria	near_neighbour	GCF_014131795.1	complete	4705596	4	0b595a214ce24bc0350ebdcbfa618bc7
+1509	Clostridium sporogenes	bacteria	near_neighbour	GCF_000973705.1	complete	4141984	1	636afe0d77c1df5d3bcc366ae16832f3
+1561	Clostridium baratii	bacteria	near_neighbour	GCF_001991075.2	complete	3211717	2	4e0b6c9809905b4f9b0035fd2d223a21
+1638	Listeria ivanovii	bacteria	near_neighbour	GCF_000252975.1	complete	2928879	1	cb3536af5e6491004e93fce62103476d
+1638	Listeria ivanovii	bacteria	near_neighbour	GCF_000763515.1	complete	2919548	1	29105d3adbf218e9973a90b7573e945d
+1639	Listeria monocytogenes	bacteria	target	GCF_000008285.1	complete	2905187	1	afbec3745156284e5eec3729cc62bbe2
+1639	Listeria monocytogenes	bacteria	target	GCF_000196035.1	complete	2944528	1	2138c98683085992eee905dad7b7e271
+1640	Listeria seeligeri	bacteria	near_neighbour	GCF_000027145.1	complete	2797636	1	afd92f234aabd78e4a68f666787ededd
+1640	Listeria seeligeri	bacteria	near_neighbour	GCF_015697685.1	complete	2927941	2	048d2c5e813706af655e9c43b613263c
+1642	Listeria innocua	bacteria	near_neighbour	GCF_000195795.1	complete	3093113	2	5ac2483c89d83c5008630ab23306bf66
+1642	Listeria innocua	bacteria	near_neighbour	GCF_028596125.1	complete	2887185	2	97e86ebcd4b0dcd0206fe3b3940b7647
+1717	Corynebacterium diphtheriae	bacteria	target	GCF_001457455.1	complete	2463666	1	e981cfd66c480a4419a8059c9eb8be2b
+1719	Corynebacterium pseudotuberculosis	bacteria	near_neighbour	GCF_002155265.1	complete	2337763	1	d45ca852cb2b51a284bfbecd170b45b9
+1764	Mycobacterium avium	bacteria	near_neighbour	GCF_022175585.2	complete	5173839	1	0f7705246a7df5658e2944c727706e13
+1765	Mycobacterium tuberculosis variant bovis	bacteria	near_neighbour	GCF_005156105.1	complete	4411814	1	f64b4732e6751cd89e86f20011e085bf
+1773	Mycobacterium tuberculosis	bacteria	target	GCF_000195955.2	complete	4411532	1	3d76fa9f280e185535f281b847177638
+4754	Pneumocystis carinii	fungus	near_neighbour	GCF_001477545.1	contig	7661456	62	7754541bf4baaca87ac87dd6bb90204d
+5037	Histoplasma capsulatum	fungus	target	GCF_000150115.1	scaffold	30483324	88	76108bf3ac59394a480f90543d735f6b
+5039	Blastomyces dermatitidis	fungus	target	GCF_000003525.1	scaffold	66608683	27	c2788cab2035b51f7659310d8786fa9f
+5059	Aspergillus flavus	fungus	near_neighbour	GCF_009017415.1	complete	37749288	8	49515dc1e817bce4ed3a1ac8e52da82b
+5073	Penicillium	fungus	near_neighbour	GCF_016767815.1	complete	26336737	6	0633ea960ee5e7f0d58b839a5e8048f7
+5207	Cryptococcus neoformans	fungus	target	GCF_000149245.1	chromosome	18916112	15	9cc74e8150c6a065fa86ccab0d03251e
+5501	Coccidioides immitis	fungus	target	GCF_000149335.2	scaffold	29016019	7	b2875f6ab743e7bbe2589b9c5f47acc6
+5507	Fusarium oxysporum	fungus	near_neighbour	GCF_013085055.1	complete	50358849	12	33e955da3bf1bf26e972124a0ae58e76
+5661	Leishmania donovani	parasite	target	GCF_000227135.1	chromosome	32444968	36	c486160d3c494e7d2d4a7469dbd8dc3f
+5664	Leishmania major	parasite	near_neighbour	GCF_000002725.2	complete	32855089	36	a6093b8e31174b16c63d2bab099d5785
+5666	Leishmania tropica	parasite	near_neighbour	GCA_014139745.1	chromosome	32700668	43	383d5fce29b2bc8c9e6451c0a7df20e0
+5671	Leishmania infantum	parasite	near_neighbour	GCF_000002875.2	chromosome	32122061	76	562545239846303869ab080646cd632d
+5691	Trypanosoma brucei	parasite	target	GCF_000002445.2	chromosome	26075494	12	687cc783a7add37f77ceab24f45b7ab5
+5692	Trypanosoma congolense	parasite	near_neighbour	GCA_056783695.1	chromosome	61647097	189	325d7219263c67167f24f99a74f4259f
+5693	Trypanosoma cruzi	parasite	target	GCF_000209065.1	scaffold	89937456	29495	cabf87d37e669f4c5eeafaad91db2e06
+5697	Trypanosoma evansi	parasite	near_neighbour	GCA_917563935.1	complete	25432160	13	5b046bb2db5944266d1ba48c7ca69547
+5698	Trypanosoma rangeli	parasite	near_neighbour	GCF_003719475.1	scaffold	21157315	1080	da7a64a3a0a9bf9f4f04eed021d51cea
+5741	Giardia intestinalis	parasite	target	GCF_000002435.2	chromosome	12078186	35	54ac59c4d43d72d3b1b0d06922b312f2
+5742	Giardia muris	parasite	near_neighbour	GCA_006247105.1	chromosome	9777924	59	d2d6e2f62aeae0677040f5027dd9553f
+5743	Giardia ardeae	parasite	near_neighbour			0	0	
+5755	Acanthamoeba castellanii	parasite	target	GCF_000313135.1	scaffold	42019824	384	7c3ed0d9f5de80e4ada8f1668ea3996d
+5759	Entamoeba histolytica	parasite	target	GCF_000208925.1	scaffold	20835395	1529	e786efeb84ab3d66503ae0f878f8ac39
+5762	Naegleria gruberi	parasite	near_neighbour	GCF_000004985.1	scaffold	40964085	784	a2127928e7b31e3a99295dce962feb45
+5763	Naegleria fowleri	parasite	target	GCF_008403515.1	scaffold	29549973	83	799c20b98ac64c51777fb4359192a0ff
+5807	Cryptosporidium parvum	parasite	target	GCF_000165345.1	chromosome	9102324	8	dd54b893a1cf4effc166a706725b6e58
+5811	Toxoplasma gondii	parasite	target	GCF_000006565.2	chromosome	65668120	2264	241a35f1fb6af4057f596b7ad2b52370
+5827	Plasmodium cynomolgi	parasite	near_neighbour	GCF_000321355.1	chromosome	26181343	1663	101a173ab250238f420b16548f14d488
+5833	Plasmodium falciparum	parasite	target	GCF_000002765.6	complete	23292622	14	85bd53cb478f0e377ffae853c6f14c66
+5850	Plasmodium knowlesi	parasite	target	GCF_000006355.2	chromosome	24395979	164	541cec2efa99e2af5502de73c9b2591c
+5855	Plasmodium vivax	parasite	target	GCF_000002415.2	chromosome	27013691	2748	8b84da1bd481dd66a78e220e43319700
+5858	Plasmodium malariae	parasite	near_neighbour	GCF_900090045.1	chromosome	33612066	62	918493ad90a221953b4f5306987f767d
+6182	Schistosoma japonicum	parasite	near_neighbour	GCA_025215515.1	chromosome	406576294	100	fbcd5732738cfb5e163cfe67b7a6fc6a
+6183	Schistosoma mansoni	parasite	target	GCF_000237925.1	chromosome	364532842	885	f2e251d2878280445f417435693f9ce5
+6184	Schistosoma bovis	parasite	near_neighbour	GCA_944470425.2	chromosome	391812492	78	e9596ce57de3c522696a77ecfd834b8f
+6185	Schistosoma haematobium	parasite	near_neighbour	GCF_000699445.3	chromosome	400271889	163	1b1b6718c03cfa7fbc0041322e184f7c
+6204	Taenia solium	parasite	target	GCA_001870725.1	scaffold	129810970	13131	a44d266596dea8769af869383d8ad815
+6206	Taenia saginata	parasite	near_neighbour	GCA_001693075.2	scaffold	169104283	3626	5223af52c34e11bfa964165f4f364a8e
+6210	Echinococcus granulosus	parasite	target	GCF_000524195.1	scaffold	110837706	957	449f7494f1ec728711f43cd9f6aefa0a
+6211	Echinococcus multilocularis	parasite	target	GCA_060824975.1	chromosome	136321017	32	d86c6e46aa472156ad1cdedf7aa69ace
+6313	Angiostrongylus cantonensis	parasite	target	GCA_009735665.1	scaffold	293306699	26577	542d06e7b9196ccb4d90b99d413d1f9d
+6334	Trichinella spiralis	parasite	target	GCA_000181795.3	chromosome	63576506	6839	bb5305396cc7c0a1a9280abcc7da0e49
+6335	Trichinella nativa	parasite	near_neighbour	GCA_056869805.1	chromosome	55298063	26	9ad5bca036b5ce194676babb78510e69
+6337	Trichinella pseudospiralis	parasite	near_neighbour	GCA_056869575.1	chromosome	56435383	89	dcedf3b4885e6367c133f06d4becf9f5
+10243	Cowpox virus	virus	near_neighbour	GCA_004025655.1	complete	228534	1	3c4cc992a6d93694141499396fc5aa5a
+10243	Cowpox virus	virus	near_neighbour	GCA_004025855.1	complete	229131	1	0f7e66caacefcbf39e328587612e0b71
+10243	Cowpox virus	virus	near_neighbour	GCF_000839185.1	complete	224499	1	1340cbbe95743ecfbdca81f22ea693ce
+10244	Monkeypox virus	virus	target	GCA_025462475.1	complete	210919	1	1ff7bb365ce41a3d2e909f19776fb9f4
+10244	Monkeypox virus	virus	target	GCF_000857045.1	complete	196858	1	5a54462d4b686ebf58fb20f28b86cca6
+10244	Monkeypox virus	virus	target	GCF_014621545.1	complete	197209	1	a8733b6a6b758a052e191474980b7360
+10245	Orthopoxvirus vaccinia	virus	near_neighbour	GCA_038422505.1	complete	221213	1	61d4b245fbaa2190cb6cae4b7bc50ab7
+10245	Orthopoxvirus vaccinia	virus	near_neighbour	GCF_000860085.1	complete	194711	1	c47b4dba0947571242f9cc02825bcded
+10245	Orthopoxvirus vaccinia	virus	near_neighbour	GCF_006449675.1	complete	212633	1	1d463c630bd4ef1fde84b8c39369e905
+10255	Variola virus	virus	target	GCA_025630165.1	complete	187742	1	eb2fde1d6be59d8f7b43958d2f2f48d5
+10255	Variola virus	virus	target	GCA_025630175.1	complete	187872	1	ebab40ce95f92e82e715896891963f84
+10255	Variola virus	virus	target	GCF_000859885.1	complete	185578	1	dc539881403f876516b2381d77c8b754
+11021	Eastern equine encephalitis virus	virus	target	GCA_000862705.1	complete	11675	1	b719b3699e72a0231952d8f5826f069e
+11021	Eastern equine encephalitis virus	virus	target	GCF_000862705.1	complete	11675	1	ed83e29ca4778f28cd328e02f2781efa
+11029	Ross River virus	virus	near_neighbour	GCA_002889255.1	complete	11948	1	b323b4a2154b592e6aa6ff7458ddbd79
+11029	Ross River virus	virus	near_neighbour	GCF_000862165.1	chromosome	11657	1	6aa72c61b263bb24791f94be3b13a522
+11029	Ross River virus	virus	near_neighbour	GCF_002889255.1	complete	11948	1	369331a1831f5b8c0ec4dce864347aaa
+11036	Venezuelan equine encephalitis virus	virus	target	GCF_000862105.1	complete	11444	1	c57b78407979cd3a6c4d9142a002e137
+11036	Venezuelan equine encephalitis virus	virus	target	GCF_002889695.1	complete	11447	1	b452fa3c8fd92095369a57336c59e60d
+11036	Venezuelan equine encephalitis virus	virus	target	GCF_002889775.1	complete	11464	1	2500557372fc2337ee8fcf9f9b846ffc
+11039	Western equine encephalitis virus	virus	near_neighbour	GCA_002889215.1	complete	11562	1	42a8ad3d19f73736f0f55899463871a7
+11039	Western equine encephalitis virus	virus	near_neighbour	GCF_000850885.1	complete	11484	1	bc32ce2488b74ef55caaff53de210eab
+11039	Western equine encephalitis virus	virus	near_neighbour	GCF_002889215.1	complete	11562	1	8ce7a01416bd5acff386ca61f3fba10c
+11041	Rubella virus	virus	near_neighbour	GCA_000863025.1	complete	9762	1	e2f4d10ccea8b93c443f08de2fdca464
+11041	Rubella virus	virus	near_neighbour	GCF_000863025.1	complete	9762	1	fa058eca212242a75d16e699ebb1032f
+11041	Rubella virus	virus	near_neighbour	GCF_024749945.1	complete	9761	1	eeffe8ea9cddc477eb0354791fe4d525
+11072	Japanese encephalitis virus	virus	target	GCA_000862145.1	complete	10976	1	7d92ea1d545a1d08e0fd42d23c80a7d0
+11072	Japanese encephalitis virus	virus	target	GCF_000862145.1	complete	10976	1	392d119b3447c5d89bffbfeef8ed5da8
+11079	Murray Valley encephalitis virus	virus	near_neighbour	GCA_000863565.1	complete	11014	1	d491c2c7d0627d2e7798a12b9703e8f5
+11079	Murray Valley encephalitis virus	virus	near_neighbour	GCA_031109475.1	complete	10960	1	ae5c191e50d06ae5a87c25864f92596f
+11079	Murray Valley encephalitis virus	virus	near_neighbour	GCF_000863565.1	complete	11014	1	791749ea29428105044b6fd7872007ee
+11080	St. Louis encephalitis virus	virus	near_neighbour	GCA_000866785.1	complete	10940	1	8f8dc2de6743d841b9817e92d4664df0
+11080	St. Louis encephalitis virus	virus	near_neighbour	GCF_000866785.1	complete	10940	1	48c62e896a133a43aca2387e4a196011
+11082	West Nile virus	virus	target	GCF_000861085.1	complete	10962	1	dd03f5793f31069944dfd967c1f994d9
+11082	West Nile virus	virus	target	GCF_000875385.1	complete	11029	1	69bcb1e16ac28988ad902a4c53836e6c
+11082	West Nile virus	virus	target	GCF_004786635.1	complete	10664	1	a4201dfdd68e7a95ea1b9a3b5112134e
+11083	Powassan virus	virus	near_neighbour	GCA_000860485.1	complete	10839	1	065fe9a91ca5c1780ca54c4ce8f4ec46
+11083	Powassan virus	virus	near_neighbour	GCA_004786555.1	complete	10800	1	8524388e9340c58f9d2dfabcf6f66a09
+11083	Powassan virus	virus	near_neighbour	GCF_000860485.1	complete	10839	1	9e12c3ba1d4ac92502f8fdeae04dd42c
+11084	Tick-borne encephalitis virus	virus	target	GCA_000863125.1	complete	11141	1	911cd4b9e2d976f188d1a356f623dbb9
+11084	Tick-borne encephalitis virus	virus	target	GCF_000863125.1	complete	11141	1	58f14e16e66efc547933bb5308008e31
+11084	Tick-borne encephalitis virus	virus	target	GCF_004788235.1	complete	10927	1	c33940caf141530aef48777ba49942c3
+11086	Louping ill virus	virus	near_neighbour	GCA_000863165.1	complete	10871	1	57a9a0338a5010d4d19e1eef72cfed9b
+11086	Louping ill virus	virus	near_neighbour	GCF_000863165.1	complete	10871	1	5a93b0f8f3e44956cb974e2bf4ff85dc
+11086	Louping ill virus	virus	near_neighbour	GCF_004786655.1	chromosome	1488	1	57b742d31943c8a5fa500ef93040f1de
+11089	Yellow fever virus	virus	target	GCA_000857725.1	complete	10862	1	9c96dacfca4e0ac93ba5408fc7c651d6
+11089	Yellow fever virus	virus	target	GCA_031101965.1	complete	11519	1	2d7b2f5f9684c4b89e01422dd747b746
+11089	Yellow fever virus	virus	target	GCF_000857725.1	complete	10862	1	72d341e851f0e2fa9be30f581977b639
+11234	Measles morbillivirus	virus	target	GCA_031116535.1	complete	15900	1	7e8859479f8658d578ed1e244eddba6e
+11234	Measles morbillivirus	virus	target	GCA_031118305.1	complete	16728	1	eccc0071a5b3b6fa930c93e5d8ddb56c
+11234	Measles morbillivirus	virus	target	GCF_000854845.1	complete	15894	1	54b907b18aceecb524e80e3d8e199040
+11266	Filoviridae	virus	target	GCF_000848505.1	complete	18959	1	783a7d25c6030a2de069ffbfbfbd854c
+11266	Filoviridae	virus	target	GCF_000854085.1	complete	18891	1	6a85d3a0e7e48632453c4e420f9f9f2e
+11266	Filoviridae	virus	target	GCF_000855585.1	complete	18875	1	b58d5e8e371903e5fa7c26519dc87a95
+11266	Filoviridae	virus	target	GCF_000857325.3	complete	19112	1	987db98ce67c773179d20964ffb68344
+11266	Filoviridae	virus	target	GCF_000888475.1	complete	18935	1	81d50c7835c186544db6904fbc0aa214
+11266	Filoviridae	virus	target	GCF_000889155.1	complete	18940	1	7fd8e2d2da6ffc019b2a3cf37c55fc55
+11266	Filoviridae	virus	target	GCF_000896415.1	complete	18927	1	77ac1d8b0c84cdc2691de2d96913d1c0
+11266	Filoviridae	virus	target	GCF_000943645.1	complete	19114	1	f3d48b26bbdf4bbdaab9b2127f699e5e
+11266	Filoviridae	virus	target	GCF_003505815.1	complete	19043	1	f8edab5cb96edf0df6730e6ef8567233
+11266	Filoviridae	virus	target	GCF_004788975.1	complete	17221	1	4c9f27ceb8927a341d71925215b3d932
+11266	Filoviridae	virus	target	GCF_004788995.1	complete	14280	1	e3c4d44c2bb7777f45cd379eca62c994
+11266	Filoviridae	virus	target	GCF_013088285.1	complete	18300	1	b178b7afe138f1f4988de767b5842cef
+11292	Rabies lyssavirus	virus	target	GCA_000859625.1	complete	11932	1	1ac244021c34a331c8da3ac264382258
+11292	Rabies lyssavirus	virus	target	GCA_900231295.1	complete	11931	1	9112a9a5c2fb356efb6ccea8e856d028
+11292	Rabies lyssavirus	virus	target	GCF_000859625.1	complete	11932	1	19325e85fc32ce693e076806397fdc51
+11320	Influenza A virus	virus	target	GCA_038603805.1	complete	13730	8	747b80514c5aba2531c97c6d4d4898ef
+11320	Influenza A virus	virus	target	GCA_038686795.1	complete	13652	8	334e0717ae823276542a111f775bca0c
+11320	Influenza A virus	virus	target	GCA_038767705.1	complete	13764	8	35d8122d306e14b82f0eeb818073bcee
+11520	Influenza B virus	virus	near_neighbour	GCA_036587685.1	complete	14643	8	22e81fb23c9f6d6723614fc3bcd1dbf7
+11520	Influenza B virus	virus	near_neighbour	GCA_036591985.1	complete	14643	8	ff422b412d56856dd2c0ff5adc5e008f
+11520	Influenza B virus	virus	near_neighbour	GCA_036593195.1	complete	14643	8	88d96edf1dfcda702c7fc15cb5d1e9a8
+11552	Influenza C virus	virus	near_neighbour	GCA_000856665.2	complete	12906	7	3a3dfd61ee91791b89457532b3589579
+11552	Influenza C virus	virus	near_neighbour	GCA_031323545.1	complete	12932	7	defe3d4666b65816189bf53a1ebfbb97
+11552	Influenza C virus	virus	near_neighbour	GCF_000856665.10	complete	12906	7	e340dd519922770f6ba45a7f05a17408
+11590	Toscana virus	virus	near_neighbour	GCA_031497085.1	complete	12602	3	b66534a9d92b012d13380cc8ca112066
+11596	Hazara virus	virus	near_neighbour	GCA_002831085.1	complete	18232	3	018430e4ca799fc044700b455302d9c9
+11596	Hazara virus	virus	near_neighbour	GCF_002831085.1	complete	18232	3	4cf475c1a8b14ba79f0119f0a9b4ff5a
+12080	Poliovirus 1	virus	near_neighbour	GCA_003108565.1	complete	7442	1	0c1fb03174a4cce147955401366bf11a
+12080	Poliovirus 1	virus	near_neighbour	GCA_031102545.1	complete	7478	1	2adf01582f1d063d702e01773423c0b9
+12080	Poliovirus 1	virus	near_neighbour	GCF_008766755.1	complete	7441	1	f198526c82071619f4985ca0a4db3e92
+12092	Hepatovirus A	virus	near_neighbour	GCA_008776015.1	complete	7569	1	32ec3cafed9b444967dffdaf4aed51be
+12092	Hepatovirus A	virus	near_neighbour	GCF_000860505.1	complete	7478	1	42d1c0892001e9d79a150f4f8d32c248
+12092	Hepatovirus A	virus	near_neighbour	GCF_008776015.1	complete	7569	1	2704253f18d11550fb4d15505180fa8c
+12542	Omsk hemorrhagic fever virus	virus	near_neighbour	GCA_000855505.1	complete	10787	1	b444d76035b0b4ba445de9775bc29bf5
+12542	Omsk hemorrhagic fever virus	virus	near_neighbour	GCF_000855505.1	complete	10787	1	2edbe8872e35bde4d3d568b8c12424de
+12637	Dengue virus	virus	target	GCF_000862125.1	complete	10735	1	5c6039f89fb7f7ad24940b12918ea2f2
+12637	Dengue virus	virus	target	GCF_000866625.1	complete	10707	1	274a3c4a1ed38af285faf1993edcb7dc
+12637	Dengue virus	virus	target	GCF_000871845.1	complete	10723	1	a40da36186113c43c33115e4e7a6edd0
+12643	Ectromelia virus	virus	near_neighbour	GCA_000841905.1	complete	209771	1	2865f7992cedee560ad0a8aced58d9ad
+12643	Ectromelia virus	virus	near_neighbour	GCA_006465865.1	complete	207428	1	76852a1797635bf47e7d9dd5eb178ec3
+12643	Ectromelia virus	virus	near_neighbour	GCF_000841905.1	complete	209771	1	7660f8d516ce157d83c7ae56f2b0bd64
+13373	Burkholderia mallei	bacteria	target	GCF_033956065.1	complete	5834748	2	190e8317abbf4c2a0f91b8eaa00d9245
+28082	Legionella anisa	bacteria	near_neighbour	GCF_003176875.1	chromosome	4362280	3	6a1c4a9ec647ef8f70e68c003643dbd0
+28110	Francisella philomiragia	bacteria	near_neighbour	GCF_018135955.1	complete	2017543	2	0a698288ef90bc35b4191a41fd6e0890
+28450	Burkholderia pseudomallei	bacteria	target	GCF_030297255.1	complete	7081111	2	1c42eaddd50bfee17a47bf20a089b5d9
+28564	Talaromyces stipitatus	fungus	near_neighbour	GCF_000003125.1	scaffold	35685443	820	1ad6377b9ccdbba5ab57a7ad21d479f8
+28873	Camelpox virus	virus	near_neighbour	GCA_000839105.1	complete	205719	1	5b88bf25d1396bd1c747d28b6ebf098b
+28873	Camelpox virus	virus	near_neighbour	GCA_006472005.1	complete	202289	1	d1b8fa77d6538908627422be5fe961a0
+28873	Camelpox virus	virus	near_neighbour	GCF_000839105.1	complete	205719	1	1d0f410c8ea799544ca4ba8e4873b157
+28901	Salmonella enterica	bacteria	target	GCF_000006945.2	complete	4951383	2	ebb90f0310aaa04bbd523814f1b2b3ce
+29176	Neospora caninum	parasite	near_neighbour	GCF_000208865.1	chromosome	57547420	14	06152ac7e8abdde614c3095453864be8
+29459	Brucella melitensis	bacteria	target	GCF_000007125.1	complete	3294931	2	fc253a779d2d84d45b59b3eccd84d705
+29461	Brucella suis	bacteria	target	GCF_000007505.1	complete	3315175	2	c753353c104d10295672fb00b379a443
+33188	Uncinocarpus reesii	fungus	near_neighbour	GCF_000003515.1	scaffold	22349738	45	a59e8103c3134e42a67da67acfb2f2f0
+33892	Mycobacterium tuberculosis variant bovis BCG	bacteria	near_neighbour	GCF_001043255.1	complete	4410431	1	036ca001240f72dadd2fd67941b664f6
+33894	Mycobacterium tuberculosis variant africanum	bacteria	near_neighbour	GCF_000253355.1	complete	4389314	1	3b413ce2ed9ca629963b89e9b777c2a3
+35814	Bordetella holmesii	bacteria	near_neighbour	GCF_020735985.1	complete	3688120	1	f2cf4c51e4aa85f817ccfa286ee61fa7
+36080	Mucor circinelloides	fungus	near_neighbour	GCA_051295215.1	contig	37441900	14	2555672e32ae9ebddb7bab6a4f5e5b8e
+36330	Plasmodium ovale	parasite	near_neighbour	GCA_977926815.1	chromosome	38053323	15	3d0bca2ee333064e2021d7b729600ffb
+36855	Brucella canis	bacteria	near_neighbour	GCF_000018525.1	complete	3312769	2	82f0dc4877c5368411980b99cca60e90
+37124	Chikungunya virus	virus	target	GCA_000854045.1	complete	11826	1	cbd656b0af304caf593f8c5a5744bc2a
+37124	Chikungunya virus	virus	target	GCF_000854045.1	complete	11826	1	77aaee0b0201eac1197addb95671e16a
+37124	Chikungunya virus	virus	target	GCF_002889555.1	chromosome	11268	1	072bcfe97aba2740d868f2d7c91ee55a
+37727	Talaromyces marneffei	fungus	target	GCF_009556855.1	complete	28198338	8	b8abe1024bd240cf0f636a5f35191579
+37769	Cryptococcus gattii	fungus	target	GCF_000185945.1	chromosome	18374760	14	709bcddcc167646619310ad4738b6051
+38767	Lyssavirus duvenhage	virus	near_neighbour	GCA_000905375.1	complete	11976	1	eb6ea3de4ebceb79aa059a32faee446d
+38767	Lyssavirus duvenhage	virus	near_neighbour	GCF_000905375.1	complete	11976	1	357202f231d535fb347235abcba065fa
+40410	Cryptococcus deneoformans	fungus	near_neighbour	GCF_000091045.1	chromosome	19051922	14	16565c3dd2ae6c2a75d0d8e8f52faa21
+41668	Entamoeba moshkovskii	parasite	near_neighbour	GCA_002914575.1	scaffold	25247492	4607	bfa2ec1e5477d4b710c44fb886d8b44d
+42068	Pneumocystis jirovecii	fungus	target	GCF_001477535.1	contig	8396240	70	863032148423011d6eb2d6deea800b69
+42458	Lichtheimia corymbifera	fungus	near_neighbour	GCA_000697475.1	contig	36620786	1176	9db201348f19bf77df9e368a010c6bf3
+42862	Rickettsia felis	bacteria	near_neighbour	GCF_000012145.1	complete	1587240	3	4003d3c60dce91b8d624ae8ded8918a1
+45357	Candidozyma haemuli	fungus	near_neighbour	GCF_002926055.2	contig	13314323	12	6b56f314621117b11dea1fdbe447faf0
+45882	Trichinella britovi	parasite	near_neighbour	GCA_056869705.1	chromosome	60369333	65	91b8f858e4629a6171b3e5ff389020a2
+46681	Entamoeba dispar	parasite	near_neighbour	GCF_000209125.1	scaffold	30633164	12258	484cdfa35e21ede308dd62bf284d5096
+51637	Naegleria lovaniensis	parasite	near_neighbour	GCF_003324165.1	scaffold	30830176	110	3d6b4a91d02c2c06aee343adb02b6ffd
+57482	European bat lyssavirus 1	virus	near_neighbour	GCA_900176705.1	complete	11973	1	b15b51e3939dbb51d37f4c57a1185c04
+57482	European bat lyssavirus 1	virus	near_neighbour	GCA_900176765.1	complete	11967	1	17d99913281f3db38e9b13755e874c46
+57482	European bat lyssavirus 1	virus	near_neighbour	GCF_000870765.1	complete	11966	1	7a3289776eee6bce2c524101945bf596
+57975	Burkholderia thailandensis	bacteria	near_neighbour	GCF_000012365.1	complete	6723972	2	88acc1154a3ca12cd04fcbeb5e729336
+58291	Rhizopus microsporus	fungus	near_neighbour	GCF_002708625.1	scaffold	25972395	131	8fd9b568e6319620ebaf57f408a2d1b7
+59301	Mayaro virus	virus	near_neighbour	GCA_000863385.1	complete	11411	1	4696606d6cf9cefc17cefb8b26696a36
+59301	Mayaro virus	virus	near_neighbour	GCF_000863385.1	complete	11411	1	beeeaced606df5227ace48aaf1a3921b
+60517	Taenia asiatica	parasite	near_neighbour	GCA_001693035.2	scaffold	168679183	6900	e98a057b804ff371711f23262897ed13
+60875	Mucambo virus	virus	near_neighbour	GCA_002829885.1	complete	11391	1	587136806735b099de10c15cfb4d8a6e
+60875	Mucambo virus	virus	near_neighbour	GCF_002829885.1	complete	11391	1	814cafb7fba38a1b5786583827d6aa4b
+64286	Usutu virus	virus	near_neighbour	GCA_000854945.1	complete	11066	1	36a30931bec75a786b539d081bd5c49a
+64286	Usutu virus	virus	near_neighbour	GCF_000854945.1	complete	11066	1	1c8cf1c97c7ba6e251f9896c181a55dd
+64318	Spondweni virus	virus	near_neighbour	GCA_001610725.1	complete	10290	1	b606c581dbeb7f45c47dafa33328afb4
+64318	Spondweni virus	virus	near_neighbour	GCF_001610725.1	complete	10290	1	6b250903ddf2a7a3f023c3b879e0f23c
+64320	Zika virus	virus	target	GCF_002366285.1	complete	10808	1	bb2e3487564ef023f0eba9e9d761d93d
+64320	Zika virus	virus	target	GCF_004787195.1	complete	10807	1	f86732a42f38166f24e5095b75a54c42
+64320	Zika virus	virus	target	GCF_004788155.1	complete	11155	1	af933488ed312010a92555e62c29d300
+64495	Rhizopus arrhizus	fungus	target	GCA_048164915.1	contig	51296285	18	436c9595049b0c1cef5425d024d8c23b
+65058	Corynebacterium ulcerans	bacteria	near_neighbour	GCF_000215645.1	complete	2502095	1	346017bfa7c75971e8f7f0e13a573ca7
+66527	Balamuthia mandrillaris	parasite	target	GCA_057986245.1	chromosome	94778788	186	b5b297dbe0e92763eace4fc7e98b5a6c
+78331	Mycobacterium canetti	bacteria	near_neighbour	GCF_000253375.1	complete	4482059	1	9f23eeffb29251f095e60f812c9f1f88
+83554	Chlamydia psittaci	bacteria	target	GCF_000204255.1	complete	1179220	2	42edf27e72a7668f6fe24312c8fb1dc4
+83555	Chlamydia abortus	bacteria	near_neighbour	GCF_040235295.1	complete	1174186	2	30cdd945a7e2ca52e8bb2123cb167cd7
+83558	Chlamydia pneumoniae	bacteria	near_neighbour	GCF_000007205.1	complete	1225935	1	7ae67592b3a4d6644d891a30fe612fb8
+90961	Lyssavirus australis	virus	near_neighbour	GCA_000850325.1	complete	11822	1	297dba866e22e459d724089fd9cf2233
+90961	Lyssavirus australis	virus	near_neighbour	GCF_000850325.1	complete	11822	1	89870eb9e7652c34d507e33a025f6b04
+91492	Aspergillus udagawae	fungus	near_neighbour	GCF_001078395.1	scaffold	32252303	17	c4a828f0a07824b71b311b91b3357360
+93969	Cryptosporidium meleagridis	parasite	near_neighbour	GCA_039657295.1	chromosome	9178484	13	83671e1015d34ab2ae8bcc0e2141e870
+99158	Hammondia hammondi	parasite	near_neighbour	GCA_000447165.1	contig	51498142	36360	9a1a82c492dd13be52c11ad8cf9049c9
+110766	Entamoeba coli	parasite	near_neighbour			0	0	
+117008	Cryptosporidium andersoni	parasite	near_neighbour	GCF_001865355.1	scaffold	9088557	135	6aea9c265a49975a3905bdcfb9598a59
+117187	Fusarium verticillioides	fungus	near_neighbour	GCF_000149555.1	chromosome	41844914	22	d1bac00e9d7c69f19182a532a26edcb7
+121759	Paracoccidioides brasiliensis	fungus	target	GCF_000150735.1	scaffold	29952540	57	28b3754a85bfa2beb1430e5799aed99f
+138948	Enterovirus A	virus	near_neighbour	GCF_008798895.1	complete	7427	1	3c7a6a9a7985bfd2dc8c7e7136069654
+138948	Enterovirus A	virus	near_neighbour	GCF_008798935.1	complete	7429	1	e4d58087b68dcceb2d64815fbf77789a
+138948	Enterovirus A	virus	near_neighbour	GCF_008798955.1	complete	7438	1	c3cca7309c5571139f1f51e684ef7cc0
+138949	Enterovirus B	virus	near_neighbour	GCF_008766555.1	complete	7438	1	3c06d7d8de0bdd493cc2c7da6c2bd25d
+138949	Enterovirus B	virus	near_neighbour	GCF_008798655.1	complete	7445	1	5f865ba804ea9bbdd33afe9329e9e522
+138949	Enterovirus B	virus	near_neighbour	GCF_008799735.1	complete	7450	1	51a0a1c0d5f104e6e2d24d9a27d880e8
+138950	Enterovirus C	virus	target	GCF_008797795.1	complete	7459	1	959fe409611043b8422eeb42d7134f6f
+138950	Enterovirus C	virus	target	GCF_008797815.1	complete	7478	1	97d8cbfe66ce87a1a961acf10ccfd6ad
+138950	Enterovirus C	virus	target	GCF_008800055.1	complete	7458	1	f2374f05975b2986cfcb8a2aec6d7ab7
+147711	Rhinovirus A	virus	near_neighbour	GCF_008791775.1	complete	7168	1	610c5d2c116999def6610c0b5b919ced
+147711	Rhinovirus A	virus	near_neighbour	GCF_008796465.1	complete	7164	1	040c59e110cb635dd64a75dd267b200a
+147711	Rhinovirus A	virus	near_neighbour	GCF_008797055.1	complete	7163	1	9788206c028e4457f191803fc0486fbc
+169388	Fusarium solani	fungus	target	GCF_023522795.1	contig	59379714	19	f4908c8f361456f3b00a76b0c80eb91e
+186538	Zaire ebolavirus	virus	target	GCA_000848505.1	complete	18959	1	e44670d9f5bb25656a6417430fc5248a
+186538	Zaire ebolavirus	virus	target	GCA_900007085.1	complete	18887	1	ece3be91fa7ba5ce57fdabdae8d6f5d6
+186538	Zaire ebolavirus	virus	target	GCF_000848505.1	complete	18959	1	783a7d25c6030a2de069ffbfbfbd854c
+186539	Reston ebolavirus	virus	near_neighbour	GCA_000854085.1	complete	18891	1	d7c19d888d8018d1cef9ca409e7d2fd5
+186539	Reston ebolavirus	virus	near_neighbour	GCA_031113305.1	complete	18890	1	37a05b3a5f3661352f43725a597d7114
+186539	Reston ebolavirus	virus	near_neighbour	GCF_000854085.1	complete	18891	1	6a85d3a0e7e48632453c4e420f9f9f2e
+186540	Sudan ebolavirus	virus	target	GCA_000855585.1	complete	18875	1	1c24946b4596a84d1fdd35deb644cdc3
+186540	Sudan ebolavirus	virus	target	GCA_031136705.1	complete	18875	1	c86adcb00dd3d2df2b075aad40d3b83c
+186540	Sudan ebolavirus	virus	target	GCF_000855585.1	complete	18875	1	b58d5e8e371903e5fa7c26519dc87a95
+194540	Nairobi sheep disease virus	virus	near_neighbour	GCA_002117695.1	complete	18748	3	c138a9a7c0a488e26d75a624e6af7aff
+194540	Nairobi sheep disease virus	virus	near_neighbour	GCF_002117695.1	complete	18748	3	1dfb51cf438017fececf423496837456
+199306	Coccidioides posadasii	fungus	target	GCF_018416015.2	complete	28193268	9	129f6031b120125c348149610bb1af54
+208452	Plasmodium coatneyi	parasite	near_neighbour	GCF_001680005.1	chromosome	27685530	14	05003b882cf6dbd3708b9592cabeb7b9
+237895	Cryptosporidium hominis	parasite	target	GCF_000006425.1	scaffold	8743570	1422	a2e30bc23c4d44748cf7fbe8a2ec219a
+263815	Pneumocystis murina	fungus	near_neighbour	GCF_000349005.2	contig	7501343	20	c219c376e74f3a4f6b82299e47f6bb44
+290028	Human coronavirus HKU1	virus	near_neighbour	GCA_000858765.1	complete	29926	1	24db0987ee406ae111b8abce858867e5
+290028	Human coronavirus HKU1	virus	near_neighbour	GCA_964024425.1	chromosome	29918	1	c2b28ec600d22f92100c1f6c2e4d7e0d
+290028	Human coronavirus HKU1	virus	near_neighbour	GCF_000858765.1	complete	29926	1	67ca7b7bc657b5afabe95e1809bd064b
+291484	Hepatitis E virus	virus	target	GCA_048568685.1	complete	7499	1	d330508daa7e0a1b9f48a0b2e67d8ad5
+293939	Aspergillus lentulus	fungus	near_neighbour	GCF_010724455.1	scaffold	30229310	760	85db492d175deb5fca0ac7d3f8ee028c
+321387	Angiostrongylus vasorum	parasite	near_neighbour	GCA_018806985.1	scaffold	279948744	468	2846f2484c4c8ed1b6daa130731c248b
+334426	Angiostrongylus costaricensis	parasite	near_neighbour	GCA_900624975.1	scaffold	262782696	6384	0cfdb0e4744a0222c557554686e269a2
+418784	Candidozyma pseudohaemuli	fungus	near_neighbour	GCF_003013735.1	scaffold	12591275	36	d97f7728bba3c0b091993fe8a27ba8e7
+498019	Candida auris	fungus	target	GCF_003013715.1	complete	12249773	7	7c790b60eea8e18bf01b515475ce0fce
+565995	Bundibugyo virus	virus	near_neighbour	GCA_000889155.1	complete	18940	1	278102e8ba5726b734a8928f82f270b4
+565995	Bundibugyo virus	virus	near_neighbour	GCF_000889155.1	complete	18940	1	7fd8e2d2da6ffc019b2a3cf37c55fc55
+622488	Francisella hispaniensis	bacteria	near_neighbour	GCF_000195555.1	complete	1945310	1	94aa9347f9c4e32a034dcd775f65a7fe
+694009	Severe acute respiratory syndrome-related coronavirus	virus	near_neighbour	GCF_000864885.1	complete	29751	1	b0bd6ec872005651eb20de7617da7f37
+694009	Severe acute respiratory syndrome-related coronavirus	virus	near_neighbour	GCF_013088585.1	complete	29728	1	c6de01be8e0e0f45072b6df6cff474b5
+694009	Severe acute respiratory syndrome-related coronavirus	virus	near_neighbour	GCF_013088595.1	complete	29274	1	61d07408f2d2c04d2c8cadee8c44e56f
+746128	Aspergillus fumigatus	fungus	target	GCF_000002655.1	chromosome	29384958	8	9ca94102ca5073223af8b396d90988f8
+1048829	Paracoccidioides lutzii	fungus	near_neighbour	GCF_000150705.2	scaffold	32925248	110	0e10c0d0b537255b3d062dd40a903358
+1231522	Candidozyma duobushaemuli	fungus	near_neighbour	GCF_002926085.2	contig	12580400	8	eb1876e60f64a5a09dfe77f88c8afd33
+1335626	Middle East respiratory syndrome-related coronavirus	virus	target	GCA_031159135.1	complete	30423	1	ec8770effc835d2bff6867d4d9d3eac2
+1335626	Middle East respiratory syndrome-related coronavirus	virus	target	GCF_000901155.1	complete	30119	1	6cea620d76595f5b9f174fc55e0da931
+1335626	Middle East respiratory syndrome-related coronavirus	virus	target	GCF_002816195.1	complete	30111	1	18bb6fffbc74d7c7f4a30db3e2183aca
+1681229	Blastomyces gilchristii	fungus	near_neighbour	GCF_000003855.2	scaffold	75404732	103	5975b175b44ba872b925daddab6d2ea7
+1933189	Sandfly fever Naples phlebovirus	virus	near_neighbour			0	0	
+1955775	Emergomyces africanus	fungus	near_neighbour	GCA_061611815.1	complete	32435257	9	752806bd28aef67c8d3791da60756990
+1980456	Andes orthohantavirus	virus	target	GCA_000850405.1	complete	12104	3	85913b54328c29dca7f69f9fcb03f974
+1980456	Andes orthohantavirus	virus	target	GCA_031580475.1	complete	5591	2	95f7377b3ea2957ac043caa0552f5bcd
+1980456	Andes orthohantavirus	virus	target	GCF_000850405.1	complete	12104	3	6b6d26165a1d317665e1626d72d5f284
+2169701	Onyong-nyong virus	virus	near_neighbour	GCA_000863005.1	complete	11835	1	a95a926111148644c4905372b9365d8f
+2169701	Onyong-nyong virus	virus	near_neighbour	GCF_000863005.1	complete	11835	1	79141b36779278cc122ac13181d16451
+2169701	Onyong-nyong virus	virus	near_neighbour	GCF_002888795.1	complete	11822	1	da13db84c9fd85d5200abb2be07c0d0f
+2169991	Junin mammarenavirus	virus	target	GCA_000856545.1	complete	10525	2	51003094dc7d48b2424e6d04695f5d58
+2169991	Junin mammarenavirus	virus	target	GCF_000856545.1	complete	10525	2	1bc75598073016e0a8a8f5492b839604
+2697049	Severe acute respiratory syndrome coronavirus 2	virus	target	GCA_011537615.1	complete	29923	1	640c6847aa24b883a2230d8a51b37e91
+2697049	Severe acute respiratory syndrome coronavirus 2	virus	target	GCA_011545035.1	complete	29945	1	728c6a2fe948475b6cad2f3af298ea59
+2697049	Severe acute respiratory syndrome coronavirus 2	virus	target	GCF_009858895.2	complete	29903	1	a95c1bc590491390b8d2e2dc4106ce46
+2848048	rat hepatitis E virus	virus	near_neighbour			0	0	
+2907957	Sabia virus	virus	near_neighbour	GCA_000855825.1	complete	10499	2	292a58c35df666521020215877f390d0
+2907957	Sabia virus	virus	near_neighbour	GCF_000855825.1	complete	10499	2	33c3eae884914501c7d39472c721a471
+2971765	Langya virus	virus	near_neighbour	GCA_031319335.1	complete	18402	1	e44a2ab0f4be64b7f0c54ba22a71fce5
+2971765	Langya virus	virus	near_neighbour	GCF_031319335.1	complete	18402	1	2d0222789d7d716476a189fd1ccb9ec3
+3052221	Henipavirus cedarense	virus	near_neighbour	GCA_000924595.1	complete	18162	1	28fc4a5151d38246da01c95f4039025e
+3052221	Henipavirus cedarense	virus	near_neighbour	GCF_000924595.1	complete	18162	1	0abcb557627f18ba3af9145480f05405
+3052223	Hendra henipavirus	virus	target	GCA_000852685.1	complete	18234	1	45c820f8d0289d94a4b58093924c9433
+3052223	Hendra henipavirus	virus	target	GCF_000852685.1	complete	18234	1	faf60758166c33b3c83edc0648ec8e42
+3052225	Nipah henipavirus	virus	target	GCA_003147825.1	complete	18252	1	b869e5268c79c3c83a4a9df0f72e5637
+3052225	Nipah henipavirus	virus	target	GCA_003147845.1	complete	18252	1	2e71e9dd4533c5a2517728a2e162cbc4
+3052225	Nipah henipavirus	virus	target	GCF_000863625.1	complete	18246	1	b92ab0bbb13830793d622fa1668f56f1
+3052303	Mammarenavirus choriomeningitidis	virus	near_neighbour	GCA_004789475.1	complete	10604	2	e41ef8c4545434f701aed8f100094608
+3052303	Mammarenavirus choriomeningitidis	virus	near_neighbour	GCF_000851025.1	complete	10056	2	f9319e34448b7462fa96d25b7ce19567
+3052303	Mammarenavirus choriomeningitidis	virus	near_neighbour	GCF_004789475.1	complete	10604	2	87a8d9b9f16dbbed66372d063a698b6f
+3052307	Mammarenavirus guanaritoense	virus	near_neighbour	GCA_000853765.1	complete	10424	2	be542d52c29990fb8da340e00235c588
+3052307	Mammarenavirus guanaritoense	virus	near_neighbour	GCF_000853765.1	complete	10424	2	79a04c330f7929cd3d90e8b7b1849729
+3052310	Lassa mammarenavirus	virus	target	GCA_000851705.1	complete	10681	2	d19ef1ebae70ca6879e12f972721b855
+3052310	Lassa mammarenavirus	virus	target	GCA_900094045.1	complete	10697	2	adb04a25a6d6cccc324ebb3a74c85612
+3052310	Lassa mammarenavirus	virus	target	GCF_000851705.1	complete	10681	2	a111580fea65ee1e3e97b13a1f5e39e5
+3052314	Mammarenavirus lujoense	virus	near_neighbour	GCA_000885555.1	complete	10352	2	0464f397f06350b4417a7252c5ff8bbf
+3052314	Mammarenavirus lujoense	virus	near_neighbour	GCF_000885555.1	complete	10352	2	9b3203e92b65c06fa92f3c6fde07610c
+3052317	Mammarenavirus machupoense	virus	near_neighbour	GCA_000853725.1	complete	10635	2	b6965d19758cd4bdde8b7b81b68a1739
+3052317	Mammarenavirus machupoense	virus	near_neighbour	GCF_000853725.1	complete	10635	2	d1ace640ccd4ea15c393f3dc7e6aaf52
+3052320	Mammarenavirus mopeiaense	virus	near_neighbour	GCA_000856585.1	complete	10698	2	0ef6497eb530ba038531a15f4b50ad13
+3052320	Mammarenavirus mopeiaense	virus	near_neighbour	GCF_000856585.1	complete	10698	2	055bfa1154c4a597d6407fb5e9e631cd
+3052320	Mammarenavirus mopeiaense	virus	near_neighbour	GCF_000886675.1	complete	10590	2	2981e31ae5f6620ff3c4121b5895efb6
+3052480	Hantaan orthohantavirus	virus	target	GCA_000856085.1	complete	11845	3	91d641a0d3c13261ab767abc5aeef047
+3052480	Hantaan orthohantavirus	virus	target	GCA_031580105.1	complete	11847	3	da007eebddd51677bcaddec16c32a8a0
+3052480	Hantaan orthohantavirus	virus	target	GCF_000856085.1	complete	11845	3	885e61ccefa4ebce03743611616d922e
+3052493	Orthohantavirus puumalaense	virus	near_neighbour	GCA_000854405.1	complete	12062	3	6473b9d7c4c52310247af068caf2f67e
+3052493	Orthohantavirus puumalaense	virus	near_neighbour	GCF_000854405.1	complete	12062	3	c758343994067a4e53186ec2532be5d7
+3052493	Orthohantavirus puumalaense	virus	near_neighbour	GCF_002829765.1	complete	12016	3	eb313290d59e89c172d35be7d4566e48
+3052498	Orthohantavirus seoulense	virus	near_neighbour	GCA_000855645.1	complete	11950	3	2475ad88d55603354419b379ef63e173
+3052498	Orthohantavirus seoulense	virus	near_neighbour	GCA_031544335.1	complete	11835	3	fd5c081de5af0776063b9743b33782c3
+3052498	Orthohantavirus seoulense	virus	near_neighbour	GCF_000855645.1	complete	11950	3	b01f1a6e4611a2e0bd0da9d59ff11312
+3052499	Sin Nombre orthohantavirus	virus	target	GCA_002830985.1	complete	12318	3	262fec134f7019bf252c866c1ad653e7
+3052499	Sin Nombre orthohantavirus	virus	target	GCF_000854765.1	complete	12317	3	6b90fb5491d5b8edf6490711612e37eb
+3052499	Sin Nombre orthohantavirus	virus	target	GCF_002830985.1	complete	12318	3	43beca8f055ebf6fa29cda8f1e7279f6
+3052505	Marburg marburgvirus	virus	target	GCA_000943645.1	complete	19114	1	c5d4e0de5db899b2040ee6f646978cc5
+3052505	Marburg marburgvirus	virus	target	GCF_000857325.3	complete	19112	1	987db98ce67c773179d20964ffb68344
+3052505	Marburg marburgvirus	virus	target	GCF_000943645.1	complete	19114	1	f3d48b26bbdf4bbdaab9b2127f699e5e
+3052518	Crimean-Congo hemorrhagic fever orthonairovirus	virus	target	GCA_000854165.1	complete	19146	3	c41bd6f9a4bec7322c7a35f6d10fcef7
+3052518	Crimean-Congo hemorrhagic fever orthonairovirus	virus	target	GCF_000854165.1	complete	19146	3	fb29daad917e1257d171d658d36fb409
+3052676	Rift Valley fever phlebovirus	virus	target	GCA_000847345.1	complete	11979	3	4557fe1ce287032f2b1a0b99cd231e9c
+3052676	Rift Valley fever phlebovirus	virus	target	GCA_031497275.1	complete	11979	3	2dd0d682add318505fc360e0e24074f7
+3052676	Rift Valley fever phlebovirus	virus	target	GCF_000847345.1	complete	11979	3	32175a14408e8cf05e887abe5b373f80
+3139435	canine distemper virus	virus	near_neighbour	GCA_000854065.1	complete	15690	1	55b67ffb428271a4c1156dced03317d3
+3139435	canine distemper virus	virus	near_neighbour	GCF_000854065.1	complete	15690	1	79639ffd7f8da562e796e08825f7ad3e
