@@ -71,8 +71,8 @@ LOG = logging.getLogger("build_pack_refs")
 
 PINNED_TAXDUMP = "2026-09-29"
 
-# WHERE THE DATABASES LIVE IS NOT THIS SCRIPT'S TO ASSUME. These were /media/36tb/db and
-# /media/8tb/bioThreatFinder, the two volumes on the machine this was written on.
+# WHERE THE DATABASES LIVE IS NOT THIS SCRIPT'S TO ASSUME. These were two volumes on the
+# machine this was written on (named in D51), which nobody else has.
 # nextflow.config stopped defaulting to them and refuses to start with either root unset;
 # the build scripts had not, so a clone built against paths that do not exist. $BTF_DB is
 # the same variable the pipeline reads. None means "not determined": main() refuses.

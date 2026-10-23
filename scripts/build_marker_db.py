@@ -178,7 +178,7 @@ PINNED_TAXDUMP = "2026-09-29"
 
 # WHERE THE DATABASES LIVE IS NOT THIS SCRIPT'S TO ASSUME.
 #
-# These two used to be /media/36tb/db and /media/8tb/bioThreatFinder - the two volumes on
+# These two used to be fixed paths - two volumes on
 # the machine this was written on, which nobody else has. nextflow.config stopped defaulting
 # to them (it refuses to start with either root unset); the build scripts had not, so a
 # clone's build still pointed at paths that do not exist. $BTF_DB is the same variable the

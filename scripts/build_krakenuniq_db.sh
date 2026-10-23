@@ -148,7 +148,7 @@ FORCE=0
 CLEAN=0
 
 # Existing, current, unpacked NCBI taxdump on the shared READ-ONLY volume.
-# Pinned dated snapshot, NOT the shared /media/36tb/db/taxdump that D8 measured
+# Pinned dated snapshot, NOT the shared root's own taxdump, which D8 measured
 # at 201 days stale and decided to stop using.
 TAXDUMP_SRC="${BTF_DB:+$BTF_DB/taxdump/2026-09-29}"
 MAX_TAXDUMP_AGE_DAYS=90
@@ -332,7 +332,7 @@ esac
 # NEVER WRITE UNDER THE SHARED READ-ONLY ROOT. That root is $BTF_DB_ROOT - the same
 # variable the pipeline reads - and the four names below are the pre-existing resources
 # other work on a deployment may depend on, the stale 2022 Kraken2 databases among them.
-# These were the literal /media/36tb/db paths of the machine this was written on, which
+# These were literal paths from the machine this was written on (D51), which
 # made the guard protect somebody else's nothing while not protecting their real shared
 # volume. Applies whatever --btf-db was set to.
 if [[ -n "${BTF_DB_ROOT:-}" ]]; then
@@ -519,7 +519,7 @@ set_stamp()  { (( DRY_RUN == 1 )) || { mkdir -p "$STAMP_DIR"; date -u +%Y-%m-%dT
 # The build reads only names.dmp and nodes.dmp from that directory, and writes
 # its derived `taxDB` into the DATABASE directory, not into the taxonomy one.
 #
-# So why COPY instead of pointing --taxonomy-dir at /media/36tb/db/taxdump?
+# So why COPY instead of pointing --taxonomy-dir at the shared root's taxdump?
 # Because build_db.sh contains this fallback: if names.dmp or nodes.dmp is
 # missing from TAXONOMY_DIR, it cd's INTO that directory and downloads a fresh
 # taxdump there. One bad path, one partial file, and the shared taxdump that
@@ -533,7 +533,7 @@ set_stamp()  { (( DRY_RUN == 1 )) || { mkdir -p "$STAMP_DIR"; date -u +%Y-%m-%dT
 # the fix is `krakenuniq-download --db <db> taxonomy`, which writes into
 # <db>/taxonomy - still never into the shared volume.
 # The taxonomy a screen is built against decides whether its taxids join the
-# watchlist. decisions.md D8 measured the shared /media/36tb/db/taxdump at 201 days
+# watchlist. decisions.md D8 measured the shared root's own taxdump at 201 days
 # stale (+288,764 taxids of drift) and decided to stop using it; this script defaulted
 # to it anyway and had no age check, so a build could bake a 201-day-old taxonomy into
 # an index while the watchlist resolved against the pinned snapshot. Taxa added or

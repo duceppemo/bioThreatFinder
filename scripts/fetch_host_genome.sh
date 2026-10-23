@@ -41,10 +41,9 @@ trap '_btf_on_err $LINENO' ERR
 # Defaults
 # --------------------------------------------------------------------------
 # The volume the PIPELINE reads from (pack.yaml's ${btf_db} resolves under this).
-# It used to default to /media/36tb/db, so with no arguments the files landed in
-# /media/36tb/db/bioThreatFinder/host/human while pack.yaml points at
-# /media/8tb/bioThreatFinder/host/human - and the cross-check below passed anyway,
-# because it compared BASENAMES.
+# It used to default to the SHARED root, so with no arguments the files landed under
+# <shared>/bioThreatFinder/host/human while pack.yaml points at $BTF_DB/host/human -
+# and the cross-check below passed anyway, because it compared BASENAMES.
 # WHERE THE DATABASES LIVE IS NOT THIS SCRIPT'S TO ASSUME. This was a volume on the
 # machine it was written on. $BTF_DB is the same variable the pipeline reads and refuses to
 # start without; empty means "not determined" and the check below refuses rather than
@@ -389,8 +388,8 @@ fetch_human() {
     #
     # THIS USED TO COMPARE BASENAMES ONLY. It grepped pack.yaml for "chm13v2.0.fa.gz"
     # and friends and never for the DIRECTORY, so with the old --db-root default the
-    # files were written to /media/36tb/db/... while pack.yaml pointed at
-    # /media/8tb/... and every check passed - a guard satisfying its own logic while
+    # files were written under the shared root while pack.yaml pointed at the project
+    # root, and every check passed - a guard satisfying its own logic while
     # failing the purpose its comment states. The full resolved path is what matters,
     # so that is what is compared.
     local pack_yaml

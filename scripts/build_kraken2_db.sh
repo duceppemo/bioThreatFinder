@@ -90,10 +90,10 @@ SKIP_MAPS=1
 FORCE=0
 
 # Existing, current, unpacked NCBI taxdump on the shared volume.
-# Default is the PINNED, dated project snapshot, not the shared one on /media/36tb.
+# Default is the PINNED, dated project snapshot, not whatever the shared root carries.
 # The index and the watchlist must resolve against the SAME taxonomy snapshot; if they
 # differ, taxids disagree and watchlist lookups miss, giving an empty result that is
-# indistinguishable from a clean negative. The shared /media/36tb/db/taxdump was
+# indistinguishable from a clean negative. The shared root's own taxdump was
 # 6.5 months stale and is used by other work on this machine, so it is left alone.
 TAXDUMP_SRC="${BTF_DB:+$BTF_DB/taxdump/2026-09-29}"
 
@@ -323,7 +323,7 @@ set_stamp()  { (( DRY_RUN == 1 )) || { mkdir -p "$STAMP_DIR"; date -u +%Y-%m-%dT
 # ---------------------------------------------------------------------------
 # Taxonomy
 # ---------------------------------------------------------------------------
-# Can kraken2-build consume the existing /media/36tb/db/taxdump?
+# Can kraken2-build consume an existing taxdump under the shared root?
 #
 # Partly, and it is worth doing. There is NO kraken2-build flag that points at an
 # external taxonomy directory: `--download-taxonomy` always re-fetches. But

@@ -37,7 +37,7 @@
 # ----------------------
 # Metabuli indexes are large (see the size table below) and querying them is
 # dominated by reads into the index, not by CPU. The project DB root is on NVMe
-# (/media/8tb) deliberately - putting a 400 GB Metabuli index on the 36 TB
+# deliberately - putting a 400 GB Metabuli index on the slow shared
 # spinning volume would make stage 1 disk-bound and is the single easiest way to
 # make this pipeline unusably slow. Metabuli also streams the index in chunks
 # governed by --max-ram, so on a machine that cannot hold the index the seek
@@ -74,7 +74,7 @@ trap '_btf_on_err $LINENO' ERR
 # start without; empty means "not determined" and the check below refuses rather than
 # guessing.
 BTF_DB="${BTF_DB:-}"
-# Pinned dated snapshot, NOT the shared /media/36tb/db/taxdump that D8 measured
+# Pinned dated snapshot, NOT the shared root's own taxdump, which D8 measured
 # at 201 days stale and decided to stop using.
 TAXDUMP_SRC="${BTF_DB:+$BTF_DB/taxdump/2026-09-29}"
 MAX_TAXDUMP_AGE_DAYS=90
@@ -311,7 +311,7 @@ esac
     || die "refusing to build at '${DB_DIR}' - it is not under ${BTF_DB}/metabuli"
 # NEVER WRITE UNDER THE SHARED READ-ONLY ROOT. That root is $BTF_DB_ROOT - the same
 # variable the pipeline reads - and the four names below are the pre-existing resources
-# other work on a deployment may depend on. These were the literal /media/36tb/db paths of
+# other work on a deployment may depend on. These were literal paths from
 # the machine this was written on, which made the guard protect somebody else's nothing
 # while silently not protecting their actual shared volume.
 if [[ -n "${BTF_DB_ROOT:-}" ]]; then
@@ -527,7 +527,7 @@ set_stamp()  { (( DRY_RUN == 1 )) || { mkdir -p "$STAMP_DIR"; date -u +%Y-%m-%dT
 # Taxonomy (local build only)
 # ---------------------------------------------------------------------------
 # `metabuli build --taxonomy-path DIR` expects a directory holding the NCBI dmp
-# files. Copy them in rather than pointing at /media/36tb/db/taxdump directly,
+# files. Copy them in rather than pointing at the shared root's taxdump directly,
 # for the same reason build_kraken2_db.sh does: a build tool that writes anything
 # into its taxonomy directory - a derived map, a merged copy, an unpacked
 # refresh - would corrupt the one taxdump that resolve_watchlist.py pins for
@@ -549,7 +549,7 @@ set_stamp()  { (( DRY_RUN == 1 )) || { mkdir -p "$STAMP_DIR"; date -u +%Y-%m-%dT
 # That translation does not exist in this pipeline yet, which is why --mode refseq
 # is the default.
 # The taxonomy a screen is built against decides whether its taxids join the
-# watchlist. decisions.md D8 measured the shared /media/36tb/db/taxdump at 201 days
+# watchlist. decisions.md D8 measured the shared root's own taxdump at 201 days
 # stale (+288,764 taxids of drift) and decided to stop using it; this script defaulted
 # to it anyway and had no age check, so a build could bake a 201-day-old taxonomy into
 # an index while the watchlist resolved against the pinned snapshot. Taxa added or

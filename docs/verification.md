@@ -191,7 +191,7 @@ One-offs against real data, not automated:
 - **The pipeline HAS run end to end, repeatedly** - `plumbing_001`, `plumbing_v2`,
   `lod_v1`, `lod_v2_kraken2`, `mmap_test`, `hostqc_test`, `metabuli_smoke`,
   `lod_v3_threearm`, `lod_v4`, the `divergent_v1` bake-off and (in progress) `d12fine` all
-  sit under `/media/8tb/bioThreatFinder/runs/` or `simulated/*/bakeoff/`. Those runs are
+  sit under `$BTF_DB/runs/` or `$BTF_DB/simulated/*/bakeoff/`. Those runs are
   where D12, D13, D14 and D15 came from, and where the Toxoplasma false positive was found
   and then fixed: `lod_v4` is the first batch carrying a host-matrix control, and its
   `supported` tier is empty where `lod_v3` had 18 *T. gondii* calls.

@@ -271,7 +271,8 @@ fi
 
 # GUARD 2: the stored PATH is tokenised too, not only the basename.
 # parse_sylph splits the whole Genome_file string, so a numeric directory component
-# injects a token indistinguishable from a taxid - "/media/36tb/..." contributes "36",
+# injects a token indistinguishable from a taxid - a path like "vol36/refs" contributes
+# "36",
 # which is a real NCBI taxid. Every sylph row would then carry phantom support for it.
 PATH_TOKENS="$(printf '%s\n' "$REFS_DIR" | tr '/._' '\n\n\n' | grep -E '^[0-9]{2,}$' || true)"
 if [[ -n "$PATH_TOKENS" ]]; then

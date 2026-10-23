@@ -81,8 +81,8 @@ import urllib.request
 from collections import defaultdict
 from pathlib import Path
 
-# WHERE THE PACK LIVES IS NOT THIS SCRIPT'S TO ASSUME. This was /media/8tb/bioThreatFinder,
-# a volume on the machine it was written on. $BTF_DB is the same variable the pipeline reads
+# WHERE THE PACK LIVES IS NOT THIS SCRIPT'S TO ASSUME. This was a fixed path on the
+# machine it was written on (named in D51). $BTF_DB is the same variable the pipeline reads
 # and refuses to start without; None means "not determined", and main() refuses.
 _ENV_BTF_DB = os.environ.get("BTF_DB")
 DEFAULT_BTF_DB = Path(_ENV_BTF_DB) if _ENV_BTF_DB else None

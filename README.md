@@ -785,13 +785,18 @@ whether counts are measured or estimated and on what basis.
 
 ## Database layout
 
-Deliberately split across two volumes. The values below are the development host's; both
-are set per deployment and the pipeline refuses to start without them:
+Deliberately split across two roots. Both are set per deployment — the pipeline refuses to
+start with either unset, and no script in this repo defaults to a path on any particular
+machine (D51):
 
-| Root | Volume | Holds |
+| Root | Wants | Holds |
 |---|---|---|
-| `db_root` = `/media/36tb/db` | 36 TB spinning, 97% full | Shared, pre-existing, **read-only**: `taxdump`, a sylph GTDB sketch, `nt` |
-| `btf_db` = `/media/8tb/bioThreatFinder` | 7.3 TB NVMe, 15% used | Project-owned: KrakenUniq, Metabuli, Kraken2 indexes, the sylph **pack** sketch, host genomes, pack refs and markers |
+| `$BTF_DB_ROOT` (`--db_root`) | capacity; may be slow and shared | Pre-existing, **read-only** resources a site already has: a taxdump, a sylph GTDB sketch, `nt` |
+| `$BTF_DB` (`--btf_db`) | **the fastest disk available**, ~350 GB for everything | Project-owned: pack refs and markers, the sylph **pack** sketch, host genomes, and the Kraken2 / Metabuli / KrakenUniq indexes |
+
+`$BTF_DB` must end in `bioThreatFinder`: the build scripts that take `--db-root` append
+that segment themselves. Sizes for each artifact, and which of them are re-creatable
+rather than needing to be fetched, are in [`docs/operations.md`](docs/operations.md).
 
 The sylph arm uses `${btf_db}/sylph/<pack>_pack_refs.syldb`, sketched from the pack's own
 references — **not** the GTDB sketch on `db_root`. That is not interchangeable: sylph
@@ -876,7 +881,7 @@ It caught a real bug on its first run: a broken `elif` chain meant a BCG vaccine
 was being reported as `supported` — a possible TB detection — instead of `vaccine_strain`.
 See `docs/verification.md`, which also lists what is **not** verified.
 
-**Databases built** (on NVMe at `/media/8tb/bioThreatFinder`):
+**Databases built** (under `$BTF_DB`, on local NVMe — ~350 GB in total):
 
 | Artifact | State |
 |---|---|

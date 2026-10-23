@@ -43,7 +43,7 @@ PACK = REPO / "packs" / "human"
 # WHERE THE BUILT DATABASES ARE, IF THEY ARE ANYWHERE.
 #
 # The cases that compare a shipped artifact against the repo used to name
-# /media/8tb/bioThreatFinder directly - this machine's volume, so on anyone else's clone
+# one fixed path directly - this machine's volume, so on anyone else's clone
 # they skipped for the reason "no built pack" when the real reason was "the path in the
 # test is not yours". $BTF_DB is the same variable nextflow.config reads and refuses to
 # start without. None means no built databases are reachable, and those cases skip, which
@@ -4402,33 +4402,47 @@ def test_no_host_paths(tmp: Path) -> None:
     that does not exist) and quiet for a check: a `--check` reading a root that is not
     yours reports a healthy pack as having no database at all.
 
-    Scanned: every non-comment line of scripts/, bin/, nextflow.config and this file, for
-    an absolute path under a deployment volume or a home directory. The first version of
-    this check looked only at assignments and argparse defaults, and a mutation test
-    walked straight through it - a default reached through a conditional expression is a
-    default that no `=`-anchored pattern sees. Comments are exempt, because the history of
-    why those volumes were split is worth keeping; /usr/bin/wget and /opt/conda/bin do not
-    match and are legitimate last-resort tool paths.
-    """
-    volumes = re.compile(r"""(/(?:media|mnt|home|Users|data)/[^"'\s),;]*)""")
-    scanned, offenders = 0, []
-    for d, globs in ((SCRIPTS, ("*.py", "*.sh")), (BIN, ("*.py", "*.sh")),
-                     (REPO, ("nextflow.config",)), (REPO / "tests", ("*.py",))):
-        for pattern in globs:
-            for f in sorted(d.glob(pattern)):
-                scanned += 1
-                for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
-                    stripped = line.lstrip()
-                    if stripped.startswith(("#", "//", "*")):
-                        continue
-                    hit = volumes.search(line)
-                    if hit:
-                        offenders.append(f"{f.relative_to(REPO)}:{n}: {hit.group(1)}")
+    Scanned: EVERY tracked file, comments and documentation included, for an absolute path
+    under a deployment volume or a home directory. The one exemption is
+    `docs/decisions.md`, a dated log whose entries cite the paths they were measured on;
+    editing those would falsify the record rather than generalise the tool.
 
-    record("roots:no script defaults to a path on one particular machine",
-           not offenders, f"{len(offenders)} default(s): " + "; ".join(offenders[:6]))
-    record("roots:the scan actually looked at the scripts", scanned >= 20,
-           f"only {scanned} file(s) scanned - the glob is wrong, so a pass means nothing")
+    Two earlier versions were weaker and both were defeated. The first matched only
+    assignments and argparse defaults, anchored on `=`, `default=` and `:-` - and a
+    default reached through a conditional expression is a default no such pattern sees.
+    The second exempted comments, which let the author's volume names stay in twenty-odd
+    explanatory notes; a published tool should carry no path from the machine it was built
+    on, so the facts in those comments were kept and the paths generalised.
+
+    /usr/bin/wget, /opt/conda/bin and a samplesheet's `/data/reads.fastq.gz` do not match
+    and are legitimate: the first two are last-resort tool lookups, the third is a
+    placeholder for the user's own data.
+    """
+    volumes = re.compile(r"""(/(?:media|mnt|home|Users|srv)/[^"'\s),;]*)""")
+    # The dated decision log cites the paths its measurements were taken on. Everything
+    # else - code, comments, docs, CI, the packs - must be portable.
+    EXEMPT = {"docs/decisions.md"}
+    tracked = run(["git", "-C", REPO, "ls-files"]).stdout.split()
+    scanned, offenders = 0, []
+    for rel in tracked:
+        if rel in EXEMPT:
+            continue
+        f = REPO / rel
+        try:
+            text = f.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue          # binaries and fixtures
+        scanned += 1
+        for n, line in enumerate(text.splitlines(), 1):
+            hit = volumes.search(line)
+            if hit:
+                offenders.append(f"{rel}:{n}: {hit.group(1)}")
+
+    record("roots:no tracked file names a path on one particular machine",
+           not offenders, f"{len(offenders)} path(s): " + "; ".join(offenders[:6]))
+    record("roots:the scan actually looked at the repository", scanned >= 60,
+           f"only {scanned} file(s) scanned - `git ls-files` failed, so a pass means "
+           f"nothing")
 
     # THE POSITIVE HALF. A missing default must become a refusal that names the variable,
     # not a crash on None or an empty path silently joined into something plausible:

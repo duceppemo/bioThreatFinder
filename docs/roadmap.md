@@ -81,7 +81,7 @@ docs/decisions.md D2). Metabuli supplies a DNA+amino-acid arm for divergent agen
 likewise opt-in and off by default since 2026-10-05 (D15 - it changed no finding on any
 scenario measured, including the divergent_* pair built to favour it). Bracken abundance,
 sylph ANI. Any-classifier OR; concordance and k-mer quality recorded and
-surfaced in the report. Project DBs moved to NVMe at /media/8tb/bioThreatFinder.
+surfaced in the report. Project DBs live on fast local disk under `$BTF_DB`.
 Remaining stage-1 work:
   * Centrifuger as an ONT-specific arm (low memory, FM-index) - evaluate whether
     it adds anything over KrakenUniq on long reads
@@ -131,8 +131,9 @@ Multi-host depletion (bovine, porcine, ovine, caprine, equine, avian, salmonid).
 Reconcile the watchlist against the current WOAH list.
 
 ### 5. Plant pack (EPPO A1/A2)
-Heavier on fungi/oomycetes. Crop host genomes. Note `/media/36tb/db/oomycetes` and
-`stagonospora` already exist on this box.
+Heavier on fungi/oomycetes. Crop host genomes. Note that oomycete and `stagonospora`
+resources already exist on the development host's shared root, so the first pass can
+reuse them rather than rebuild.
 
 ### 6. Influenza A segment-aware subtyping
 HA/NA subtype is the actionable unit; a species-level call is not enough. Needs a

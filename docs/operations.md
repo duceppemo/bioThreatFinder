@@ -7,15 +7,14 @@ be paid for twice, so it was reframed rather than trimmed.
 
 **Two kinds of material, labelled throughout.** Unlabelled sections are portable: true for
 any deployment. Sections marked **HOST-SPECIFIC** record what was observed on the
-development machine — a 503 GB Ubuntu workstation with `/media/8tb` (NVMe) and
-`/media/36tb` (bulk) — and may not hold on yours. Nothing in a host-specific section is
-configuration the pipeline reads.
+development machine — a 503 GB Ubuntu workstation with one fast NVMe volume and one large
+slow one — and may not hold on yours. Nothing in a host-specific section is configuration
+the pipeline reads, and no path from that machine survives anywhere in the repo outside the
+dated entries in `docs/decisions.md` (D51).
 
 **Two roots, set once.** The pipeline requires both and refuses to start without them,
 naming both: `$BTF_DB_ROOT` (`--db_root`) for large shared read-only resources, and
-`$BTF_DB` (`--btf_db`) for project-owned artifacts on the fastest disk available. On the
-development host they are `BTF_DB_ROOT=/media/36tb/db` and
-`BTF_DB=/media/8tb/bioThreatFinder`.
+`$BTF_DB` (`--btf_db`) for project-owned artifacts on the fastest disk available.
 
 ```bash
 export BTF_DB_ROOT=/path/to/shared
@@ -27,10 +26,10 @@ refuses to run when it is unset** (D51) — they used to default to the two volu
 so a clone built against paths it did not have. Two flags still override, and they do not
 mean the same thing:
 
-| In a build script | Means | Here |
+| In a build script | Means | Example, for `BTF_DB=/fast/bioThreatFinder` |
 |---|---|---|
-| `--btf-db` | exactly `$BTF_DB` — the base that `packs/` hangs off, **not** the volume. `/media/8tb` gives `/media/8tb/packs/...` and the script dies with "no refs manifest" | `/media/8tb/bioThreatFinder` |
-| `--db-root` | the **parent** of `$BTF_DB`: these scripts append `bioThreatFinder/` themselves | `/media/8tb` |
+| `--btf-db` | exactly `$BTF_DB` — the base that `packs/` hangs off, **not** the volume. Passing the volume gives `<volume>/packs/...` and the script dies with "no refs manifest" | `/fast/bioThreatFinder` |
+| `--db-root` | the **parent** of `$BTF_DB`: these scripts append `bioThreatFinder/` themselves | `/fast` |
 
 `$BTF_DB` must end in `bioThreatFinder` for that second form to land where the pipeline
 reads. Neither flag is needed once the variable is exported, and **`--db-root` is not
@@ -159,7 +158,7 @@ runnable example, because the failure it replaces was not a crash:
 
 | Was | Is |
 |---|---|
-| a build wrote to `/media/8tb/...` on a machine that has no such volume | refusal naming `$BTF_DB`, before anything is downloaded |
+| a build wrote to a fixed path on a machine that has no such volume | refusal naming `$BTF_DB`, before anything is downloaded |
 | `--check` read a root that was not yours and reported a **healthy pack as having no database** | the default is the pack you built, so the bare form is correct |
 | an empty root silently joined into `/bioThreatFinder/packs/human/refs` — a real-looking path that exists nowhere | refused, with the two ways to answer |
 
@@ -176,8 +175,9 @@ through a conditional expression is still a default.
 
 ## The built databases — reference state
 
-**HOST-SPECIFIC** inventory, under `$BTF_DB` on the development host. The figures are the
-reference state: this is what a correct rebuild produces.
+Inventory under `$BTF_DB`, as built on the development host. The figures are the reference
+state: this is what a correct rebuild produces, so a figure that disagrees is the thing to
+investigate.
 
 | Artifact | State |
 |---|---|
