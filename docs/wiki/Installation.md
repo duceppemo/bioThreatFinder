@@ -66,7 +66,7 @@ images also build in parallel, and a pin change rebuilds one.
 
 ```bash
 # build locally instead of pulling, then point the pipeline at the local tags
-docker build -f containers/Dockerfile --build-arg SPEC=sylph -t biothreatfinder-sylph:0.4.0 .
+docker build -f containers/Dockerfile --build-arg SPEC=sylph -t biothreatfinder-sylph:0.4.1 .
 nextflow run . -profile docker --container_prefix biothreatfinder- ...
 ```
 

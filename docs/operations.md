@@ -205,7 +205,7 @@ and a pin change rebuilds one.
 
 | | |
 |---|---|
-| build one | `docker build -f containers/Dockerfile --build-arg SPEC=sylph -t biothreatfinder-sylph:0.4.0 .` |
+| build one | `docker build -f containers/Dockerfile --build-arg SPEC=sylph -t biothreatfinder-sylph:0.4.1 .` |
 | run from local builds | `--container_prefix biothreatfinder-` |
 | run from the registry | the default, `ghcr.io/duceppemo/biothreatfinder-` |
 

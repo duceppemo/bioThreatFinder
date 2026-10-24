@@ -92,7 +92,7 @@ The images are public, so this normally means an old checkout pointing at images
 not published yet, or a private registry mirror. Build locally instead:
 
 ```bash
-docker build -f containers/Dockerfile --build-arg SPEC=sylph -t biothreatfinder-sylph:0.4.0 .
+docker build -f containers/Dockerfile --build-arg SPEC=sylph -t biothreatfinder-sylph:0.4.1 .
 nextflow run . -profile docker --container_prefix biothreatfinder- ...
 ```
 

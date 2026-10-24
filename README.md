@@ -104,7 +104,7 @@ If bioThreatFinder is useful in your work, please cite the software (see
 [`CITATION.cff`](CITATION.cff)) and the databases:
 
 > Duceppe, M.-O. (2026). *bioThreatFinder: two-stage metagenomic screening and in-silico
-> confirmation of high-consequence pathogens* (v0.4.0).
+> confirmation of high-consequence pathogens* (v0.4.1).
 > https://github.com/duceppemo/bioThreatFinder
 
 > Duceppe, M.-O. (2026). *bioThreatFinder databases: a pinned NCBI taxonomy snapshot
