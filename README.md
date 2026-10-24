@@ -12,7 +12,8 @@
   <img src="https://img.shields.io/badge/nextflow-%E2%89%A524.04-23aa62" alt="Nextflow >=24.04">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/duceppemo/bioThreatFinder" alt="License: MIT"></a>
   <a href="https://github.com/duceppemo/bioThreatFinder/wiki"><img src="https://img.shields.io/badge/docs-wiki-informational" alt="Documentation"></a>
-  <a href="https://doi.org/10.5281/zenodo.23602998"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.23602998.svg" alt="Databases DOI"></a>
+  <a href="https://doi.org/10.5281/zenodo.23607033"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.23607033.svg" alt="Software DOI"></a>
+  <a href="https://doi.org/10.5281/zenodo.23602998"><img src="https://img.shields.io/badge/databases-10.5281%2Fzenodo.23602998-blue" alt="Databases DOI"></a>
 </p>
 
 Metagenomic screening and in-silico confirmation of high-consequence pathogens, across
@@ -104,8 +105,8 @@ If bioThreatFinder is useful in your work, please cite the software (see
 [`CITATION.cff`](CITATION.cff)) and the databases:
 
 > Duceppe, M.-O. (2026). *bioThreatFinder: two-stage metagenomic screening and in-silico
-> confirmation of high-consequence pathogens* (v0.4.1).
-> https://github.com/duceppemo/bioThreatFinder
+> confirmation of high-consequence pathogens* (v0.4.1). Zenodo.
+> https://doi.org/10.5281/zenodo.23607033
 
 > Duceppe, M.-O. (2026). *bioThreatFinder databases: a pinned NCBI taxonomy snapshot
 > (2026-09-29) and a curated marker-gene database for high-consequence pathogen

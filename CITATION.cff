@@ -24,6 +24,9 @@ authors:
     affiliation: Canadian Food Inspection Agency
 license: MIT
 repository-code: https://github.com/duceppemo/bioThreatFinder
+# The CONCEPT doi: it always resolves to the latest version, which is what a citation
+# should follow. Each release also gets its own version doi.
+doi: 10.5281/zenodo.23607033
 references:
   - type: data
     title: >-

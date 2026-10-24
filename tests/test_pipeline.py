@@ -4784,6 +4784,37 @@ def test_install_route(tmp: Path) -> None:
            f"declared {floor.group(0) if floor else 'nothing'}, but resourceLimits needs "
            f"24.04 and the DSL is strict-syntax")
 
+    # .zenodo.json OVERRIDES CITATION.cff for the deposit, so the two must not disagree:
+    # whichever a reader consults, the author, licence and title have to match. Zenodo
+    # infers metadata from CITATION.cff when there is no .zenodo.json - which worked, and
+    # gave a record with no link to the databases the software cannot run without.
+    zen = REPO / ".zenodo.json"
+    record("install:the software deposit's metadata is in the repo", zen.is_file(),
+           "without .zenodo.json every release's metadata is whatever Zenodo infers")
+    if zen.is_file():
+        import json as _json
+        z = _json.loads(zen.read_text(encoding="utf-8"))
+        record("install:.zenodo.json and CITATION.cff agree on the licence",
+               z.get("license", "").upper() == "MIT" and "license: MIT" in cff)
+        fam = re.search(r"family-names:\s*(\S+)", cff)
+        record("install:.zenodo.json and CITATION.cff agree on the author",
+               bool(fam) and any(fam.group(1) in c.get("name", "")
+                                 for c in z.get("creators", [])),
+               f"CITATION.cff says {fam.group(1) if fam else '?'}, .zenodo.json says "
+               f"{[c.get('name') for c in z.get('creators', [])]}")
+        # THE RECIPROCAL LINK. The databases are a separate deposit and the pipeline
+        # cannot run without them, so the software record has to say so - a dataset whose
+        # software is unlinked, or software whose data is unlinked, is half a record.
+        rels = {(r.get("relation"), r.get("identifier"))
+                for r in z.get("related_identifiers", [])}
+        record("install:the software deposit points at the database deposit",
+               ("requires", "10.5281/zenodo.23602998") in rels,
+               f"relations: {sorted(rels)}")
+        record("install:the deposit description carries the disclaimer",
+               "not a validated diagnostic assay" in z.get("description", "")
+               and "decide that a sample is safe" in z.get("description", ""),
+               "a Zenodo page is read by people who never open the repository")
+
     record("install:the packager refuses to publish a stale marker database",
            "--check" in pack_src and "does not pass its own freshness check" in pack_src,
            "a reader cannot tell a stale archive from a fresh one, and the manifest is "

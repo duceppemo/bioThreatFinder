@@ -100,6 +100,22 @@ and pushed while `-profile docker` fails for everyone else.
 5. If the databases changed, `scripts/package_databases.sh` and a new Zenodo version, then
    the urls in `assets/databases.manifest.tsv`.
 
+The Zenodo deposit's metadata comes from `.zenodo.json`, which **overrides** `CITATION.cff`
+for that purpose — so the two must agree, and the suite checks the author, licence and the
+link to the database deposit. Without `.zenodo.json`, Zenodo infers from `CITATION.cff`,
+which works and produces a software record with **no link to the databases the pipeline
+cannot run without**.
+
+Two DOIs, and the distinction matters when citing: the **concept** DOI always resolves to
+the latest version and is what belongs in a paper; the **version** DOI pins exact files and
+is what `assets/databases.manifest.tsv` uses, because the installer verifies a recorded
+sha256 and "latest" would one day stop matching it.
+
+| Record | Concept | Version |
+|---|---|---|
+| software | `10.5281/zenodo.23607033` | one per release |
+| databases | `10.5281/zenodo.23602998` | `10.5281/zenodo.23602999` |
+
 ## Decisions
 
 Every non-obvious choice is a numbered entry in
