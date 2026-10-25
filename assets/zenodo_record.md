@@ -34,7 +34,7 @@ able to find it without reading the description.
 |---|---|
 | Name | Duceppe, Marc-Olivier |
 | Affiliation | Canadian Food Inspection Agency |
-| ORCID | *(add yours — it is the one field here nobody else can fill in, and it is what makes the deposit resolvable to you across name changes and namesakes)* |
+| ORCID | `0000-0003-2130-0427` — in `CITATION.cff` and `.zenodo.json`, so every future release carries it |
 
 ## Version
 

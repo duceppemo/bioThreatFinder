@@ -4838,6 +4838,14 @@ def test_install_route(tmp: Path) -> None:
                                  for c in z.get("creators", [])),
                f"CITATION.cff says {fam.group(1) if fam else '?'}, .zenodo.json says "
                f"{[c.get('name') for c in z.get('creators', [])]}")
+        orc = re.search(r"orcid:\s*'https://orcid\.org/([\d-]+X?)'", cff)
+        record("install:.zenodo.json and CITATION.cff agree on the ORCID",
+               bool(orc) and all(c.get("orcid") == orc.group(1)
+                                 for c in z.get("creators", [])),
+               f"CITATION.cff {orc.group(1) if orc else None}, .zenodo.json "
+               f"{[c.get('orcid') for c in z.get('creators', [])]} - the ORCID is the "
+               f"only field that resolves a deposit to a person across namesakes")
+
         # THE RECIPROCAL LINK. The databases are a separate deposit and the pipeline
         # cannot run without them, so the software record has to say so - a dataset whose
         # software is unlinked, or software whose data is unlinked, is half a record.

@@ -22,6 +22,7 @@ authors:
     family-names: Duceppe
     email: marc-olivier.duceppe@inspection.gc.ca
     affiliation: Canadian Food Inspection Agency
+    orcid: 'https://orcid.org/0000-0003-2130-0427'
 license: MIT
 repository-code: https://github.com/duceppemo/bioThreatFinder
 # The CONCEPT doi: it always resolves to the latest version, which is what a citation
@@ -46,6 +47,7 @@ references:
         family-names: Duceppe
         email: marc-olivier.duceppe@inspection.gc.ca
         affiliation: Canadian Food Inspection Agency
+        orcid: 'https://orcid.org/0000-0003-2130-0427'
 keywords:
   - metagenomics
   - biosurveillance
