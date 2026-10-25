@@ -52,7 +52,7 @@ table was run against the shipped databases on 2026-10-22.
 | Masking completeness (D34) | `python3 scripts/mask_pack_refs.py --pack human --dry-run` | 0, or 1 if a reference has no result | does every reference have a masking result |
 | Threshold coherence | `python3 scripts/check_threshold_coherence.py` | report, always 0 | which per-taxon gates can never bind |
 | Conda specs | `bash scripts/check_conda_specs.sh` | 0 or nonzero | does every per-process pin still solve (network, minutes) |
-| The suite | `python3 tests/test_pipeline.py` | 0 or nonzero | 477 checks with samtools on `PATH` and `$BTF_DB` set; 416 pass and 14 skip on a bare clone with neither. No network, ~30 s |
+| The suite | `python3 tests/test_pipeline.py` | 0 or nonzero | 482 checks with samtools on `PATH` and `$BTF_DB` set; 421 pass and 14 skip on a bare clone with neither. No network, ~30 s |
 
 **Why there are this many.** Well over thirty bugs found in this project so far share one
 shape: *produces an empty or degraded result indistinguishable from a clean negative.* A
