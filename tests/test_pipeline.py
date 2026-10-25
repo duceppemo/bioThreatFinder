@@ -1247,9 +1247,44 @@ def test_shared_assembly_masking(tmp: Path) -> None:
     # one-reference taxa, so the test passed; it was asserting less than it looked.
     with mask_manifest.open() as fh:
         mask_rows = list(_csv.DictReader(fh, delimiter="\t"))
-    rows: dict = {}
+    # PAIR ON THE SHARED ACCESSION, NOT ON THE TAXID.
+    #
+    # This used to be `rows.setdefault(r["taxid"], r)` - one row per taxid, the first
+    # one seen - which silently assumed every taxon has exactly one reference. The moment
+    # a taxon in one of these pairs gained a second (D43's cover, 2026-10-24), the test
+    # compared one partner's SHARED row against the other partner's NEW row and reported
+    # a disagreement that did not exist: the shared rows agreed exactly, as they must.
+    #
+    # The fix uses the same source of truth the masking itself uses for the flag (D34):
+    # the refs manifest's `accession` column. A mask row is matched to a reference by its
+    # bed_path, because `<stem>.fna.gz` is masked to `<stem>.mask.bed`.
+    with refs_manifest.open() as fh:
+        ref_rows = [r for r in _csv.DictReader(fh, delimiter="\t")
+                    if (r.get("accession") or "").strip() and (r.get("path") or "").strip()]
+    stem_of = {}                      # (taxid, accession) -> fasta stem
+    for r in ref_rows:
+        stem = pathlib.Path(r["path"]).name
+        for suffix in (".fna.gz", ".fna", ".fa.gz", ".fa"):
+            if stem.endswith(suffix):
+                stem = stem[: -len(suffix)]
+                break
+        stem_of[(r["taxid"].strip(), r["accession"].strip())] = stem
+    by_stem = {}                      # fasta stem -> mask row
     for r in mask_rows:
-        rows.setdefault(r["taxid"], r)
+        bed = pathlib.Path(r.get("bed_path") or "").name
+        if bed.endswith(".mask.bed"):
+            by_stem[bed[: -len(".mask.bed")]] = r
+
+    def shared_rows(a: str, b: str):
+        """The two mask rows for the one accession both taxids hold, or (None, None)."""
+        acc_a = {acc for (tid, acc) in stem_of if tid == a}
+        acc_b = {acc for (tid, acc) in stem_of if tid == b}
+        for acc in sorted(acc_a & acc_b):
+            ra = by_stem.get(stem_of.get((a, acc), ""))
+            rb = by_stem.get(stem_of.get((b, acc), ""))
+            if ra and rb:
+                return ra, rb
+        return None, None
     record("shared_assembly:no reference is lost to taxid-keyed bookkeeping",
            len({r.get("bed_path") for r in mask_rows}) == len(mask_rows),
            f"{len(mask_rows)} rows, "
@@ -1257,9 +1292,10 @@ def test_shared_assembly_masking(tmp: Path) -> None:
 
     for a, b, label in (("263", "264", "F. tularensis / F. novicida"),
                         ("620", "622", "Shigella / S. dysenteriae")):
-        ra, rb = rows.get(a), rows.get(b)
+        ra, rb = shared_rows(a, b)
         if not ra or not rb:
-            skip(f"shared_assembly:{label}", f"taxid {a if not ra else b} not in manifest")
+            skip(f"shared_assembly:{label}",
+                 f"no accession held by both {a} and {b} has a masking result")
             continue
         # The PER-SOURCE columns are the point. The first version of this test compared
         # only the four totals, all of which agreed, so it passed green while

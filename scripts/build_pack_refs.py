@@ -1523,6 +1523,32 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # fully built: 1 / 1" and "genomes on disk: 8". `--max-per-taxon N` could not
         # produce N distinct assemblies for any taxon that already had one, which is
         # every taxon in a built pack.
+        # A CAP ON WHAT TO ACQUIRE IS NOT A CAP ON WHAT IS ALREADY THERE.
+        #
+        # The manifest is rewritten from scratch each run, and the resume loop below
+        # stops carrying rows once it holds `want` of them. For a taxon that legitimately
+        # has MORE than --max-per-taxon allows, the surplus rows were therefore dropped
+        # from the new manifest while their files stayed on disk - and an artifact present
+        # on disk but absent from the manifest is invisible to the masking pass, the
+        # coverage statistics, the lock and the sketch check, every one of which reads the
+        # manifest. Measured 2026-10-24: a run with --extra-refs silently removed 12 rows
+        # across 4 taxids, and reported success.
+        #
+        # So the cap is raised to what is already recorded. This is D52's lesson one layer
+        # down: there, the LOCK states how many assemblies a taxon has, so --max-per-taxon
+        # must not trim it; here the existing manifest states it. The exception is a lock
+        # in force, which is authoritative BY DESIGN and must still be able to shrink a
+        # taxon - that is the conformance check, not a loss.
+        if not args.force and not task.get("locked"):
+            held_rows = sum(1 for (mtid, _), row in prior.items()
+                            if mtid == str(tid) and (row.get("accession") or "").strip()
+                            and (row.get("path") or "")
+                            and Path(row["path"]).is_file())
+            if held_rows > want:
+                LOG.info("  taxid %s already holds %d reference(s), more than the %d this "
+                         "run would acquire - keeping all of them", tid, held_rows, want)
+                want = held_rows
+
         taken_acc: set = set()
         if not args.force:
             for (mtid, macc), row in prior.items():

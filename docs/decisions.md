@@ -5497,3 +5497,70 @@ bare clone.
 The wiki repository does not exist until a first page is created in the web UI, so the
 first run of the sync workflow fails at its checkout step until someone clicks *Create the
 first page* and saves anything. Every run after that overwrites it.
+
+---
+
+## D57 — D43's cover applied, and two bookkeeping defects it exposed
+
+**Date:** 2026-10-24
+**Evidence:** measured-here (counts before and after; both defects reproduced)
+**Status:** done
+
+D43 measured the cover and recommended it without applying it. Applied now, from the
+committed report rather than from a fresh judgement: `build_pack_refs.py --extra-refs
+docs/reference_span.tsv`, which is the flag that file's `taxid` / `add_accessions` columns
+were written for.
+
+| | before | after |
+|---|---|---|
+| references with sequence | 375 | **406** |
+| lock rows | 380 | **411** (+31, −0) |
+| sketch genomes | 375 | **406** |
+| references with a masking result | 375 | **406** |
+
+Nine taxids went from 10 references between them to 41. One of the 32 accessions was
+already held, so the net addition is 31.
+
+### Defect 1: a cap on what to acquire was applied to what already existed
+
+The manifest is rewritten from scratch each run, and the resume path stopped carrying rows
+once it held `--max-per-taxon`-many. Four taxids legitimately held more, so **12 rows were
+dropped from the manifest while their files stayed on disk** — and the run reported
+success. In this project that is the worse direction: an artifact present on disk but
+absent from the manifest is invisible to the masking pass, the coverage statistics, the
+lock and the sketch check, every one of which reads the manifest.
+
+This is D52's lesson one layer down. There, the LOCK states how many assemblies a taxon
+has, so `--max-per-taxon` must not trim it; here the existing manifest states the same
+thing. The cap is now raised to what is already recorded — except when a lock is in force,
+where shrinking a taxon is the deliberate conformance behaviour and must stay possible.
+
+Recovered by restoring the pre-build manifest, which was the only copy still holding the 12
+rows, and rerunning: 0 rows lost, 4 taxids reported as preserved by the new guard.
+
+### Defect 2: a test that assumed one reference per taxon
+
+`test_shared_assembly_masking` built `rows[taxid] = first row seen`. The moment a taxon in
+one of the checked pairs gained a second reference, the test compared one partner's SHARED
+row against the other partner's NEW row and reported a disagreement that did not exist —
+the shared rows agreed exactly, 5,192,674 bp and 11,144 masked on both sides.
+
+The irony is worth recording: this test exists to catch masking that silently attributes
+shared sequence to one partner, and its own bookkeeping dropped rows keyed on a field that
+is not unique. It now pairs on the refs manifest's `accession` column, which is the same
+source of truth `mask_pack_refs.py` uses to derive the `SHARED_SEQUENCE` flag (D34), and
+matches mask rows to references by `bed_path`, since `<stem>.fna.gz` masks to
+`<stem>.mask.bed`.
+
+### What this does not establish
+
+D43's two cautions still hold and nothing here tests them. An ANI threshold cannot carry
+this verdict, because the ANI at which read identity crosses the floor is species-dependent.
+And one of the nine degrades discontinuously rather than gradually, so its divergent members
+return breadth near zero and are non-actionable whatever the markers say — more references
+do not help that case, and this change should not be read as having fixed it. Whether the
+cover improves a real call is a measurement on real data, not a property of having built it.
+
+Suite **482 passed** with `$BTF_DB` and samtools, **421 passed, 0 failed, 14 skipped** on a
+bare clone. Checks: marker 0, sylph 0, masking completeness 0, threshold coherence 0, index
+coverage 3 (its documented state).
