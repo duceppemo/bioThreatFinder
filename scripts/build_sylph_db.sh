@@ -241,10 +241,52 @@ SYLPH_VERSION="$("$SYLPH" --version 2>&1 | head -1 | sed 's/^sylph //')"
 # ---------------------------------------------------------------------------
 # Collect inputs
 # ---------------------------------------------------------------------------
-mapfile -t FASTAS < <(find "$REFS_DIR" -maxdepth 1 -type f \
+mapfile -t DISK_FASTAS < <(find "$REFS_DIR" -maxdepth 1 -type f \
     \( -name '*.fna.gz' -o -name '*.fa.gz' -o -name '*.fasta.gz' \
        -o -name '*.fna' -o -name '*.fa' -o -name '*.fasta' \) | sort)
-(( ${#FASTAS[@]} > 0 )) || die "no FASTA files in ${REFS_DIR}"
+(( ${#DISK_FASTAS[@]} > 0 )) || die "no FASTA files in ${REFS_DIR}"
+
+# THE MANIFEST IS THE PACK, NOT THE DIRECTORY.
+#
+# This script used to sketch whatever FASTA files were in REFS_DIR, and --check compared
+# the sketch against that same directory - so both sides of the comparison were the same
+# wrong thing. Measured 2026-10-26: after a reference set was reverted, 31 files remained on
+# disk that the manifest no longer named; the rebuild silently sketched them, reported 406
+# genomes against a 375-reference manifest, and --check answered FRESH. A check cannot see a
+# disagreement it is not looking at.
+#
+# So when a manifest exists it decides what belongs in the sketch, and a file on disk that
+# it does not name is reported rather than swept in. Without a manifest - a bare --refs-dir
+# pointed anywhere - the directory is all there is, and that is said out loud.
+MANIFEST="${MANIFEST:-${REFS_DIR}/manifest.tsv}"
+declare -A IN_MANIFEST=()
+MANIFEST_N=0
+if [[ -f "$MANIFEST" ]]; then
+    while IFS= read -r b; do
+        [[ -n "$b" ]] || continue
+        IN_MANIFEST["$b"]=1
+        MANIFEST_N=$((MANIFEST_N + 1))
+    done < <(awk -F'\t' 'NR==1{for(i=1;i<=NF;i++) h[$i]=i; next}
+                          h["path"] && h["accession"] && $(h["accession"]) != "" && $(h["path"]) != "" {
+                              n=split($(h["path"]), parts, "/"); print parts[n]
+                          }' "$MANIFEST" | sort -u)
+fi
+
+FASTAS=()
+ORPHANS=()
+if (( MANIFEST_N > 0 )); then
+    for f in "${DISK_FASTAS[@]}"; do
+        if [[ -n "${IN_MANIFEST[$(basename "$f")]:-}" ]]; then
+            FASTAS+=("$f")
+        else
+            ORPHANS+=("$(basename "$f")")
+        fi
+    done
+else
+    FASTAS=("${DISK_FASTAS[@]}")
+fi
+(( ${#FASTAS[@]} > 0 )) || die "no FASTA file in ${REFS_DIR} is named by ${MANIFEST}.
+       Either the manifest is for another pack, or the references were never built."
 
 # GUARD 1: every basename must carry a taxid parse_screen can recover.
 # Checked against the SAME rule parse_sylph uses - an all-digit token of >= 2 characters -
@@ -358,9 +400,22 @@ check_freshness() {
     done
 
     log "sketch      : ${#sketched[@]} genomes, c=${got_c:-?} k=${got_k:-?} min-spacing=${got_ms:-?}, written $(mtime "$OUT")"
-    log "refs        : ${#FASTAS[@]} FASTA files in ${REFS_DIR}"
+    if (( MANIFEST_N > 0 )); then
+        log "refs        : ${#FASTAS[@]} named by ${MANIFEST} (${#DISK_FASTAS[@]} files on disk)"
+    else
+        log "refs        : ${#FASTAS[@]} FASTA files in ${REFS_DIR} (NO MANIFEST - the"
+        log "              directory is the only authority available here)"
+    fi
 
     local stale=0
+    if (( ${#ORPHANS[@]} > 0 )); then
+        stale=1
+        log "STALE: ${#ORPHANS[@]} FASTA file(s) in ${REFS_DIR} are NOT named by the"
+        log "       manifest. A superseded reference left on disk gets sketched, and then"
+        log "       the arm answers for a genome the pack no longer claims - while every"
+        log "       count agrees with itself."
+        show_some "on disk, not in the manifest" "${ORPHANS[@]}"
+    fi
     if (( ${#missing[@]} > 0 )); then
         stale=1
         log "STALE: ${#missing[@]} reference(s) were never sketched. The sylph arm is BLIND"

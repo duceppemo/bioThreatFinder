@@ -71,7 +71,7 @@ finding. Open `results/report/biothreatfinder_report.html` for the run, or
 carries the gate that decided it, never a bare verdict.
 
 ```bash
-python3 tests/test_pipeline.py     # 483 checks, offline, no databases, ~30 s
+python3 tests/test_pipeline.py     # 488 checks, offline, no databases, ~30 s
 ```
 
 ## Documentation

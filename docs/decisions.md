@@ -5615,14 +5615,65 @@ manifest restored to 375 and 31 files still on disk, the re-sketch silently incl
 reported 406, and `--check` said FRESH. The comparison that would have caught it is sketch
 against *manifest*.
 
-**The bundle predicate does not look in this direction.** D45 detects references changing
-under a bundle. The revert's first pass left all nine bundles untouched: each was newer than
-every reference and its recorded input set had been rewritten by the enlarging build, so the
-bundles held six references where the manifest listed one. Forced by deleting them so they
-rebuilt as missing.
+**~~The bundle predicate does not look in this direction.~~ WRONG — corrected 2026-10-26.**
+This entry claimed D45's predicate cannot detect a bundle built from a larger set than the
+manifest now names. It can. Probed directly with a fabricated sidecar, all four cases are
+reported: equal sets are current, a gained reference, a lost reference, and a **superset**
+(`no longer wants GCF_2, GCF_3`) all return stale.
+
+The skip I saw during the revert had a duller cause: I read the log while the run was still
+in its per-taxon loop, before the bundle phase had reached those nine, and read "built
+yesterday" timestamps as a decision the predicate had made. Deleting the bundles forced the
+rebuild and so hid the mistake rather than exposing it. The guard was never at fault, and a
+decision log asserting a defect in a working guard is worse than no entry — hence this
+correction rather than a quiet edit. `tests/test_pipeline.py -k stale` already covers the
+predicate.
 
 ### Restored state
 
 375 references, 90 bundles, 180 indexes, 375 sketched, 375 masked, 0 cover accessions in
 manifest, lock or any bundle. Checks: marker 0, masking 0, thresholds 0, sylph 0, index
 coverage 3. Suite 483 passed.
+
+---
+
+## D59 — The sketch's authority is the manifest, not the directory it reads
+
+**Date:** 2026-10-26
+**Evidence:** measured-here (the failure reproduced, then the fix verified against it)
+**Status:** done
+
+`build_sylph_db.sh` sketched whatever FASTA files were in `refs/`, and `--check` compared
+the sketch against that same directory. Both sides of the comparison were the same wrong
+thing, so the one disagreement that matters — sketch against **manifest** — was invisible.
+
+Measured while reverting a reference set (D58): 31 files stayed on disk that the manifest no
+longer named, the rebuild silently sketched them, the sketch reported **406 genomes against
+a 375-reference manifest**, and `--check` answered **FRESH**. Every count agreed with
+itself. This is the same family as D47's count comparison and D52's container checksum: a
+check whose two sides share the error cannot see it.
+
+**The manifest now decides what belongs in the sketch**, and a file on disk that it does not
+name is reported as STALE rather than swept in — because that is precisely how a superseded
+reference gets into the sketch, after which the arm answers for a genome the pack no longer
+claims. Verified by planting one unnamed file: exit **3**, named in the output, while the
+clean pack still exits **0**.
+
+The no-manifest case is kept and **stated**: a bare `--refs-dir` pointed anywhere has no
+manifest, and there the directory really is the only authority. A weaker check that looks
+like the strong one is the worse failure, so it says so in its own output.
+
+Five checks pin it (`-k sketchauth`). They are source-level, because `--check` needs
+`sylph inspect` and this suite is offline — the behaviour was verified live the same day.
+
+### The correction that came with it
+
+D58 also claimed D45's bundle predicate could not detect a bundle built from a larger set
+than the manifest names. **That was wrong**, and probing the function directly refuted it:
+equal sets, a gained reference, a lost reference and a **superset** are all reported
+correctly. What I had actually seen was a log read before the bundle phase reached those
+taxa. D58 now carries the correction inline.
+
+Two lessons worth keeping separate: a guard can be wrong (D59), and a claim that a guard is
+wrong can itself be wrong (the D58 correction). The second is the more dangerous of the two
+in a decision log, because the next reader inherits it as settled.

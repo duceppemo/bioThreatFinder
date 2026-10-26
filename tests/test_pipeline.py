@@ -4136,6 +4136,46 @@ def test_sketch_freshness(tmp: Path) -> None:
            f"references with a path")
 
 
+def test_sketch_authority(tmp: Path) -> None:
+    """D59. The sketch's authority is the manifest, not the directory it reads.
+
+    `build_sylph_db.sh` sketched whatever FASTA files were in `refs/`, and `--check`
+    compared the sketch against that same directory - so both sides of the comparison were
+    the same wrong thing, and the one disagreement that matters was invisible.
+
+    Measured 2026-10-26, while reverting a reference set: 31 files stayed on disk that the
+    manifest no longer named, the rebuild silently sketched them, the sketch reported 406
+    genomes against a 375-reference manifest, and `--check` answered FRESH. Every count
+    agreed with itself.
+
+    Behaviour verified live the same day (the check needs `sylph inspect`, so it cannot run
+    in this offline suite): planting one file the manifest does not name makes `--check`
+    exit 3 and name it, while the clean pack still exits 0.
+    """
+    src = (SCRIPTS / "build_sylph_db.sh").read_text(encoding="utf-8")
+
+    record("sketch:the manifest decides what belongs in the sketch",
+           "IN_MANIFEST" in src and "MANIFEST_N" in src,
+           "sketching the directory means a superseded reference left on disk is sketched")
+    record("sketch:a file the manifest does not name is reported",
+           "ORPHANS" in src and "NOT named by the" in src,
+           "that is how the sketch becomes wider than the pack")
+    record("sketch:an orphan makes the check STALE rather than FRESH",
+           'if (( ${#ORPHANS[@]} > 0 )); then\n        stale=1' in src,
+           "reporting it without failing leaves the operator to notice a log line")
+    # The fallback has to exist AND be visible: a bare --refs-dir pointed anywhere has no
+    # manifest, and in that case the directory really is all there is - which is a weaker
+    # guarantee and must say so rather than appear equivalent.
+    record("sketch:no manifest is a stated fallback, not a silent one",
+           "NO MANIFEST - the" in src,
+           "a weaker check that looks like the strong one is the worse failure")
+    # And the build must use the same filtered list, or the check polices a sketch built
+    # from something else - which is the shape of the bug it was written for.
+    record("sketch:the build sketches the filtered list",
+           'FASTAS+=("$f")' in src and "DISK_FASTAS" in src,
+           "the check and the build must agree on what the pack is")
+
+
 def test_marker_db_freshness(tmp: Path) -> None:
     """D47. The third artifact nothing compared against its inputs.
 
@@ -5208,6 +5248,7 @@ CASES = {
     "extrarefs": test_extra_refs_cover,
     "stale": test_bundle_staleness,
     "sketch": test_sketch_freshness,
+    "sketchauth": test_sketch_authority,
     "markerdb": test_marker_db_freshness,
     "idxcover": test_index_coverage,
     "envs": test_env_specs,

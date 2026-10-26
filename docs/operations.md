@@ -52,7 +52,7 @@ table was run against the shipped databases on 2026-10-22.
 | Masking completeness (D34) | `python3 scripts/mask_pack_refs.py --pack human --dry-run` | 0, or 1 if a reference has no result | does every reference have a masking result |
 | Threshold coherence | `python3 scripts/check_threshold_coherence.py` | report, always 0 | which per-taxon gates can never bind |
 | Conda specs | `bash scripts/check_conda_specs.sh` | 0 or nonzero | does every per-process pin still solve (network, minutes) |
-| The suite | `python3 tests/test_pipeline.py` | 0 or nonzero | 483 checks with samtools on `PATH` and `$BTF_DB` set; 422 pass and 14 skip on a bare clone with neither. No network, ~30 s |
+| The suite | `python3 tests/test_pipeline.py` | 0 or nonzero | 488 checks with samtools on `PATH` and `$BTF_DB` set; 427 pass and 14 skip on a bare clone with neither. No network, ~30 s |
 
 **Why there are this many.** Well over thirty bugs found in this project so far share one
 shape: *produces an empty or degraded result indistinguishable from a clean negative.* A
@@ -71,6 +71,12 @@ And the bundle predicate (D45) is the one with no standalone read-only form — 
 rebuild decision inside the builder, so asking "are my bundles current?" means invoking the
 builder, whose `--dry-run` reaches the network. The answer is still correct whenever a build
 runs, which is where a repair would happen anyway.
+
+**One gap closed (D59).** The sketch check used to compare the sketch against the `refs/`
+directory, which is also what the sketch was built from — so a reference left on disk but
+dropped from the manifest was silently sketched and the check answered FRESH. The manifest
+is now the authority for what belongs in the sketch, and a file it does not name makes the
+check exit 3.
 
 **Three of these also run at launch, which is the point:** the only consumer of any of these
 databases is a run, so a run is where the operator is told. A schedule would report staleness
