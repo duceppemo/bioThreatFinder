@@ -95,10 +95,11 @@ Each of these writes nothing. **0** means yes, **3** means no and it names what 
 reported as a stale database.
 
 ```bash
-python3 scripts/build_marker_db.py    --pack human --check      # covers markers.tsv, on every claimed tier
-bash    scripts/build_sylph_db.sh     --pack human --check      # covers every pack reference
-python3 scripts/check_index_coverage.py --pack human            # can the index report every watchlist taxon at all
-python3 scripts/mask_pack_refs.py     --pack human --dry-run    # does every reference have a masking result
+python3 scripts/build_marker_db.py      --pack human --check    # covers markers.tsv, on every claimed tier
+bash    scripts/build_sylph_db.sh       --pack human --check    # covers every reference the MANIFEST names
+python3 scripts/check_index_coverage.py --pack human            # can Kraken2 report every watchlist taxon at all
+python3 scripts/check_metabuli_coverage.py --pack human         # the same question for the Metabuli arm
+python3 scripts/mask_pack_refs.py       --pack human --dry-run  # does every reference have a masking result
 python3 scripts/check_threshold_coherence.py                    # which per-taxon gates can never bind
 ```
 
@@ -119,8 +120,11 @@ Only the sylph check needs a tool on `PATH` (`conda activate btf-sylph`); the re
 stdlib Python and run from a bare clone. That is deliberate — a check that needs a
 configured deployment is a check nobody runs on a fresh clone.
 
-**Two gaps, both known.** Metabuli has no freshness or coverage check at all; it is opt-in
-and off by default. And the competitive bundles' predicate is a rebuild decision inside
+**Metabuli's answer is 3 as well**, and more sharply: 63 of 90 watchlist taxa have no
+sequence at or below them in the prebuilt database that ships — every fungus, 19 of 20
+parasites. The arm is off by default, so this is not a run-time defect; it is what the arm
+would answer if switched on for those taxa. A different Metabuli database would answer
+differently. And the competitive bundles' predicate is a rebuild decision inside
 `build_pack_refs.py` rather than a standalone check, so asking "are my bundles current?"
 means invoking the builder.
 

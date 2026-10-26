@@ -17,9 +17,9 @@ pointing at built databases for the cases that compare a shipped artifact agains
 taxonomy. All of those skip with a message naming what to set. Everything else is
 fixture-driven.
 
-Current state: **488 passed, 0 failed, 0 skipped** (2026-10-26) with `samtools` on PATH
+Current state: **497 passed, 0 failed, 0 skipped** (2026-10-26) with `samtools` on PATH
 and `$BTF_DB` set. On a bare clone with neither, `python3 tests/test_pipeline.py` reports
-**427 passed, 0 failed, 14 skipped** - 3 of those skips want `samtools`, the other 11 want
+**434 passed, 0 failed, 15 skipped** - 3 of those skips want `samtools`, the other 11 want
 built databases. Per-case overrides (`BTF_TAXDUMP`, `BTF_REFS_DIR`, `BTF_MARKER_DB`,
 `BTF_REFS_MANIFEST`) still point one case at a copy elsewhere. The per-script `--self-test` suites run
 as single checks from here, so `selftest:build_marker_db` alone covers 60+ assertions,

@@ -5677,3 +5677,78 @@ taxa. D58 now carries the correction inline.
 Two lessons worth keeping separate: a guard can be wrong (D59), and a claim that a guard is
 wrong can itself be wrong (the D58 correction). The second is the more dangerous of the two
 in a decision log, because the next reader inherits it as settled.
+
+---
+
+## D60 — The last unchecked arm, and the test that does not transfer to it
+
+**Date:** 2026-10-26
+**Evidence:** measured-here
+**Status:** done
+
+Every other database now answers a question about itself: the bundles (D45), the sketch
+(D46, D59), the marker database (D47), the Kraken2 index (D48). Metabuli answered none,
+because it is opt-in and off by default — which is a reason it was not urgent, not a reason
+it was covered. An arm nobody checks answers nothing when it is finally switched on for the
+one question it exists for.
+
+### Why D48's test does not transfer
+
+`check_index_coverage.py` asks whether a watchlist taxon has a node in the Kraken2 index's
+**pruned** taxonomy. That discriminates because `kraken2-build` keeps only nodes spanning
+sequences it loaded, so an absent node proves the arm cannot report the taxon.
+
+A Metabuli database copies the **whole** NCBI taxdump into `ncbi-taxdump/` — 2,734,183
+nodes here. Every watchlist taxon has a node in it, and so would every taxon that has ever
+existed. The same test would pass unconditionally, and **a check that cannot fail is not a
+check.**
+
+The discriminating input is `taxID_list`: the 35,574 taxids this database holds sequence
+for. So the question is asked over the clade — does this taxon, or any descendant, appear
+there? Descendants are expanded from the database's **own** copy of the taxonomy rather than
+from the pinned snapshot, because the question is what *this* database can report and it
+will use its own copy at query time.
+
+The walk goes **up** from each sequenced taxid, not down from each watchlist taxon: 35k
+lineages memoised beats 90 descents through 2.7M nodes. The self-test pins the property that
+makes memoisation safe — a shared ancestor must not truncate a later lineage.
+
+### Measured
+
+**63 of 90 watchlist taxa have no sequence at or below them**, in the prebuilt
+`refseq_standard` database that `build_metabuli_db.sh --prebuilt` installs:
+
+| group | absent | of |
+|---|---|---|
+| fungus | 13 | 13 |
+| parasite | 19 | 20 |
+| virus | 22 | 31 |
+| bacteria | 9 | 26 |
+
+Sanity-checked before being believed: five bacteria known to be in RefSeq all come back
+covered, so this is not an artefact of the clade logic. 1.9 s to run.
+
+This is **a property of the distribution that was installed, not of Metabuli**. A different
+database would answer differently, and the manifest records that this one came prebuilt from
+`opendata.mmseqs.org`.
+
+It also gives D15 a structural reading. D15 measured that this arm changed **zero** findings
+across every scenario and kept it anyway, because its untested case — an agent absent from
+the index — cannot be simulated from a database. That remains true. What is now visible is
+that for two thirds of the watchlist the arm has nothing to answer with at all, so for those
+taxa "changed no finding" was never a measurement of the amino-acid route's value.
+
+### What the check refuses to do
+
+An **absent** database is UNDETERMINED, never a gap: the arm is off by default, so absent is
+a configuration, and exit 3 on every deployment that never installed it is how a guard gets
+switched off (D47, D52, D59).
+
+A **non-NCBI namespace** also refuses to report. Metabuli publishes GTDB-based databases,
+and GTDB taxids are not NCBI taxids; coverage computed against them would be a confident
+number about nothing. `main.nf` already refuses such an index at launch, and this check will
+not quietly contradict it.
+
+And a sequenced clade is called **necessary, not sufficient** — one genome under a genus
+does not mean a species can be resolved, and the amino-acid route can place a read on a
+clade without resolving below it. The wording follows D48's.

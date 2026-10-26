@@ -4136,6 +4136,71 @@ def test_sketch_freshness(tmp: Path) -> None:
            f"references with a path")
 
 
+def test_metabuli_coverage(tmp: Path) -> None:
+    """D60. The last unchecked arm. Opt-in is not the same as covered.
+
+    D46 closed the sketch, D47 the marker database, D48 the Kraken2 index, D59 the sketch's
+    authority. Metabuli stayed unchecked because it is off by default - which is a reason it
+    was not urgent, not a reason it was covered. An arm nobody checks answers nothing when
+    it is finally switched on for the one question it exists for.
+
+    The test that works for Kraken2 does NOT transfer. That check asks whether a watchlist
+    taxon has a node in the index's PRUNED taxonomy, which is discriminating because
+    kraken2-build keeps only nodes spanning sequences it loaded. A Metabuli database copies
+    the WHOLE NCBI taxdump, so every watchlist taxon has a node and the same test would pass
+    unconditionally - a check that cannot fail is not a check. The discriminating input is
+    `taxID_list`, the taxids the database holds sequence for, asked over the clade.
+    """
+    chk = SCRIPTS / "check_metabuli_coverage.py"
+    record("metabuli:the arm has a coverage check at all", chk.is_file(), f"missing {chk}")
+    if not chk.is_file():
+        return
+    src = chk.read_text(encoding="utf-8")
+
+    # The self-test carries the property that makes the clade walk correct.
+    proc = run([sys.executable, "-I", chk, "--self-test"])
+    record("metabuli:the clade walk self-test passes", proc.returncode == 0,
+           (proc.stdout + proc.stderr)[-300:])
+
+    record("metabuli:coverage is asked over the CLADE, not the node",
+           "sequenced_clades" in src and "taxID_list" in src,
+           "every watchlist taxon has a node in a full taxdump copy, so a node test would "
+           "pass unconditionally")
+    record("metabuli:the database's OWN taxonomy is used, not the pinned snapshot",
+           "ncbi-taxdump" in src and "nodes.dmp" in src,
+           "the question is what THIS database can report, and it uses its own copy at "
+           "query time")
+    # A missing database must be UNDETERMINED, never a verdict: the arm is off by default,
+    # so absent is a configuration rather than a fault, and exit 3 would cry wolf on every
+    # deployment that never installed it.
+    record("metabuli:an absent database is UNDETERMINED, not a gap",
+           "no Metabuli database to check" in src and "EXIT_UNDETERMINED" in src,
+           "exit 3 on an uninstalled opt-in arm is a guard that gets switched off")
+    record("metabuli:a non-NCBI namespace refuses to report coverage",
+           "taxonomy_namespace=" in src and "not comparable to the" in src,
+           "GTDB taxids are not NCBI taxids, so coverage against them is meaningless")
+    record("metabuli:a sequenced clade is called necessary, not sufficient",
+           "necessary, not sufficient" in src)
+
+    # ---- and the installed database, where there is one ----
+    db = btf_path("metabuli", "refseq")
+    if db is None or not (db / "taxID_list").is_file():
+        skip("metabuli:the installed database's watchlist coverage",
+             f"no Metabuli database at {db} (the arm is opt-in and off by default)")
+        return
+    proc = run([sys.executable, "-I", chk, "--pack", "human",
+                "--packs-dir", REPO / "packs", "--metabuli-db", db])
+    # 3 is the measured state of the prebuilt refseq database, not a failure: 63 of 90
+    # watchlist taxa have no sequenced clade in it. 1 would mean the check could not tell.
+    record("metabuli:the check reaches a verdict on the installed database",
+           proc.returncode in (0, 3),
+           f"exit {proc.returncode}: {(proc.stdout + proc.stderr)[-200:]}")
+    record("metabuli:the verdict names how many taxa the arm cannot report",
+           "of 90 watchlist taxa have NO sequence" in proc.stdout
+           or "COVERED" in proc.stdout,
+           proc.stdout[-200:])
+
+
 def test_sketch_authority(tmp: Path) -> None:
     """D59. The sketch's authority is the manifest, not the directory it reads.
 
@@ -5249,6 +5314,7 @@ CASES = {
     "stale": test_bundle_staleness,
     "sketch": test_sketch_freshness,
     "sketchauth": test_sketch_authority,
+    "metabuli": test_metabuli_coverage,
     "markerdb": test_marker_db_freshness,
     "idxcover": test_index_coverage,
     "envs": test_env_specs,

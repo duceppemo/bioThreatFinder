@@ -123,10 +123,10 @@ all, so sylph is already the only stage-1 arm that can see them.
 ## Checking an installation
 
 ```bash
-python3 tests/test_pipeline.py              # 488 checks, offline, no databases, ~30 s
+python3 tests/test_pipeline.py              # 497 checks, offline, no databases, ~30 s
 nextflow run . --help                       # must compile
 ```
 
-On a bare clone with no databases and no samtools, 427 of those checks pass and 14 skip
+On a bare clone with no databases and no samtools, 434 of those checks pass and 15 skip
 with a message naming what to set — so the suite is a valid thing to run before anything
 is built. Then the database checks in [Databases](Databases).

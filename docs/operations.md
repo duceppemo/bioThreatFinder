@@ -49,10 +49,11 @@ table was run against the shipped databases on 2026-10-22.
 | sylph sketch (D46) | `bash scripts/build_sylph_db.sh --pack human --check` | 0/3/1 | does the sketch cover every pack reference |
 | Marker database (D47) | `python3 scripts/build_marker_db.py --pack human --check` | 0/3/1 | does the database cover `markers.tsv`, on every tier it claims |
 | Kraken2 index (D48) | `python3 scripts/check_index_coverage.py --pack human` | 0/3/1 — **3 today**, by design, see D48 | can the index report every watchlist taxon **at all** |
+| Metabuli (D60) | `python3 scripts/check_metabuli_coverage.py --pack human` | 0/3/1 — **3 today**: 63 of 90 taxa have no sequenced clade in the prebuilt database | can this arm report every watchlist taxon at all |
 | Masking completeness (D34) | `python3 scripts/mask_pack_refs.py --pack human --dry-run` | 0, or 1 if a reference has no result | does every reference have a masking result |
 | Threshold coherence | `python3 scripts/check_threshold_coherence.py` | report, always 0 | which per-taxon gates can never bind |
 | Conda specs | `bash scripts/check_conda_specs.sh` | 0 or nonzero | does every per-process pin still solve (network, minutes) |
-| The suite | `python3 tests/test_pipeline.py` | 0 or nonzero | 488 checks with samtools on `PATH` and `$BTF_DB` set; 427 pass and 14 skip on a bare clone with neither. No network, ~30 s |
+| The suite | `python3 tests/test_pipeline.py` | 0 or nonzero | 497 checks with samtools on `PATH` and `$BTF_DB` set; 434 pass and 15 skip on a bare clone with neither. No network, ~30 s |
 
 **Why there are this many.** Well over thirty bugs found in this project so far share one
 shape: *produces an empty or degraded result indistinguishable from a clean negative.* A
@@ -65,14 +66,20 @@ Only the sylph check needs a tool: `conda activate btf-sylph` first, or it exits
 stdlib Python and run from a bare clone — deliberately, since the head node has neither
 sylph nor kraken2 and the checks that matter at launch must work without them.
 
-**Two gaps, both known.** Metabuli has no freshness or coverage check at all; it is opt-in
-and off by default (`--skip_metabuli` defaults true), which is why it has stayed unchecked.
-And the bundle predicate (D45) is the one with no standalone read-only form — it is a
+**One gap left.** The bundle predicate (D45) is the one with no standalone read-only form — it is a
 rebuild decision inside the builder, so asking "are my bundles current?" means invoking the
 builder, whose `--dry-run` reaches the network. The answer is still correct whenever a build
 runs, which is where a repair would happen anyway.
 
-**One gap closed (D59).** The sketch check used to compare the sketch against the `refs/`
+**Two gaps closed.** Metabuli now has a coverage check (D60), and it answers **3**: 63 of
+90 watchlist taxa have no sequence at or below them in the prebuilt `refseq_standard`
+database — every fungus, 19 of 20 parasites, 22 of 31 viruses and 9 of 26 bacteria. The arm
+is opt-in and off by default, so that is not a run-time defect; it is what the arm would
+answer if switched on for those taxa, and the reason to switch it on is a divergent agent
+the nucleotide arm would miss. A different Metabuli database would give a different answer —
+this is a property of the distribution that was installed, not of the tool.
+
+And (D59) the sketch check used to compare the sketch against the `refs/`
 directory, which is also what the sketch was built from — so a reference left on disk but
 dropped from the manifest was silently sketched and the check answered FRESH. The manifest
 is now the authority for what belongs in the sketch, and a file it does not name makes the
