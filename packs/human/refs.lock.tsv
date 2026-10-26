@@ -11,12 +11,6 @@ taxid	name	group	role	accession	assembly_level	genome_size	n_contigs	seq_md5
 264	Francisella tularensis subsp. novicida	bacteria	near_neighbour	GCF_000833355.1	complete	1870206	1	38a7642f32e42bcb044ff81a471262aa
 292	Burkholderia cepacia	bacteria	near_neighbour	GCF_009586235.1	complete	8366868	3	e715de0302bcb253c38f76a60621c744
 446	Legionella pneumophila	bacteria	target	GCF_001941585.1	complete	3409143	1	2c567414dfac74ad945771b914fb440f
-446	Legionella pneumophila	bacteria	target	GCF_003003555.1	complete	3546234	1	039b18b03a788dde27bed5bbb746d9a4
-446	Legionella pneumophila	bacteria	target	GCF_003004065.1	complete	3412234	1	0128f542396b078a1d71333152fdba89
-446	Legionella pneumophila	bacteria	target	GCF_003004175.1	complete	3436658	1	a74b29f7ea4b5729772163749fe4d7aa
-446	Legionella pneumophila	bacteria	target	GCF_059698915.1	complete	3409180	1	dc598e7e8c70849341197691b0848325
-446	Legionella pneumophila	bacteria	target	GCF_900119785.1	complete	3430562	1	a8090352fac53ce6d7d29104f9eb3e09
-446	Legionella pneumophila	bacteria	target	GCF_900637585.1	complete	3458917	1	fff3f9887aca3b8d0750cc9096891ee0
 450	Legionella longbeachae	bacteria	near_neighbour	GCF_000091785.1	complete	4149158	2	ff434a7c4a2b4b56f59f320f705bf4bc
 485	Neisseria gonorrhoeae	bacteria	near_neighbour	GCF_013030075.1	complete	2171755	2	bb5924106943da27f0f6f79b9413d13e
 486	Neisseria lactamica	bacteria	near_neighbour	GCF_003351565.1	complete	2200224	1	e19edf6b880ab7c8eecd01e2fe424bfc
@@ -29,13 +23,7 @@ taxid	name	group	role	accession	assembly_level	genome_size	n_contigs	seq_md5
 544	Citrobacter	bacteria	near_neighbour	GCF_041320245.1	complete	5773871	4	2386e3ca3651511f7321eb516fde6fd9
 546	Citrobacter freundii	bacteria	near_neighbour	GCF_904859905.1	complete	5171093	3	2820caa10ede6fb9b6d04fa493a492b6
 562	Escherichia coli	bacteria	target	GCF_000008865.2	complete	5594605	3	521db62f069023b018d21843b2cb0242
-562	Escherichia coli	bacteria	target	GCF_001900735.1	complete	5247683	3	41ffb22a75718ad1ea771150ad3dc5e9
-562	Escherichia coli	bacteria	target	GCF_022846255.1	complete	4939895	1	8820ce80482a3933d00469e6fdefcd9a
-562	Escherichia coli	bacteria	target	GCF_029227855.1	complete	5230856	3	a26d08f3f9764b9db0eea512680e0ad3
-562	Escherichia coli	bacteria	target	GCF_049266445.1	complete	4900521	1	9fe48e40d374556c7c2233a77e36954b
-562	Escherichia coli	bacteria	target	GCF_059448725.1	chromosome	5438510	6	a596187ae93a8e2f2d00748137ebe496
 620	Shigella	bacteria	near_neighbour	GCF_022354085.1	complete	5192674	2	56d1a26a7d835c8f49ac73e508dac5d8
-622	Shigella dysenteriae	bacteria	target	GCF_002950055.1	complete	5061835	2	9b983707f648fae443c66240a28d038f
 622	Shigella dysenteriae	bacteria	target	GCF_022354085.1	complete	5192674	2	56d1a26a7d835c8f49ac73e508dac5d8
 623	Shigella flexneri	bacteria	near_neighbour	GCF_000006925.2	complete	4828820	2	af0144f745f9ec7ddfcd77757fa82a72
 624	Shigella sonnei	bacteria	near_neighbour	GCF_002950395.1	complete	4994001	2	35e164cc8aef99d9bd17bf1aac2ed30a
@@ -43,22 +31,16 @@ taxid	name	group	role	accession	assembly_level	genome_size	n_contigs	seq_md5
 632	Yersinia pestis	bacteria	target	GCF_000009065.1	complete	4829855	4	d28257f5f8fda3894c6a0ff38cc51d22
 633	Yersinia pseudotuberculosis	bacteria	near_neighbour	GCF_900637475.1	complete	4610200	1	619df25500b94f9819d78cb263efaca3
 666	Vibrio cholerae	bacteria	target	GCF_008369605.1	complete	4138412	3	38bcaaddf23252e49adfcf697ada0bec
-666	Vibrio cholerae	bacteria	target	GCF_900324435.1	complete	4123525	2	9b6bd1d68f62a8e6195742476de7819e
 670	Vibrio parahaemolyticus	bacteria	near_neighbour	GCF_000196095.1	complete	5165770	2	cb81da9ba4c1056d43baf01cdead0a21
 674	Vibrio mimicus	bacteria	near_neighbour	GCF_001558475.2	complete	4438697	2	b325059b9310a36afb48f91270a858e0
 726	Haemophilus haemolyticus	bacteria	near_neighbour	GCF_900477945.1	complete	1934644	1	f22a07f9aafad4774db9ad98ff2cc37b
-727	Haemophilus influenzae	bacteria	target	GCF_019703675.1	complete	1884503	1	0d84e4d27b2513de9742e01dcefd5fa4
 727	Haemophilus influenzae	bacteria	target	GCF_020736045.1	complete	1890662	1	e06ade7321eaad74ddbfc8969f0ece71
-727	Haemophilus influenzae	bacteria	target	GCF_058169815.1	complete	1960255	1	d8672e50620f683f99e59f1c1eb27954
-727	Haemophilus influenzae	bacteria	target	GCF_900635795.1	complete	1860106	1	c86e50d23a6201d8f00ef1e3d6aa3753
 729	Haemophilus parainfluenzae	bacteria	near_neighbour	GCF_016127215.1	complete	2141704	1	a18ac41a9343b410543410d9d37909b1
 777	Coxiella burnetii	bacteria	target	GCF_000007765.2	complete	2032807	2	37fbd12d503f062ecebe2deee697fa24
 780	Rickettsia	bacteria	near_neighbour	GCF_936269705.1	complete	2623967	1	7e3a85e97b65c7c9621d54165f216953
 782	Rickettsia prowazekii	bacteria	target	GCF_000277165.1	complete	1109804	1	e8c9add4df79ce0bba9d343a63f7bde8
 783	Rickettsia rickettsii	bacteria	near_neighbour	GCF_000018225.1	complete	1257710	1	05f23938e9760408263ccdde95eaf894
-784	Orientia tsutsugamushi	bacteria	target	GCF_000063545.1	complete	2127051	1	c1024af884ef8736cfcf2ed26297da64
 784	Orientia tsutsugamushi	bacteria	target	GCF_900327255.1	complete	2078193	1	6e341c4d8790d251ea9fd37a0e10b24d
-784	Orientia tsutsugamushi	bacteria	target	GCF_900377405.1	complete	2254553	1	aec91ed7e07d99dd28d5403e74cd2b01
 785	Rickettsia typhi	bacteria	near_neighbour	GCF_000008045.1	complete	1111496	1	4900a4e9fdbc133d744fda87e8dd2fc2
 813	Chlamydia trachomatis	bacteria	near_neighbour	GCF_000008725.1	complete	1042519	1	90dfc991beefffbf4b576c99c8603ad1
 1311	Streptococcus agalactiae	bacteria	near_neighbour	GCF_949788565.1	complete	2015582	2	701c6961fd1a1ce833c5de1f7d17c753
@@ -68,16 +50,7 @@ taxid	name	group	role	accession	assembly_level	genome_size	n_contigs	seq_md5
 1396	Bacillus cereus	bacteria	near_neighbour	GCF_006094295.1	complete	5431377	2	5256b56eee4523c468e2ee8d87127ce4
 1405	Bacillus mycoides	bacteria	near_neighbour	GCF_018739485.1	complete	5697065	2	d43cad340371c496708455465e4c94e2
 1428	Bacillus thuringiensis	bacteria	near_neighbour	GCF_000161615.1	chromosome	6260142	1	62923e02b0677f4df8eaa5686cdbd041
-1491	Clostridium botulinum	bacteria	target	GCF_000019545.1	complete	4259691	2	a1e606024c75a3d16d9e1711a5beb1b2
 1491	Clostridium botulinum	bacteria	target	GCF_000063585.1	complete	3903260	2	c653983b7a03f337c7be2a858a4150f4
-1491	Clostridium botulinum	bacteria	target	GCF_000204565.1	complete	3207592	6	f90f426c72c31e4d8d9da1f79f44878f
-1491	Clostridium botulinum	bacteria	target	GCF_000827955.1	complete	3611898	1	282b0128802b7d66b3bd8e1cc960d1db
-1491	Clostridium botulinum	bacteria	target	GCF_003013655.1	complete	4005274	1	cbe4740f6037b33d5cbf975328206fee
-1491	Clostridium botulinum	bacteria	target	GCF_003017335.1	complete	3978960	1	e182f17702ddf85e609fd88f3bdfc8e2
-1491	Clostridium botulinum	bacteria	target	GCF_016071375.1	complete	2702994	6	e43fbc5a504e3115be536db56dd8616c
-1491	Clostridium botulinum	bacteria	target	GCF_016838665.1	complete	4090796	1	361f009001f6220e4a0862068431bab6
-1491	Clostridium botulinum	bacteria	target	GCF_017100085.1	complete	3137507	3	e18854ed1c118de5a2e9ad75d1e11c7e
-1491	Clostridium botulinum	bacteria	target	GCF_031228685.1	complete	4330354	2	2c34dd450041de9904677f8b51c2815a
 1492	Clostridium butyricum	bacteria	near_neighbour	GCF_014131795.1	complete	4705596	4	0b595a214ce24bc0350ebdcbfa618bc7
 1509	Clostridium sporogenes	bacteria	near_neighbour	GCF_000973705.1	complete	4141984	1	636afe0d77c1df5d3bcc366ae16832f3
 1561	Clostridium baratii	bacteria	near_neighbour	GCF_001991075.2	complete	3211717	2	4e0b6c9809905b4f9b0035fd2d223a21
@@ -85,7 +58,6 @@ taxid	name	group	role	accession	assembly_level	genome_size	n_contigs	seq_md5
 1638	Listeria ivanovii	bacteria	near_neighbour	GCF_000763515.1	complete	2919548	1	29105d3adbf218e9973a90b7573e945d
 1639	Listeria monocytogenes	bacteria	target	GCF_000008285.1	complete	2905187	1	afbec3745156284e5eec3729cc62bbe2
 1639	Listeria monocytogenes	bacteria	target	GCF_000196035.1	complete	2944528	1	2138c98683085992eee905dad7b7e271
-1639	Listeria monocytogenes	bacteria	target	GCF_058093475.1	complete	2947621	1	b390ec00a495213e3d13eebde434a7a5
 1640	Listeria seeligeri	bacteria	near_neighbour	GCF_000027145.1	complete	2797636	1	afd92f234aabd78e4a68f666787ededd
 1640	Listeria seeligeri	bacteria	near_neighbour	GCF_015697685.1	complete	2927941	2	048d2c5e813706af655e9c43b613263c
 1642	Listeria innocua	bacteria	near_neighbour	GCF_000195795.1	complete	3093113	2	5ac2483c89d83c5008630ab23306bf66
@@ -239,9 +211,6 @@ taxid	name	group	role	accession	assembly_level	genome_size	n_contigs	seq_md5
 28873	Camelpox virus	virus	near_neighbour	GCA_006472005.1	complete	202289	1	d1b8fa77d6538908627422be5fe961a0
 28873	Camelpox virus	virus	near_neighbour	GCF_000839105.1	complete	205719	1	1d0f410c8ea799544ca4ba8e4873b157
 28901	Salmonella enterica	bacteria	target	GCF_000006945.2	complete	4951383	2	ebb90f0310aaa04bbd523814f1b2b3ce
-28901	Salmonella enterica	bacteria	target	GCF_002211865.1	complete	5051440	3	53f00cd8e66cfccf895e28420adc0401
-28901	Salmonella enterica	bacteria	target	GCF_003325035.1	complete	5195044	1	f35da243676a9037a16956c57d016174
-28901	Salmonella enterica	bacteria	target	GCF_019339465.1	complete	4970704	1	001b7c94046b8dec84c5006d4df7b8be
 29176	Neospora caninum	parasite	near_neighbour	GCF_000208865.1	chromosome	57547420	14	06152ac7e8abdde614c3095453864be8
 29459	Brucella melitensis	bacteria	target	GCF_000007125.1	complete	3294931	2	fc253a779d2d84d45b59b3eccd84d705
 29461	Brucella suis	bacteria	target	GCF_000007505.1	complete	3315175	2	c753353c104d10295672fb00b379a443

@@ -5564,3 +5564,65 @@ cover improves a real call is a measurement on real data, not a property of havi
 Suite **482 passed** with `$BTF_DB` and samtools, **421 passed, 0 failed, 14 skipped** on a
 bare clone. Checks: marker 0, sylph 0, masking completeness 0, threshold coherence 0, index
 coverage 3 (its documented state).
+
+---
+
+## D58 — The cover is reverted: adding references changes what two gates measure
+
+**Date:** 2026-10-26
+**Evidence:** measured-here
+**Status:** reverted. D43 stands as a measurement; D57's claim that it was *applied* is superseded.
+
+D57 verified that the enlarged pack's artifacts agreed with each other. It did not ask
+whether the pack was better. Measured on four samples against `runs/zymo_rl100`, the
+comparison cannot support a claim either way, because two gates stopped meaning what they
+meant.
+
+**`reference_bp`, the denominator of `breadth`, is the summed length of every reference a
+taxon holds.**
+
+| taxid | reference_bp | factor | unique_reads |
+|---|---|---|---|
+| 562 | 5,593,900 → 31,302,699 | ×5.6 | 3,349,860 → 4,133,092 |
+| 1639 | 2,944,426 → 8,797,120 | ×3.0 | 12,476,571 → 17,605,659 |
+| 28901 | 4,951,143 → 20,167,721 | ×4.1 | 9,652 → 3,571 |
+
+Reads recruited rose. `breadth` fell in all 11 compared rows. `identity` was unchanged to
+four decimals everywhere, which is the clue that this was arithmetic. `neighbour_ratio`
+rose, once 6.6 → 99.7, because the target gained references while its neighbours kept one.
+
+Three rows moved up to `confirmed_in_silico` and two moved down. None of that is
+attributable to evidence, and a top-tier call arriving for arithmetic reasons is the
+direction this project refuses. The thresholds were set against single-reference
+denominators.
+
+**The obvious fix was wrong.** Gating on the existing `best_reference_breadth` looked like a
+column swap. For taxa holding one reference it disagrees with `breadth` on 9 of 12 rows,
+once by 18× — because `best_reference` names a **contig** (`taxid|632|NC_003134.1`), so the
+column is the best-covered contig's breadth, not a genome-level figure. It would have
+replaced one wrong denominator with a flattering one.
+
+What would serve is breadth over the best-matching **assembly**, grouping contigs by the
+accession the bundle headers carry. That changes what `min_breadth` means for all 90 taxa,
+so it belongs in its own change with its own before/after — not as a side effect of adding
+references.
+
+### Two gaps found while reverting
+
+**The sketch check compares the wrong two things.** `build_sylph_db.sh` sketches the
+`refs/` directory and `--check` compares the sketch against that same directory. With the
+manifest restored to 375 and 31 files still on disk, the re-sketch silently included them,
+reported 406, and `--check` said FRESH. The comparison that would have caught it is sketch
+against *manifest*.
+
+**The bundle predicate does not look in this direction.** D45 detects references changing
+under a bundle. The revert's first pass left all nine bundles untouched: each was newer than
+every reference and its recorded input set had been rewritten by the enlarging build, so the
+bundles held six references where the manifest listed one. Forced by deleting them so they
+rebuilt as missing.
+
+### Restored state
+
+375 references, 90 bundles, 180 indexes, 375 sketched, 375 masked, 0 cover accessions in
+manifest, lock or any bundle. Checks: marker 0, masking 0, thresholds 0, sylph 0, index
+coverage 3. Suite 483 passed.
