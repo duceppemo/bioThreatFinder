@@ -2,8 +2,8 @@
 
 ```bash
 scripts/install_databases.sh --route minimal     # ~62 GB
-scripts/install_databases.sh --route standard    # + Kraken2 PlusPF, ~323 GB
-scripts/install_databases.sh --route full        # + Metabuli, ~433 GB
+scripts/install_databases.sh --route standard    # + Kraken2 PlusPF, ~177 GB (~700 GB transient)
+scripts/install_databases.sh --route full        # + Metabuli, ~286 GB
 ```
 
 ## Downloaded versus built, and why so little is downloaded
@@ -11,7 +11,7 @@ scripts/install_databases.sh --route full        # + Metabuli, ~433 GB
 | | Downloaded | Built locally |
 |---|---|---|
 | **what** | the pinned taxonomy snapshot and the curated marker database — **166 MB of archive**, [doi:10.5281/zenodo.23602998](https://doi.org/10.5281/zenodo.23602998) | the 43 GB reference pack, the host genome, the Kraken2 / Metabuli indexes |
-| **why that split** | NCBI overwrites `new_taxdump.tar.gz` **in place**, so the pinned snapshot is gone upstream — and every taxid the pipeline reports keys to it. The marker database is curation, not compute | `packs/<pack>/refs.lock.tsv` pins every accession **and** the checksum of its decompressed sequence, so a clone builds the same pack and can prove it. A lock is auditable; a 261 GB archive can only be taken on trust |
+| **why that split** | NCBI overwrites `new_taxdump.tar.gz` **in place**, so the pinned snapshot is gone upstream — and every taxid the pipeline reports keys to it. The marker database is curation, not compute | `packs/<pack>/refs.lock.tsv` pins every accession **and** the checksum of its decompressed sequence, so a clone builds the same pack and can prove it. A lock is auditable; a 115 GB archive can only be taken on trust |
 | **verified by** | sha256, before anything is unpacked | the lock's per-reference checksum, then the read-only checks below |
 
 Each archive carries `DISCLAIMER.md` and a `BTF_PROVENANCE.txt` inside, because an archive
@@ -74,7 +74,7 @@ python3 scripts/build_pack_refs.py --pack human --write-lock packs/human/refs.lo
 | `packs/<pack>/markers/` | 61 MB | the marker tier. 166 rows, 146 built, 33 profile HMMs. **Published** |
 | `sylph/<pack>_pack_refs.syldb` | 177 MB | the sylph arm. 375 genomes, 6 s to rebuild |
 | `host/<pack>/` | 17 GB | host depletion, and masking's host pass |
-| `kraken2/pluspf/` | 144 GB | the primary stage-1 arm |
+| `kraken2/pluspf/` | 115 GB | the primary stage-1 arm. `hash.k2d` is all but 0.2 GB of it; **~700 GB free is needed to build it**, and the finished index is what remains |
 | `metabuli/refseq` | 110 GB | the opt-in DNA+AA arm |
 
 The sylph arm uses the **pack's own** sketch, not a GTDB sketch. They are not
@@ -100,7 +100,7 @@ bash    scripts/build_sylph_db.sh       --pack human --check    # covers every r
 python3 scripts/check_pack_bundles.py   --pack human            # do the competitive bundles still match the manifest
 python3 scripts/check_index_coverage.py --pack human            # can Kraken2 report every watchlist taxon at all
 python3 scripts/check_metabuli_coverage.py --pack human         # the same question for the Metabuli arm
-python3 scripts/mask_pack_refs.py       --pack human --dry-run  # does every reference have a masking result
+python3 scripts/mask_pack_refs.py       --pack human --dry-run  # a result for every reference, and a reference for every result
 python3 scripts/check_threshold_coherence.py                    # which per-taxon gates can never bind
 ```
 
@@ -116,6 +116,18 @@ nothing. It is tolerable only because all 19 are in the sylph sketch and sylph i
 default: **one arm is blind, not the stage.** A taxon with no Kraken2 node *and* no sketched
 reference would be invisible to stage 1 entirely; the check reports that case separately and
 the test suite fails if it ever appears.
+
+**The masking check asks its question both ways round (D62).** "Does every reference have a
+result" was the only direction for a long time, and the other one caught 31 mask BEDs on
+2026-10-26 that belonged to references the manifest no longer named — left behind because
+the manifest merge carries every earlier row forward, which is the right behaviour for an
+interrupted run and the wrong one for a reverted reference set. They made the artifact
+disagree with its own documentation: 20,148,007 bp over 406 results, against the 20,040,354
+over 375 that `docs/` correctly reports. Whether an orphan is inert is measured rather than
+assumed, because `coverage_stats.py --mask-bed` globs the whole directory into one
+contig→intervals map: an orphan whose contigs are still in the pack masks live sequence no
+manifest row accounts for, and that exits non-zero, while a dead one is a warning.
+`--prune-orphan-masks` removes them.
 
 Only the sylph check needs a tool on `PATH` (`conda activate btf-sylph`); the rest are
 stdlib Python and run from a bare clone. That is deliberate — a check that needs a

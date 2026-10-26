@@ -13,7 +13,12 @@
   same pins.
 - **~200 GB RAM** for a PlusPF-scale Kraken2 index. MMseqs2 sensitivity settings dominate
   CPU time. Without the Kraken2 arm (`--route minimal`), requirements are far lower.
-- **Disk:** ~62 GB for the minimal route, ~323 GB with Kraken2, ~433 GB with Metabuli.
+- **Disk:** ~62 GB for the minimal route, ~177 GB with Kraken2, ~286 GB with Metabuli —
+  **finished** sizes, measured. The transient requirement is the one that will stop a
+  build: `build_kraken2_db.sh` needs **~700 GiB free** and refuses below it, because a
+  PlusPF build downloads a library, builds, and only then reclaims. Metabuli's builder
+  asks for ~150-700 GiB on top of its finished 110 GB. Plan for the transient figure, not
+  the route total, or the standard route gets most of a day in and then declines.
   Fast local disk matters: the k-mer indexes are read-heavy and load time dominates
   per-sample wall clock.
 - Analysis scripts in `bin/` are **stdlib-only Python 3** plus `samtools`, so they run in
@@ -107,8 +112,8 @@ variables are exported.
 
 ```bash
 scripts/install_databases.sh --route minimal     # ~62 GB
-scripts/install_databases.sh --route standard    # + Kraken2 PlusPF, ~323 GB
-scripts/install_databases.sh --route full        # + Metabuli, ~433 GB
+scripts/install_databases.sh --route standard    # + Kraken2 PlusPF, ~177 GB (~700 GB transient)
+scripts/install_databases.sh --route full        # + Metabuli, ~286 GB
 ```
 
 Resumable — rerun the same command after an interruption. See [Databases](Databases) for
@@ -117,16 +122,16 @@ answer whether a database still covers its inputs.
 
 **`minimal` is not small and not crippled.** Stage 2 maps against the reference pack and
 sylph profiles it, so neither the pack nor the host genome is optional. What it leaves out
-is the 261 GB Kraken2 index — and 19 of 90 watchlist taxa have no node in that index at
+is the 115 GB Kraken2 index — and 19 of 90 watchlist taxa have no node in that index at
 all, so sylph is already the only stage-1 arm that can see them.
 
 ## Checking an installation
 
 ```bash
-python3 tests/test_pipeline.py              # 512 checks, offline, no databases, ~30 s
+python3 tests/test_pipeline.py              # 517 checks, offline, no databases, ~30 s
 nextflow run . --help                       # must compile
 ```
 
-On a bare clone with no databases and no samtools, 446 of those checks pass and 16 skip
+On a bare clone with no databases and no samtools, 451 of those checks pass and 16 skip
 with a message naming what to set — so the suite is a valid thing to run before anything
 is built. Then the database checks in [Databases](Databases).

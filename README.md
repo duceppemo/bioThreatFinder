@@ -54,8 +54,9 @@ NCBI taxonomy snapshot and the curated marker database, 166 MB in total
 sha256 before unpacking, then builds the rest. The 43 GB reference pack is built from
 [`packs/human/refs.lock.tsv`](packs/human/refs.lock.tsv), which pins every assembly
 accession **and** the checksum of its decompressed sequence, so a clone builds the pack the
-measurements were made on and can prove it. `--route standard` adds the 261 GB Kraken2
-index; `--route full` adds Metabuli.
+measurements were made on and can prove it. `--route standard` adds the 115 GB Kraken2
+index — which needs **~700 GB free while it builds**, several times its finished size;
+`--route full` adds Metabuli.
 
 ```csv
 sample,platform,fastq_1,fastq_2,role
@@ -71,7 +72,7 @@ finding. Open `results/report/biothreatfinder_report.html` for the run, or
 carries the gate that decided it, never a bare verdict.
 
 ```bash
-python3 tests/test_pipeline.py     # 512 checks with databases; 446 on a bare clone, ~30 s
+python3 tests/test_pipeline.py     # 517 checks with databases; 451 on a bare clone, ~30 s
 ```
 
 ## Documentation

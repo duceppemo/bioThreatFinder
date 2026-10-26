@@ -2,7 +2,7 @@
 #
 # WHAT IS IN HERE AND WHY SO LITTLE. Only artifacts that CANNOT be re-created are
 # published; everything else is built by scripts/install_databases.sh from sources that
-# pin what they fetch. Publishing a 261 GB Kraken2 index would be a worse answer than a
+# pin what they fetch. Publishing a 115 GB Kraken2 index would be a worse answer than a
 # build script, because the script is auditable and the archive is not.
 #
 #   taxdump   NCBI OVERWRITES new_taxdump.tar.gz IN PLACE. The pinned 2026-09-29 snapshot

@@ -5177,6 +5177,141 @@ the only place where that state is the default rather than something to arrange.
 
 ---
 
+## D52 — The rule is deterministic, the catalogue is not: `refs.lock.tsv`
+
+**Date:** 2026-10-23
+**Evidence:** measured-here (four behaviours verified live against NCBI; the lock written
+and a pack rebuilt from it)
+**Status:** done. Reconstructed 2026-10-26 — see *A note on this entry* at the end.
+
+`build_pack_refs.py` resolved each watchlist taxon to **whatever NCBI called latest that
+day**, ranked on NCBI's own assembly metadata. The RULE is deterministic. The CATALOGUE is
+not. So two people build two different reference packs from the same watchlist, with no
+error on either side, and from then on the sylph sketch covers different genomes (D46),
+stage 2 aligns against different assemblies, and every identity and breadth figure in
+`docs/` describes a deployment nobody else has.
+
+D42 is the measured version of that risk rather than the feared one: changing **one**
+reference moved read identity 0.9641 → 0.9947 and breadth 0.877 → 0.982. That is the
+distance between a call and a miss, from a substitution NCBI can make without telling
+anyone.
+
+**Chosen:** `packs/<pack>/refs.lock.tsv`, a lockfile committed to the repository, and
+`--from-lock` as the way a clone builds the pack the measurements were made on.
+
+### Why the manifest was not already this
+
+The refs manifest already recorded accession **and** md5 for every reference. It records
+them **after the fact**: it verifies what you got, not that you got what the measurements
+were made on. The lock is the same information used as an **input**. That is the whole
+difference, and it is the difference between a receipt and an order.
+
+The two files are otherwise one transformation apart. `write_lock()` drops the manifest's
+`path` column — one machine's filesystem, the thing D51 had just finished removing from
+everything else — and replaces its checksum. A test asserts the committed lock carries no
+path.
+
+### The checksum is of the DECOMPRESSED sequence, and that is load-bearing
+
+The first version recorded the md5 of the `.fna.gz`. The first locked build it was tested
+on reported that NCBI had replaced the assembly: **identical sequence, different gzip
+stream**, because one copy came through `datasets` and the other through FTP. Nothing was
+wrong except the question being asked.
+
+A guard that cries wolf at every user who took a different download route is a guard that
+gets switched off (D47). So `seq_md5_of()` gunzips and hashes the sequence, which costs a
+few minutes over a 43 GB pack and means the same thing on every machine. The column is
+named `seq_md5` rather than `md5` because the distinction is the point.
+
+### Four behaviours, verified live against NCBI on 2026-10-23
+
+The suite has no network, so the `lock` group greps for these code paths rather than
+exercising them. The greps exist to stop the paths being deleted between live runs; the
+runs are what established that they work.
+
+1. **The locked accession is fetched, not the ranked one.** The lock replaces resolution; it
+   does not rank alongside it. No subtree query is issued for a locked taxon.
+2. **The content checksum holds across download routes** — the case above, re-run after the
+   fix with both routes agreeing.
+3. **A corrupted checksum fails the build**, by accession, naming both values.
+4. **An accession NCBI no longer serves fails the build by name**, rather than falling back
+   to latest. A lock that silently falls back is worse than no lock: it reports success
+   while building something else.
+
+### Three places where a lock quietly stops being one
+
+Each of these was found after the lock was written, and each is now a test:
+
+- **The lock must outrank what is on disk.** Without that, a built pack satisfies
+  `--max-per-taxon` from the files it already has, and the lock is read and ignored — so
+  pulling a corrected lock changes nothing and says nothing. This is D45's "existence is not
+  freshness" in the lock's dimension. Found because the unsatisfiable-lock test exited 0
+  while the superseded genome sat on disk.
+- **The lock sets how many assemblies a taxon has, not `--max-per-taxon`.** D42's second
+  *Listeria* assembly is exactly the row a default of 1 would drop; `want = len(locked)`
+  when a taxon is locked. (D57 is this same lesson one layer down, for a cap recorded
+  elsewhere.)
+- **`--extra-refs` with `--from-lock` is refused.** An extra alongside a lock is either
+  redundant or a silent departure from it, and there is no way to tell which from the
+  outside.
+
+### Locked-absent is not missing
+
+Four near neighbours exist **nowhere** — *Giardia ardeae*, *Entamoeba coli*, Sandfly fever
+Naples phlebovirus, rat hepatitis E virus. They are carried as rows with an accession-less
+cell, on purpose, so that the weakened discrimination is visible in the artifact rather than
+inferred from its absence.
+
+"The lock records that this taxon has no assembly anywhere" and "the lock predates this
+taxon" are different facts, and conflating them made the run warn about drift for four taxa
+it had already established have nothing to drift to. `load_lock()` returns them as a
+separate set.
+
+### Measured
+
+`packs/human/refs.lock.tsv`: **379 rows over 241 taxids** — 375 locked assemblies across 237
+taxa, each with a 32-character `seq_md5`, plus the 4 locked-absent rows. 155 target rows and
+224 near-neighbour rows. Two rows pin the **same** accession (`GCF_000833355.1`, under
+*F. tularensis* 263 and subsp. *novicida* 264), which is the shared-assembly case D34 and
+D40 are about, visible here as a property of the lock rather than a surprise at build time.
+
+It is 384 lines: four comment lines carrying the two commands, then the header. Those
+comments are why `load_lock()` filters `#` before `csv.DictReader` — the writer would
+otherwise emit a file it could not read, which was found by round-tripping it and not by
+reading the code.
+
+### What this makes possible
+
+D53's "build what you need rather than publishing the reference pack" rests entirely on
+this. Without a lock, *build it yourself* builds something else, and the 43 GB that is not
+published becomes 43 GB that cannot be reproduced. With one, "everything else is built, and
+provably the same" is a stronger guarantee than an archive rather than a weaker one — the
+build fails by name if either the accession or the bytes do not hold, while an archive can
+only be taken on trust.
+
+**Would reverse it:** NCBI offering stable, addressable assembly *versions* with a
+guarantee of availability, which would make a pin a reference rather than a copy. Or the
+pack becoming small enough to publish outright, which would make the lock a convenience
+rather than the precondition.
+
+### A note on this entry
+
+This entry was **written on 2026-10-26**, three days after the decision, because a code and
+doc review found that `docs/decisions.md` ran D51 → D53 while seven files cited D52 —
+including a message `install_databases.sh` prints to the user and the `lock` test group's
+own docstring. The decision was made and implemented on 2026-10-23; only its record was
+missing.
+
+It is reconstructed from the artifacts rather than from memory: `load_lock()` and
+`write_lock()` and their comments, the `lock` group's 14 checks, the committed lock itself,
+and D53's account of what it depended on. The four live NCBI behaviours are dated from the
+test docstring that recorded them. Nothing here is a fresh measurement, and the 2026-10-26
+figures in **Measured** are re-counted from the shipped lock today. A reconstructed entry is
+worth less than one written at the time, which is itself the finding: a decision log is only
+load-bearing if writing the entry is part of making the change.
+
+---
+
 ## D53 — The install route: 166 MB published, everything else built and provable, and a disclaimer that travels with the data
 
 **Date:** 2026-10-23
@@ -5845,3 +5980,228 @@ on every run is how an operator learns to skip the banners that mean something, 
 the same reason D48's Kraken2 coverage answer stays on demand. It becomes a candidate for
 launch if a full rebuild ever gives all 90 bundles a sidecar; until then it is a question
 the operator asks, and `docs/operations.md` is where it is asked.
+
+---
+
+## D62 — A full code and documentation review: what a repository cannot tell you about itself
+
+**Date:** 2026-10-26
+**Evidence:** measured-here (both linters read for the first time; every countable doc
+claim re-measured against its artifact; four defects reproduced before being fixed)
+**Status:** done. Four code defects fixed, three documentation errors corrected, 31 orphan
+artifacts pruned, one missing decision entry reconstructed (D52).
+
+The pipeline, the checks and the suite had each been reviewed as they were built. Nothing
+had reviewed the *repository*: the linters CI already runs, the numbers the documentation
+asserts, and the artifacts on disk against the manifests that are supposed to describe
+them. This is what that pass found, in the order of how much it mattered.
+
+### The linters were running and nobody was reading them
+
+CI runs `ruff` and `shellcheck` with `|| true`, so both have been green-by-construction for
+their whole existence. Read properly: **32 findings across 30 Python files and 9 shell
+scripts, every one cosmetic.** Two `B023` loop-variable-closure warnings are false
+positives — the closure is called in the same iteration it is defined in. That is a good
+result for the code and a bad one for the configuration: a linter whose output nobody reads
+is indistinguishable from a linter that is not installed, which is this project's recurring
+shape pointed at its own tooling.
+
+### `score_evidence.py` could drop a column, and the fix was already written next door
+
+`bin/marker_evidence.py` carries a twelve-line comment about taking `DictWriter` fieldnames
+from `results[0]`: a record's keys depend on how far it got, so the first row decides the
+whole file's schema and `extrasaction="ignore"` drops the rest **without error**. That was
+fixed there (D40, the `statecols` group).
+
+`bin/score_evidence.py:1617` had the same line and had not been fixed. Reproduced
+2026-10-26: a findings file built only from `no_reference` rows has **36 columns instead of
+37**, silently missing `best_neighbour_uniformity`, because the database-gap row omits that
+key. Mixed runs were safe only by accident — `no_reference` is the lowest tier and sorts
+last, so `findings[0]` is a complete row. The trigger is a pack whose references were never
+built, which is the first run on a new installation, and the column that disappears is a
+neighbour-discrimination measure: the file whose job is to explain why a call was weak
+loses the field that says so.
+
+**The union-of-keys loop alone did not fix it, and finding that out is the useful part.**
+Copying `marker_evidence.py`'s fix across left the gaps-only file at 36 columns, because a
+union over the rows cannot invent a column that **no** row declares — and when every
+finding is a database gap, no row carries the key at all. There the records that reached the
+measurement block did carry theirs, so the union was sufficient; here it was not. The
+`no_reference` literal already declares a dozen other blanks (`mean_depth`,
+`best_neighbour_taxid`, …) for exactly this reason and had simply omitted this one. Both
+changes are in: the key declared empty, so the schema is stable across tiers, and the union
+loop, so a future divergence in either direction cannot shrink the header silently. The
+suite's new `findcols` group asserts the gaps-only case AND the mixed case, and the first
+was watched failing against the union-only version.
+
+The other seven `DictWriter` sites were checked and are safe: `parse_screen`,
+`resolve_watchlist` and `evaluate_benchmark` each build rows from a single literal, the last
+verified by AST over all eight of its append sites.
+
+### `to_pavian.py` read the wrong file into fabricated taxids, and nothing covered it
+
+`rows_from_kraken_style()` indexes fields from the RIGHT, which is what lets one reader
+cover Kraken2's 6- and 8-column layouts plus Bracken and Metabuli. A Bracken **abundance
+table** — `name, taxonomy_id, taxonomy_lvl, kraken_assigned_reads, added_reads,
+new_est_reads, fraction_total_reads` — then parses with **zero unparseable lines**: `f[-2]`
+is `new_est_reads`, all digits, so the read count becomes the taxid; `f[-3]` becomes the
+rank; the fraction becomes the name. A Pavian report of invented taxids, `bad=0`, exit 0.
+
+The BRACKEN process writes one of those tables beside the `-w` report this script wants, in
+the same work directory, so the wrong file is one argument away. The pipeline passes the
+right one, so **no run is affected** — this is a fix to a trap, not to a result.
+
+Two guards, both cheap on a real report: a row with the abundance table's shape is rejected
+and counted, with a warning naming the file to pass instead; and field 0 must parse as a
+number, since every layout this reader accepts leads with a clade percentage while the file
+it must refuse leads with a taxon name.
+
+It was also the **only pipeline-invoked script with no coverage at all** — 551 lines, no
+self-test, no suite group — which is the worst script in the repository to leave uncovered,
+because the one thing it is designed not to do is die. It now has a `--self-test` over all
+four readers, the 8-column layout, the abundance-table refusal, `write_report`'s exact
+five-tabs contract and `normalise_rank`. `host_depletion_stats.py` turned out to have a
+passing `--self-test` that nothing ever invoked; both are now in the `selftests` group.
+
+### Masking reconciled one way only, and 31 results outlived their references
+
+D59 established that **the manifest is the authority, not the directory** — for the sylph
+sketch, where a reference left on disk was silently sketched and `--check` answered FRESH
+because both sides of the comparison read the same wrong directory. That lesson was not
+carried to masking, which is the other artifact built per reference.
+
+`reconcile()` asked "does every reference have a result". Nothing could ask "does every
+result belong to a reference". Measured on the human pack: **406 mask BEDs and 406
+`mask_manifest.tsv` rows for 375 references** — the 31 extras left by D58's reverted cover
+(*C. botulinum* ×9, *Legionella* ×6, *E. coli* ×5, *Salmonella*, *Haemophilus*,
+*Orientia*…), 107,653 bp between them.
+
+The cause is one line of a fix. The manifest merge is deliberately *merge, do not rewrite*,
+because rewriting it from one run's rows destroyed the record of everything masked earlier.
+It carried every old row forward **unconditionally**, so a reference REMOVED from the pack
+kept its row for ever. Dropping a row whose reference is gone is not the truncation that
+merge exists to prevent, and the merge now distinguishes the two.
+
+The consequence was an artifact disagreeing with the documentation that describes it:
+`mask_manifest.tsv` totalled **20,148,007 bp over 406 results**, while `docs/` reported
+20,040,354 over 375 — correct, because it counted the manifest-named subset, but not what
+the file says. Anyone checking the documentation against the artifact would have concluded
+the documentation was wrong.
+
+**Whether an orphan is inert is measured, not assumed.** `coverage_stats.py --mask-bed`
+globs the whole directory into ONE contig→intervals map, so an orphan masks live sequence
+if and only if its contig names still occur in a reference the manifest names. Contig
+accessions are assembly-specific, so normally they do not — but 263 and 264 share one
+assembly in this very pack, so sharing is possible and is now checked. A **live** orphan
+shifts a breadth denominator and exits non-zero; a **dead** one is stale state and warns,
+because a guard that exits non-zero on a healthy pack gets switched off (D47). None of the
+31 named a live contig.
+
+Pruned with the new `--prune-orphan-masks` after archiving all 31. The pack now holds 375
+BEDs and 375 rows summing to exactly 20,040,354 bp.
+
+### The Kraken2 index has been 115 GiB and the documentation said 261 GB in five places
+
+Measured 2026-10-26: `kraken2/pluspf/` is **123,670,597,057 bytes = 115.2 GiB**.
+Documented as "261 GB" in `README.md`, `docs/wiki/Installation.md`,
+`assets/databases.manifest.tsv` and — already published — `assets/zenodo_record.md`, and as
+"144 GB" in `docs/wiki/Databases.md`. The route totals `~323 GB` and `~433 GB` in five
+files are `62 + 261` and `+ 110`, so every one of them inherited the error. Corrected to
+~177 GB and ~286 GB.
+
+Two measurement mistakes, both instructive:
+
+- **261 GB** predates `kraken2-build --clean` and the deletion of `database.kraken`. It was
+  true once and became a number that was copied rather than re-measured. D53's table
+  records it as of 2026-10-23 and is left alone: the decision log is dated, and editing a
+  past entry to match today's disk falsifies the record.
+- **144 GB** is `du -sh kraken2/` — the PARENT directory. 28.5 GiB of it is
+  `_missing_staging`, the one-off output of `fetch_missing_kraken2_assemblies.py`: a build
+  input, not part of the index, and deletable. The row it appeared in was labelled
+  `kraken2/pluspf/`.
+
+**But the overstatement is the harmless direction, and the dangerous number was absent
+altogether.** `build_kraken2_db.sh` preflights `MIN_FREE_GIB=700` and correctly says the
+finished index is ~100-120 GiB. That **~700 GiB transient requirement appeared in no install
+document**, and `install_databases.sh` has no free-space preflight of its own. So a reader
+with 400 GB free, reading "~323 GB with Kraken2", starts the standard route, gets 62 GB of
+correct work, and is refused hours later by the builder. The route tables now carry a free-
+space column alongside the finished size, and the installer says it before it starts.
+Overstating a finished size wastes a disk; understating a transient one wastes a day.
+
+### `masked_positions` was computed and discarded
+
+`depth_profile()` returned a tally of depth rows skipped as masked and the caller unpacked
+it into a variable it never used. It is not a spare number: the region BED is full-length
+per target reference and `samtools depth -aa` emits every position, so it **must equal**
+`masked_bp`, which is computed independently from the mask intervals and the header
+lengths. Two counts of one quantity, and `reference_bp` — the denominator under every
+breadth and depth figure — is derived from the first. They disagree if the two
+`contig_key()` call sites resolve differently, if an interval runs past a header length, or
+if `-aa` does not emit what it is assumed to. It is now a column,
+`masked_positions_seen`, with a warning on disagreement: the only independent check of the
+mask map, free, and previously thrown away.
+
+### The marker depth gate used the aligned length as the read length
+
+`score_evidence.py` fed `gate_absence_on_depth()` `mean_alignment_length or 150.0` while
+the sample's actual mean read length was already loaded, in `read_len_of`, for the
+alignment floor. The gate computes expected reads as `depth × marker_bp / read_len`, so a
+read length that is too SMALL **overstates** how many reads a marker should have drawn — and
+keeps an absence as ABSENT that should have demoted to UNKNOWN. Anti-conservative, in the
+gate that exists specifically to stop a false ABSENT. Soft-clipping makes the aligned span
+shorter than the read, and on ONT the two can differ several-fold. Now `read_len_of` first,
+falling back to the aligned length and then to 150.
+
+### `docs/verification.md` documented 27 of 50 test groups
+
+Twenty-one groups had no row — including `install` (37 checks), `container` (30), `roots`
+(15), `ctrlaudit` (14), `lock` (14) — and two rows named groups since renamed. The table is
+the only place that says what a group is *for*, so a group with no row is a group nobody
+can tell is missing if it is deleted. All 50 now have one.
+
+### D52 did not exist
+
+`docs/decisions.md` ran D51 → D53 while **seven files cited D52**, including a message
+`install_databases.sh` prints to the user, a comment in `assets/databases.manifest.tsv`
+pointing a reader at it, and D53's own "D52 supplied the precondition". The decision — the
+reference lock — was made and implemented on 2026-10-23; only the entry was missing, which
+is the one failure mode a decision log has. Reconstructed, dated to the decision, and
+labelled as written three days later; see D52's closing note.
+
+### Measured
+
+The suite is **517 passed, 0 failed, 0 skipped** with `samtools` and `$BTF_DB`, and **451
+passed, 16 skipped** on a bare clone. It was 512/446 before this pass; the five new
+top-level checks are `selftest:to_pavian`, `selftest:host_depletion_stats` and the
+three-check `findcols` group. The assertions behind them are not counted individually —
+`to_pavian --self-test` carries 22 and `mask_pack_refs --self-test` gained 12 for the
+orphan direction, all inside one check each, which is how the per-script self-tests have
+always been counted here. All six read-only database checks ran: bundles 0,
+sylph FRESH, markers FRESH, masking 375/375 with 0 orphans, Kraken2 3 by design, Metabuli 3
+by design.
+
+What came back **clean** is worth recording, because it is most of the repository. Every
+quantitative claim that can be checked against an artifact is exact: 375 references, 237
+taxa with assemblies, 4 locked as having none anywhere, 90 targets, 166 markers → 146 built
+/ 33 HMMs / 16 UNKNOWN-only / 4 partial, 3,016,439 taxdump nodes, 20,040,354 masked bp, 19
+of 90 for Kraken2, 63 of 90 for Metabuli. Every relative link, GitHub blob URL, wiki page
+link, `D<nn>` citation, script reference and documented `(script, flag)` pair resolves — 33
+flag pairs and 30 script references checked mechanically. DOI usage is consistent across
+all three forms. All 30 `bin/` and `scripts/` Python files parse as Python 3.8, matching
+what their docstrings claim. `samtools depth -Q` and `samtools coverage -q` are both
+correct despite being opposite letters for the same quantity.
+
+### What this says about reviewing
+
+Six of the eight defects are a correct fix that was not carried to its second site:
+`DictWriter` fieldnames fixed in one of two files, manifest-versus-directory authority
+fixed for the sketch and not for masking, a self-test written and never wired up, a number
+measured once and copied thereafter. None would be found by reading the file it is in,
+because each file is self-consistent. They are only visible by comparing two places that
+are supposed to agree — which is the same thing every check in this project does to an
+artifact, applied to the source.
+
+**Would reverse it:** nothing to reverse. The standing conclusion is narrower: CI's `ruff`
+and `shellcheck` steps should stop swallowing their exit codes, now that the output is known
+to be clean enough to enforce.

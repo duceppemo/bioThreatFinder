@@ -702,6 +702,17 @@ def main() -> int:
         "reference_bp": target_len,
         "reference_bp_raw": target_len_raw,
         "masked_bp": masked_bp,
+        # THE SAME QUANTITY, COUNTED THE OTHER WAY. masked_bp comes from the mask
+        # intervals clipped to the header lengths; masked_positions_seen is a tally of
+        # the depth rows that were actually skipped as masked. The region BED is
+        # full-length per target reference and `samtools depth -aa` emits every
+        # position, so the two MUST be equal - and the whole breadth denominator rests
+        # on that. It was already computed and then discarded, which made the one
+        # independent check of the mask map free and unused. They disagree if the two
+        # contig_key() call sites resolve differently, if an interval runs past the
+        # header length, or if -aa does not emit what it is assumed to; each of those
+        # silently shifts `reference_bp` and so every breadth figure derived from it.
+        "masked_positions_seen": masked_positions,
         "masked_fraction_of_reference": (f"{masked_bp / target_len_raw:.6f}"
                                         if target_len_raw else "0"),
         "reads_in_masked_regions": tgt.get("masked_reads", 0),
@@ -754,6 +765,16 @@ def main() -> int:
             f"({masked_bp / target_len_raw:.2%}) of the reference is masked; "
             f"{tgt.get('masked_reads', 0)} read(s) fell entirely within masked "
             "intervals and are NOT counted as evidence\n")
+    # The cross-check, said out loud. Equality is the normal case and is not worth a
+    # line; a disagreement means the breadth denominator and the depth stream do not
+    # describe the same reference, which no other number in this file would reveal.
+    if masked_bp != masked_positions:
+        sys.stderr.write(
+            f"[coverage] WARNING: {args.sample} taxid={args.taxid}: the mask intervals "
+            f"account for {masked_bp} bp but {masked_positions} depth position(s) were "
+            f"skipped as masked. These are two counts of ONE quantity and must agree; "
+            f"`reference_bp` ({target_len}) is derived from the first, so breadth and "
+            f"depth are computed over a denominator the depth stream does not match.\n")
     sys.stderr.write(
         f"[coverage] {args.sample} taxid={args.taxid} ({args.taxon}): "
         f"{unique_reads} reads, breadth={breadth:.4f}, occupancy={occupancy:.4f}, "

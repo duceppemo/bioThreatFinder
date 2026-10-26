@@ -136,7 +136,7 @@ the pipeline needs is rebuilt by its own scripts.
 instead by `packs/human/refs.lock.tsv` in the repository, which names every assembly
 accession and the md5 of its *decompressed* sequence, so a clone rebuilds the exact pack
 these measurements were made on and can prove it. A lock is auditable; a multi-gigabyte
-archive can only be taken on trust. The Kraken2 (261 GB) and Metabuli (110 GB) indexes are
+archive can only be taken on trust. The Kraken2 (115 GB) and Metabuli (110 GB) indexes are
 built from their own scripts for the same reason.
 
 **Use**

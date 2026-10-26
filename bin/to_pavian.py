@@ -133,6 +133,25 @@ def indent_of(raw_name: str) -> str:
 # --------------------------------------------------------------------------
 # Passthrough converters
 # --------------------------------------------------------------------------
+def looks_like_abundance_table(f: list[str]) -> bool:
+    """Is this row a Bracken ABUNDANCE table line rather than a report line?
+
+    `name, taxonomy_id, taxonomy_lvl, kraken_assigned_reads, added_reads,
+    new_est_reads, fraction_total_reads` - seven fields, the taxid SECOND. The
+    BRACKEN process writes one of these beside the `-w` report it writes for
+    this script, so the wrong file is one argument away in the same directory.
+    Read from the right it parses WITHOUT ERROR into nonsense: f[-2] is
+    `new_est_reads`, all digits, so it becomes the taxid; f[-3] is
+    `added_reads`, so it becomes the rank; f[-1] is the fraction, so it becomes
+    the name. The result is a Pavian report of fabricated taxids with zero
+    unparseable lines and exit 0 - this project's recurring shape, a degraded
+    result indistinguishable from a good one.
+    """
+    return len(f) == 7 and f[1].strip().isdigit() and f[2].strip() in {
+        "D", "K", "P", "C", "O", "F", "G", "S", "S1", "S2", "R", "R1", "U",
+    }
+
+
 def rows_from_kraken_style(path: Path) -> tuple[list[tuple], int]:
     """Kraken2 (6 or 8 col), Bracken, Metabuli -> canonical 6-field rows.
 
@@ -140,8 +159,14 @@ def rows_from_kraken_style(path: Path) -> tuple[list[tuple], int]:
     layouts: they differ on the left (Kraken2's two minimizer columns) but keep
     ... rank, taxid, name stable at the end. Lifted from parse_screen.py so the
     two never disagree about what a column means.
+
+    Right-indexing is why the shape has to be checked on the LEFT as well: see
+    looks_like_abundance_table(), and the percentage check below. Every one of
+    these layouts leads with a clade percentage, so field 0 is a number; the
+    file this reader must not silently accept leads with a taxon name.
     """
     rows, bad = [], 0
+    abundance_shaped = 0
     with path.open() as fh:
         for line in fh:
             if not line.strip() or line.startswith(("#", "%")):
@@ -155,12 +180,32 @@ def rows_from_kraken_style(path: Path) -> tuple[list[tuple], int]:
             if len(f) < 6:
                 bad += 1
                 continue
+            if looks_like_abundance_table(f):
+                abundance_shaped += 1
+                bad += 1
+                continue
+            # A report row's first field is the clade percentage. Refusing a
+            # non-numeric one costs nothing on a real report and is what makes
+            # a mis-passed file report zero usable rows instead of nonsense.
+            try:
+                float(f[0].strip() or "x")
+            except ValueError:
+                bad += 1
+                continue
             taxid, rank, name = f[-2].strip(), f[-3].strip(), f[-1]
             if not taxid.isdigit():
                 bad += 1
                 continue
             rows.append((f[0].strip(), as_int(f[1]), as_int(f[2]),
                          normalise_rank(rank, taxid), taxid, name))
+    if abundance_shaped:
+        sys.stderr.write(
+            f"[pavian] WARNING: {path.name}: {abundance_shaped} row(s) have the "
+            f"shape of a Bracken ABUNDANCE table (name, taxonomy_id, "
+            f"taxonomy_lvl, ...), not a Kraken-style report. Pass the file "
+            f"written by `bracken -w`, not the abundance table beside it; these "
+            f"rows were rejected rather than read from the right into "
+            f"fabricated taxids.\n")
     return rows, bad
 
 
@@ -427,10 +472,101 @@ Two things worth knowing
 """
 
 
+def self_test() -> int:
+    """The converters, on synthetic reports. No network, no taxdump, no samtools.
+
+    This script is presentational and was the one pipeline-invoked script with no
+    coverage at all, which is the wrong combination: because it never dies (see
+    the DEGRADE, DO NOT DIE note in main()), a reader that silently produces
+    nonsense produces it under exit 0 and nobody looks.
+    """
+    import tempfile
+
+    def w(td, name, text):
+        p = Path(td) / name
+        p.write_text(text)
+        return p
+
+    with tempfile.TemporaryDirectory() as td:
+        # ---- 6-column Kraken-style report ----
+        rows, bad = rows_from_kraken_style(w(td, "k6.txt",
+            "100.00\t1000\t0\tR\t1\troot\n"
+            " 50.00\t500\t500\tS\t632\t  Yersinia pestis\n"
+            "  0.00\t0\t0\tU\t0\tunclassified\n"))
+        assert bad == 0, bad
+        assert [r[4] for r in rows] == ["1", "632", "0"], rows
+        assert rows[1][5] == "  Yersinia pestis", "indentation must survive verbatim"
+        assert total_reads_from(rows) == 1000, total_reads_from(rows)
+
+        # ---- 8-column Kraken2 --report-minimizer-data: two EXTRA columns on
+        # the left, which is the whole reason the fields are taken from the
+        # right. The minimizer columns must not shift the taxid.
+        rows8, bad8 = rows_from_kraken_style(w(td, "k8.txt",
+            "100.00\t1000\t0\t900\t800\tR\t1\troot\n"
+            " 50.00\t500\t500\t450\t400\tS\t632\t  Yersinia pestis\n"))
+        assert bad8 == 0, bad8
+        assert [r[4] for r in rows8] == ["1", "632"], rows8
+        assert rows8[1][1] == 500 and rows8[1][2] == 500, rows8
+
+        # ---- Metabuli: a '#'-prefixed header, dropped ----
+        rowsm, badm = rows_from_kraken_style(w(td, "mb.txt",
+            "#clade_proportion\tclade_count\tread_count\trank\ttaxID\tname\n"
+            " 12.50\t125\t125\tspecies\t1392\tBacillus anthracis\n"))
+        assert badm == 0 and len(rowsm) == 1, (badm, rowsm)
+        assert rowsm[0][3] == "S", rowsm[0]      # rank normalised
+
+        # ---- THE WRONG FILE. A Bracken ABUNDANCE table, which the BRACKEN
+        # process writes beside the `-w` report this script wants. Before the
+        # shape check it parsed with bad=0 into fabricated taxids taken from
+        # new_est_reads. It must now yield NO rows.
+        abund = w(td, "s.bracken.tsv",
+            "name\ttaxonomy_id\ttaxonomy_lvl\tkraken_assigned_reads\t"
+            "added_reads\tnew_est_reads\tfraction_total_reads\n"
+            "Yersinia pestis\t632\tS\t400\t120\t520\t0.05200\n"
+            "Bacillus anthracis\t1392\tS\t90\t15\t105\t0.01050\n")
+        rows_a, bad_a = rows_from_kraken_style(abund)
+        assert rows_a == [], f"an abundance table must give no rows, got {rows_a}"
+        assert bad_a == 3, bad_a                 # header + both data rows
+        # and the taxids it WOULD have fabricated are the read counts
+        assert "520" not in {r[4] for r in rows_a}
+
+        # ---- a report whose first field is not a percentage is refused ----
+        rows_x, bad_x = rows_from_kraken_style(w(td, "x.txt",
+            "sample_one\t10\t10\tS\t632\tYersinia pestis\n"))
+        assert rows_x == [] and bad_x == 1, (rows_x, bad_x)
+
+        # ---- KrakenUniq: header-aware, because its column order is not
+        # Kraken's (taxID, rank, taxName at the end in a different order).
+        rows_ku, bad_ku = rows_from_krakenuniq(w(td, "ku.txt",
+            "%\treads\ttaxReads\tkmers\tdup\tcov\ttaxID\trank\ttaxName\n"
+            "100.00\t1000\t0\t5000\t1.1\t0.01\t1\tno rank\troot\n"
+            " 50.00\t500\t500\t2500\t1.2\t0.02\t632\tspecies\t  Yersinia pestis\n"))
+        assert bad_ku == 0, bad_ku
+        assert [r[4] for r in rows_ku] == ["1", "632"], rows_ku
+        assert rows_ku[1][3] == "S", rows_ku[1]
+
+        # ---- write_report: exactly five tabs per line, or Pavian's
+        # read_report() discards the whole file.
+        dest = Path(td) / "out.txt"
+        write_report(dest, rows)
+        lines = dest.read_text().splitlines()
+        assert len(lines) == 3, lines
+        assert all(ln.count("\t") == 5 for ln in lines), lines
+        assert not dest.read_text().endswith("\n\n")
+
+        # ---- normalise_rank ----
+        assert normalise_rank("no rank", "1") == "R"
+        assert normalise_rank("no rank", "0") == "U"
+        assert normalise_rank("species", "632") == "S"
+
+    print("to_pavian self-test OK", file=sys.stderr)
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--sample", required=True)
+    ap.add_argument("--sample")
     ap.add_argument("--outdir", type=Path, default=Path("."))
     ap.add_argument("--kraken2-report", type=Path)
     ap.add_argument("--bracken-report", type=Path)
@@ -442,7 +578,13 @@ def main() -> int:
     ap.add_argument("--total-reads", type=int, default=0,
                     help="read total for sylph scaling; derived from a Kraken-style "
                          "report when not given")
+    ap.add_argument("--self-test", action="store_true",
+                    help="exercise the converters on synthetic reports and exit")
     args = ap.parse_args()
+    if args.self_test:
+        return self_test()
+    if not args.sample:
+        ap.error("the following arguments are required: --sample")
 
     args.outdir.mkdir(parents=True, exist_ok=True)
     manifest: list[dict] = []

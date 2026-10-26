@@ -51,10 +51,10 @@ rows on 2026-10-26, when those two checks were written.
 | Marker database (D47) | `python3 scripts/build_marker_db.py --pack human --check` | 0/3/1 | does the database cover `markers.tsv`, on every tier it claims |
 | Kraken2 index (D48) | `python3 scripts/check_index_coverage.py --pack human` | 0/3/1 — **3 today**, by design, see D48 | can the index report every watchlist taxon **at all** |
 | Metabuli (D60) | `python3 scripts/check_metabuli_coverage.py --pack human` | 0/3/1 — **3 today**: 63 of 90 taxa have no sequenced clade in the prebuilt database | can this arm report every watchlist taxon at all |
-| Masking completeness (D34) | `python3 scripts/mask_pack_refs.py --pack human --dry-run` | 0, or 1 if a reference has no result | does every reference have a masking result |
+| Masking, both directions (D34, D62) | `python3 scripts/mask_pack_refs.py --pack human --dry-run` | 0, or 1 if a reference has no result or an orphan result masks live sequence | does every reference have a masking result — **and does every result belong to a reference**. 31 orphans found and pruned on 2026-10-26; **0 today** |
 | Threshold coherence | `python3 scripts/check_threshold_coherence.py` | report, always 0 | which per-taxon gates can never bind |
 | Conda specs | `bash scripts/check_conda_specs.sh` | 0 or nonzero | does every per-process pin still solve (network, minutes) |
-| The suite | `python3 tests/test_pipeline.py` | 0 or nonzero | 512 checks with samtools on `PATH` and `$BTF_DB` set; 446 pass and 16 skip on a bare clone with neither. No network, ~30 s |
+| The suite | `python3 tests/test_pipeline.py` | 0 or nonzero | 517 checks with samtools on `PATH` and `$BTF_DB` set; 451 pass and 16 skip on a bare clone with neither. No network, ~30 s |
 
 **Why there are this many.** Well over thirty bugs found in this project so far share one
 shape: *produces an empty or degraded result indistinguishable from a clean negative.* A
@@ -184,11 +184,21 @@ downloads the two artifacts that cannot be re-created, verifies each sha256 **be
 unpacking** — a truncated taxdump does not fail loudly later, it resolves fewer taxa and
 reports success — and then builds everything else in dependency order, resumably.
 
-| Route | Adds | Total |
-|---|---|---|
-| `minimal` | taxonomy + markers (downloaded), reference pack from the lock, host genome, masking, sylph sketch | ~62 GB |
-| `standard` | Kraken2 PlusPF | ~323 GB |
-| `full` | Metabuli | ~433 GB |
+| Route | Adds | Total | Free space the build needs |
+|---|---|---|---|
+| `minimal` | taxonomy + markers (downloaded), reference pack from the lock, host genome, masking, sylph sketch | ~62 GB | ~70 GB |
+| `standard` | Kraken2 PlusPF | ~177 GB | **~700 GiB transient** |
+| `full` | Metabuli | ~286 GB | ~700 GiB transient (either builder, not both at once) |
+
+The **Total** column is the finished database measured on this machine (2026-10-26:
+61.2 GiB minimal, + 115.2 GiB for `kraken2/pluspf/`, + 109.4 GiB for `metabuli/refseq`).
+Until 2026-10-26 these read ~323 and ~433 GB, both carried forward from a 261 GB figure for
+the Kraken2 index that predated `kraken2-build --clean` and the deletion of
+`database.kraken` — the index has been 115 GiB since 2026-10-23 (D62). The **free space**
+column is the number that actually stops an install: `build_kraken2_db.sh` preflights
+`MIN_FREE_GIB=700` and refuses below it, and a reader who planned for the route total gets
+most of a day into the standard route before being told. `install_databases.sh` has no
+preflight of its own; the builder's is the one that fires.
 
 **Published: 166 MB**, at [doi:10.5281/zenodo.23602998](https://doi.org/10.5281/zenodo.23602998)
 (concept DOI — always the latest version; the manifest's urls point at the version record
@@ -302,7 +312,7 @@ investigate.
 | `host/human/` | T2T-CHM13v2.0 + sr and map-ont indexes, 17 GB |
 | `sylph/` | `human_pack_refs.syldb`, 177 MB, **375 genomes** at c=200/k=31/min-spacing=30, rebuilt 2026-10-21 with sylph 1.0.0 and a `BTF_BUILD_MANIFEST.txt`. The 2026-09-29 hand-built sketch (359 genomes) is kept beside it as `human_pack_refs.bak-2026-09-29.syldb` — the `.syldb` suffix is deliberate, `sylph inspect` refuses any other extension. Reproducible since 2026-10-05 via `scripts/build_sylph_db.sh` (6 s at 32 threads) |
 | `packs/human/markers/` | 166 manifest rows, **146 built**, 33 profile HMMs (rebuilt 2026-10-21, D41). 16 can only be UNKNOWN (3 failed, 4 curation_required, 9 motif_todo) and 4 are built on fewer tiers than declared — see the vaccine/veto note below |
-| `kraken2/pluspf/` | **complete** 2026-10-02. `hash.k2d` 123.5 GB, `opts.k2d`, `taxo.k2d`, `seqid2taxid.map`, and `database{100,150,250}mers.kmer_distrib`. k=35, minimizer 31, full-sensitivity (no `--max-db-size`). Built against the pinned 2026-09-29 taxdump, md5-verified. Includes the 5,413 assemblies `kraken2-build` had silently dropped. `--clean` run 2026-10-03: 614 GB → 233 GB, then **144 GB** on 2026-10-23 when `database.kraken` was deleted. That 125.5 GB file was a Bracken BUILD intermediate: query-time Bracken reads only the `.kmer_distrib` files, measured at 0.6 s and 7.4 MB RSS, and 100/150/250 are all built (the default `bracken_readlen` is 150). The cost of having deleted it is that a FOURTH read length now needs `bracken-build` re-run over the library |
+| `kraken2/pluspf/` | **complete** 2026-10-02, **115.2 GiB** (123,670,597,057 bytes, re-measured 2026-10-26). `hash.k2d` 123.5 GB, `opts.k2d`, `taxo.k2d`, and `database{100,150,250}mers.{kmer_distrib,kraken}`. k=35, minimizer 31, full-sensitivity (no `--max-db-size`). Built against the pinned 2026-09-29 taxdump, md5-verified. Includes the 5,413 assemblies `kraken2-build` had silently dropped. `--clean` run 2026-10-03: 614 GB → 233 GB, then **115 GiB** on 2026-10-23 when `database.kraken` was deleted. That 125.5 GB file was a Bracken BUILD intermediate: query-time Bracken reads only the `.kmer_distrib` files, measured at 0.6 s and 7.4 MB RSS, and 100/150/250 are all built (the default `bracken_readlen` is 150). The cost of having deleted it is that a FOURTH read length now needs `bracken-build` re-run over the library. **Two corrections, 2026-10-26 (D62):** the "144 GB" recorded here was `du -sh kraken2/`, the PARENT directory, 28.5 GiB of which is `_missing_staging` — the one-off output of `fetch_missing_kraken2_assemblies.py`, a build input and not part of the index, deletable; and `seqid2taxid.map` was listed above but is not present, because `--clean` removes it and query-time classification does not read it |
 | `krakenuniq/` | not built. Opt-in by design (D2) |
 | `metabuli/refseq` | **built** 2026-10-03, 110 GB, NCBI-namespaced. The arm is opt-in too (`--skip_metabuli` defaults true): measured, it changed zero findings on every scenario run, including the `divergent_*` pair meant to favour it. Kept, not removed, because its untested case — an agent absent from the index — cannot be simulated from a database. See D15 |
 

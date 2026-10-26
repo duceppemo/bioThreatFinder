@@ -1216,7 +1216,17 @@ def main() -> int:
         this_taxon = row.get("taxon") or meta.get("name", "")
         this_sample = row.get("sample", "")
         mean_depth = as_float(row.get("mean_depth"), 0.0)
-        read_len = as_float(row.get("mean_alignment_length"), 0.0) or 150.0
+        # THE SAMPLE'S OWN READ LENGTH, not the aligned length. The gate computes
+        # expected reads as depth x marker_bp / read_len, so a read_len that is too
+        # SMALL overstates how many reads a marker should have drawn and keeps an
+        # absence as ABSENT that should have demoted to UNKNOWN - the anti-conservative
+        # direction, and this gate exists precisely to stop a false ABSENT.
+        # `mean_alignment_length` is the aligned span, which soft-clipping makes shorter
+        # than the read; `read_len_of` is seqkit's avg_len for the sample, which is the
+        # quantity the formula means. On ONT the two can differ several-fold. Fall back
+        # to the aligned length when no read stats were supplied, then to 150.
+        read_len = (read_len_of.get(this_sample, 0.0)
+                    or as_float(row.get("mean_alignment_length"), 0.0) or 150.0)
         metas = marker_meta.get(this_sample, {})
         eff_state, depth_demoted = gate_absence_on_depth(
             marker_state.get(this_sample, {}), metas, this_taxon,
@@ -1588,6 +1598,14 @@ def main() -> int:
                 "mapped_fraction_of_assigned": "", "reads_in_masked_regions": "",
                 "masked_fraction_of_reference": "", "best_neighbour_taxid": "",
                 "best_neighbour_name": "",
+                # Present and empty, not absent. Every other blank above is here for
+                # this reason and this one was simply forgotten, so a run whose findings
+                # are ALL database gaps had no row anywhere carrying the key - and the
+                # union of the rows' keys is then legitimately 36 columns wide. The
+                # union loop below cannot invent a column no row declares; a schema
+                # stable across tiers has to be declared here. D18 put this measure in
+                # the TSV so the neighbour gate could be re-thresholded from the file.
+                "best_neighbour_uniformity": "",
                 "screen_reads": screen.get((sample, taxid), {}).get("assigned_reads", ""),
                 # These were left empty even though the screen row is available two
                 # lines above (screen_reads uses it), so the report lost which arms had
@@ -1614,10 +1632,28 @@ def main() -> int:
                                  -as_float(f["unique_reads"])))
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    cols = list(findings[0]) if findings else [
-        "sample", "role", "tier", "taxid", "taxon", "group", "category",
-        "control_subtraction", "reasons"
-    ]
+    # FIELDNAMES FROM THE UNION OF EVERY FINDING, not from findings[0]. The same defect
+    # marker_evidence.py carries a comment about, in this file's dimension: the
+    # `no_reference` rows built above omit `best_neighbour_uniformity`, so a run whose
+    # findings are ALL database gaps took its header from one of them and
+    # `extrasaction="ignore"` dropped that column with no error - 36 columns instead of
+    # 37, reproduced 2026-10-26. A mixed run was safe only by accident, because
+    # `no_reference` is the lowest tier and sorts last. The trigger is a pack whose refs
+    # were never built, which is exactly the first run on a new installation, and the
+    # column that vanishes is a neighbour-discrimination measure - so the file that is
+    # supposed to explain why a call was weak loses the field that says so.
+    cols: list[str] = []
+    seen_cols: set[str] = set()
+    for f in findings:
+        for k in f:
+            if k not in seen_cols:
+                seen_cols.add(k)
+                cols.append(k)
+    if not cols:
+        cols = [
+            "sample", "role", "tier", "taxid", "taxon", "group", "category",
+            "control_subtraction", "reasons"
+        ]
     with args.out.open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=cols, delimiter="\t", extrasaction="ignore")
         w.writeheader()

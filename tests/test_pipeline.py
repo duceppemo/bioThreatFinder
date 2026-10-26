@@ -185,6 +185,14 @@ def test_selftests(tmp: Path) -> None:
          [sys.executable, SCRIPTS / "measure_reference_span.py", "--self-test"]),
         ("selftest:check_index_coverage",
          [sys.executable, SCRIPTS / "check_index_coverage.py", "--self-test"]),
+        # Both of these existed and were not run by anything. host_depletion_stats
+        # carried a passing --self-test the suite never invoked, and to_pavian.py had
+        # no coverage at all - the only pipeline-invoked script with none, and the one
+        # that by design never dies, so a converter reading the wrong file produced
+        # fabricated taxids under exit 0 (D62).
+        ("selftest:host_depletion_stats",
+         [sys.executable, BIN / "host_depletion_stats.py", "--self-test"]),
+        ("selftest:to_pavian", [sys.executable, BIN / "to_pavian.py", "--self-test"]),
     ]:
         p = run(cmd)
         record(name, p.returncode == 0, p.stderr.strip().splitlines()[-1] if p.returncode else "")
@@ -3491,6 +3499,70 @@ def test_marker_state_columns(tmp: Path) -> None:
            f"got {rows.get('aa_unbuilt', {}).get('state')}")
 
 
+def test_finding_columns(tmp: Path) -> None:
+    """The same defect in the OTHER file, and the reason to look for it (D62).
+
+    `score_evidence.py` took its findings header from `findings[0]`. The
+    `no_reference` rows - a watchlist taxon whose reference was never built - are
+    assembled from a different dict literal than a scored row and omit
+    `best_neighbour_uniformity`. So a run whose findings are ALL database gaps wrote 36
+    columns instead of 37 and dropped that one silently, `extrasaction="ignore"`
+    swallowing it.
+
+    A MIXED RUN WAS SAFE ONLY BY ACCIDENT: `no_reference` is the lowest tier and the
+    sort puts it last, so `findings[0]` happened to be a complete row. The trigger is a
+    pack whose references were never built, which is the first run on a new
+    installation - and the column that vanishes is the neighbour-discrimination measure
+    D18 put in the TSV precisely so the gate could be audited from it.
+
+    Both halves are asserted. The gaps-only case is the reproduction; the mixed case is
+    what a header-from-the-union fix must not break.
+    """
+    # ---- gaps only: every row is a no_reference row ----
+    cov = tmp / "fc_empty.tsv"
+    write_cov(cov, [])
+    miss = tmp / "fc_missing.tsv"
+    miss.write_text("GAPS\t10255\tVariola virus\tno_reference\n"
+                    "GAPS\t632\tYersinia pestis\tno_reference\n")
+    out = tmp / "findings_fc_empty.tsv"
+    score(tmp, cov, missing=miss)
+    with out.open() as fh:
+        cols = list(csv.DictReader(fh, delimiter="\t").fieldnames or [])
+    record("findcols:a findings file of database gaps still carries every column",
+           "best_neighbour_uniformity" in cols,
+           f"{len(cols)} columns, and the header came from a no_reference row that "
+           f"has no best_neighbour_uniformity key")
+
+    # ---- mixed: the fix must not shrink the normal case ----
+    cov2 = tmp / "fc_mixed.tsv"
+    write_cov(cov2, [
+        cov_row(sample="MIX", role="sample", taxid="632", taxon="Yersinia pestis",
+                group="bacteria", reference_bp=4650000, unique_reads=820,
+                reads_per_million=164.0, breadth=0.3400, mean_depth=0.88, depth_cv=1.15,
+                window_bp=1000, windows_expected=4650, windows_occupied=2790,
+                window_occupancy=0.6000, mean_identity=0.9950,
+                best_neighbour_taxid="633", best_neighbour_reads=12,
+                neighbour_ratio="68.33", screen_assigned_reads=1000,
+                mapped_fraction_of_assigned="0.8200",
+                total_reads_screened=5000000, mapq_min=10),
+    ])
+    miss2 = tmp / "fc_missing2.tsv"
+    miss2.write_text("MIX\t10255\tVariola virus\tno_reference\n")
+    score(tmp, cov2, missing=miss2)
+    with (tmp / "findings_fc_mixed.tsv").open() as fh:
+        rdr = csv.DictReader(fh, delimiter="\t")
+        cols2 = list(rdr.fieldnames or [])
+        rows2 = list(rdr)
+    record("findcols:a mixed run carries the same header",
+           set(cols) == set(cols2),
+           f"gaps-only has {sorted(set(cols) - set(cols2))} extra, mixed has "
+           f"{sorted(set(cols2) - set(cols))}")
+    record("findcols:and the scored row still reports the measure",
+           any(r["tier"] != "no_reference" and r.get("best_neighbour_uniformity") != ""
+               for r in rows2) or all("best_neighbour_uniformity" in r for r in rows2),
+           "the column exists but no row populates it")
+
+
 
 def tier_rank_local(tier: str) -> int:
     """Rank a tier for test comparisons, without importing the scorer's table."""
@@ -5006,7 +5078,7 @@ def test_install_route(tmp: Path) -> None:
 
     # Only the un-re-creatable artifacts belong here. The 43 GB reference pack is pinned
     # by packs/*/refs.lock.tsv instead (D52), because a lock is auditable and an archive
-    # is not - and publishing the Kraken2 index would be 261 GB of unauditable bytes.
+    # is not - and publishing the Kraken2 index would be 115 GB of unauditable bytes.
     record("install:only the artifacts that cannot be re-created are published",
            {r["artifact"] for r in rows} == {"taxdump", "markers"},
            f"published set is {sorted(r['artifact'] for r in rows)}; refs are locked, "
@@ -5498,6 +5570,7 @@ CASES = {
     "markergene": test_marker_gene_identity,
     "salm": test_salmonella_block,
     "statecols": test_marker_state_columns,
+    "findcols": test_finding_columns,
     "mref": test_multi_reference_geometry,
     "refs": test_refs_manifest_integrity,
     "extrarefs": test_extra_refs_cover,

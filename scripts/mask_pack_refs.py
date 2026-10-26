@@ -363,6 +363,140 @@ def ref_stem(row: dict) -> str:
     return Path(row["path"]).name.replace(".fna.gz", "").replace(".fna", "")
 
 
+def bed_contigs(path: Path) -> set[str]:
+    """Contig names a BED names. Used to tell a dead orphan from a live one."""
+    out: set[str] = set()
+    try:
+        with path.open() as fh:
+            for ln in fh:
+                if not ln.strip() or ln.startswith(("#", "track", "browser")):
+                    continue
+                out.add(ln.split("\t", 1)[0])
+    except OSError:
+        pass
+    return out
+
+
+def mask_orphans(all_rows: list[dict], mask_dir: Path) -> tuple[list[Path], list[str], set]:
+    """(orphan BEDs on disk, orphan rows in mask_manifest.tsv, their LIVE contigs).
+
+    THE OTHER DIRECTION, which nothing could ask. reconcile() answers "does every
+    reference have a result"; this answers "does every result belong to a reference".
+    The manifest is the authority (D59), and masking is the artifact where that was
+    still only true one way round.
+
+    It accumulates by design. The manifest merge below MERGES, DO NOT REWRITE - the
+    fix for a real truncation bug - and it carried every old row forward
+    unconditionally, so a reference REMOVED from the pack kept both its BED and its
+    `mask_manifest.tsv` row forever. Measured 2026-10-26 on the human pack: 406 BEDs
+    and 406 manifest rows for 375 references, the 31 extras left by D58's reverted
+    cover, summing to 107,653 bp. `mask_manifest.tsv` therefore totalled 20,148,007 bp
+    over 406 rows while docs/ correctly reported 20,040,354 over 375 - the artifact
+    disagreeing with the documentation that describes it, in the direction where the
+    artifact is wrong.
+
+    Whether an orphan is INERT is a measurable question, not a judgement.
+    coverage_stats.py --mask-bed globs the whole directory into ONE contig -> intervals
+    map, so an orphan masks live sequence if and only if its contig names still occur
+    in a reference the manifest names. A reference's contig accessions are specific to
+    its assembly, so normally they do not - but 263 and 264 share one assembly in this
+    very pack, so sharing is possible and is checked rather than assumed. A live orphan
+    masks sequence no record accounts for and is reported as a failure; a dead one is
+    stale state and is reported as a warning.
+    """
+    wanted = {f"{ref_stem(r)}.mask.bed" for r in all_rows}
+    orphan_beds = sorted(b for b in mask_dir.glob("*.mask.bed")
+                         if b.name not in wanted)
+    orphan_rows: list[str] = []
+    mpath = mask_dir / "mask_manifest.tsv"
+    if mpath.exists():
+        try:
+            with mpath.open() as fh:
+                for r in csv.DictReader(fh, delimiter="\t"):
+                    bp = Path(str(r.get("bed_path", "")).strip()).name
+                    if bp and bp not in wanted:
+                        orphan_rows.append(bp)
+        except OSError:
+            pass
+    if not orphan_beds:
+        return orphan_beds, orphan_rows, set()
+    live: set = set()
+    kept = {f"{ref_stem(r)}.mask.bed" for r in all_rows}
+    kept_contigs: set = set()
+    for b in mask_dir.glob("*.mask.bed"):
+        if b.name in kept:
+            kept_contigs |= bed_contigs(b)
+    for b in orphan_beds:
+        live |= bed_contigs(b) & kept_contigs
+    return orphan_beds, orphan_rows, live
+
+
+def report_mask_orphans(all_rows: list[dict], mask_dir: Path, args) -> int:
+    """0 if nothing on disk is unaccounted for, 1 if an orphan masks live sequence."""
+    beds, rows, live = mask_orphans(all_rows, mask_dir)
+    if not beds and not rows:
+        return 0
+    bp = sum(total_len(merge_intervals(
+        [(int(f[1]), int(f[2]), "orphan") for f in
+         (ln.split("\t") for ln in b.read_text().splitlines())
+         if len(f) >= 3 and f[1].strip().isdigit()]))
+        for b in beds)
+    log("")
+    warn(f"{len(beds)} mask BED(s) and {len(rows)} mask_manifest.tsv row(s) belong to "
+         f"no reference this pack's manifest names ({bp:,} bp). The manifest is the "
+         f"authority (D59); a result for a reference that is gone is not a result:")
+    for b in beds[:30]:
+        warn(f"  {b.name}")
+    if len(beds) > 30:
+        warn(f"  ... and {len(beds) - 30} more")
+    if live:
+        warn("")
+        warn(f"{len(live)} contig(s) named by an orphan BED are STILL IN a reference "
+             f"the manifest names, and coverage_stats.py --mask-bed reads the whole "
+             f"directory into one contig map - so these intervals mask live sequence "
+             f"that no manifest row accounts for: "
+             f"{', '.join(sorted(live)[:8])}")
+    warn("")
+    warn("Remove them with:")
+    warn(f"  python3 scripts/mask_pack_refs.py --pack {args.pack} "
+         f"--btf-db {args.btf_db} --prune-orphan-masks")
+    # A DEAD orphan is stale state, not a wrong answer: warn, because a guard that
+    # exits non-zero on a healthy pack gets switched off (D47). A LIVE one changes a
+    # breadth denominator, so it exits like a missing result does.
+    return 1 if live else 0
+
+
+def prune_orphan_masks(all_rows: list[dict], mask_dir: Path) -> int:
+    """Delete orphan BEDs and drop their mask_manifest.tsv rows. Returns the count."""
+    beds, _rows, _live = mask_orphans(all_rows, mask_dir)
+    if not beds:
+        log("no orphan masking results to remove")
+        return 0
+    names = {b.name for b in beds}
+    for b in beds:
+        log(f"removing {b.name}")
+        b.unlink()
+    mpath = mask_dir / "mask_manifest.tsv"
+    if mpath.exists():
+        with mpath.open() as fh:
+            rdr = csv.DictReader(fh, delimiter="\t")
+            fields = rdr.fieldnames or []
+            keep = [r for r in rdr
+                    if Path(str(r.get("bed_path", "")).strip()).name not in names]
+        if fields:
+            tmp = mpath.with_suffix(".tsv.tmp")
+            with tmp.open("w", newline="") as fh:
+                w = csv.DictWriter(fh, fieldnames=fields, delimiter="\t",
+                                   extrasaction="ignore")
+                w.writeheader()
+                for r in keep:
+                    w.writerow(r)
+            tmp.replace(mpath)
+            log(f"mask_manifest.tsv: {len(keep)} row(s) kept")
+    log(f"removed {len(beds)} orphan masking result(s)")
+    return len(beds)
+
+
 def reconcile(all_rows: list[dict], mask_dir: Path, args) -> int:
     """0 if every pack reference has a masking result, 1 otherwise.
 
@@ -409,10 +543,14 @@ def reconcile(all_rows: list[dict], mask_dir: Path, args) -> int:
         known = {b.name for b in mask_dir.glob("*.mask.bed")}
 
     unmasked = [r for r in all_rows if f"{ref_stem(r)}.mask.bed" not in known]
+    # BOTH DIRECTIONS, on every exit path, for the same reason the forward check is
+    # scoped to the whole pack rather than this run: "is there a result nobody asked
+    # for" has nothing to do with what was asked for today either.
+    orphan_rc = report_mask_orphans(all_rows, mask_dir, args)
     if not unmasked:
         log("")
         log(f"all {len(all_rows)} pack reference(s) have a masking result")
-        return 0
+        return orphan_rc
 
     log("")
     warn(f"{len(unmasked)} of {len(all_rows)} pack reference(s) have NO masking "
@@ -525,6 +663,62 @@ def self_test() -> int:
         check("a manifest written under a different root still reconciles",
               rc == 0, f"rc={rc}")
 
+    print("-- and a result that belongs to no reference --")
+    with tempfile.TemporaryDirectory() as td:
+        mask_dir = Path(td)
+        for r in rows:
+            (mask_dir / f"{ref_stem(r)}.mask.bed").write_text("ctg_kept\t10\t20\tlow\n")
+
+        class _A:
+            pack, btf_db, threads = "human", Path("/p"), 4
+
+        check("a pack with no orphans reconciles clean",
+              reconcile(rows, mask_dir, _A()) == 0)
+
+        # A DEAD orphan: a reference dropped from the manifest, whose contigs occur in
+        # nothing the manifest still names. Stale state, reported, not a failure.
+        dead = mask_dir / "28901_Salmonella_enterica.GCF_019339465.1.mask.bed"
+        dead.write_text("ctg_gone\t0\t500\tlowcomplexity\n")
+        beds, orows, live = mask_orphans(rows, mask_dir)
+        check("an orphan BED is found", [b.name for b in beds] == [dead.name],
+              str([b.name for b in beds]))
+        check("a dead orphan names no live contig", live == set(), str(live))
+        check("a dead orphan is reported but does not fail the pack",
+              reconcile(rows, mask_dir, _A()) == 0)
+
+        # A LIVE one: 263 and 264 share an assembly in the real pack, so an orphan CAN
+        # name a contig that is still in the pack - and coverage_stats.py reads the
+        # whole directory into one contig map, so those intervals mask live sequence
+        # that no manifest row accounts for. That is a wrong answer, not stale state.
+        dead.write_text("ctg_kept\t0\t500\tlowcomplexity\n")
+        _b, _r, live = mask_orphans(rows, mask_dir)
+        check("a live orphan is identified by its contigs", live == {"ctg_kept"},
+              str(live))
+        check("a live orphan fails the pack", reconcile(rows, mask_dir, _A()) == 1)
+
+        # The manifest row is an orphan in its own right, independent of the BED.
+        man = mask_dir / "mask_manifest.tsv"
+        with man.open("w") as fh:
+            fh.write("taxid\tbed_path\n")
+            for r in rows:
+                fh.write(f"{r['taxid']}\t/p/masked/{ref_stem(r)}.mask.bed\n")
+            fh.write(f"28901\t/p/masked/{dead.name}\n")
+        _b, orows, _l = mask_orphans(rows, mask_dir)
+        check("an orphan mask_manifest row is found too", orows == [dead.name],
+              str(orows))
+
+        # Pruning removes both, and leaves every row the manifest still names.
+        n = prune_orphan_masks(rows, mask_dir)
+        check("pruning removes exactly the orphans", n == 1, f"removed {n}")
+        check("the orphan BED is gone", not dead.exists())
+        kept_rows = [ln for ln in man.read_text().splitlines()[1:] if ln.strip()]
+        check("pruning keeps every row the manifest still names",
+              len(kept_rows) == len(rows), f"{len(kept_rows)} row(s)")
+        check("a pruned pack reconciles clean",
+              reconcile(rows, mask_dir, _A()) == 0)
+        check("pruning an already clean pack removes nothing",
+              prune_orphan_masks(rows, mask_dir) == 0)
+
     print()
     if failures:
         print(f"{len(failures)} FAILED: {', '.join(failures)}")
@@ -565,6 +759,10 @@ def main() -> int:
     ap.add_argument("--only-taxid", action="append", default=[])
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--prune-orphan-masks", action="store_true",
+                    help="delete masking results for references this pack's manifest "
+                         "no longer names, and drop their mask_manifest.tsv rows. "
+                         "Reconciliation reports them read-only; this removes them")
     ap.add_argument("--self-test", action="store_true",
                     help="offline unit tests; needs no pack, genome or minimap2")
     args = ap.parse_args()
@@ -596,6 +794,14 @@ def main() -> int:
     cache = args.btf_db / "cache"
 
     all_rows = read_manifest(manifest_path)
+
+    # Before anything else, and on its own: this does not mask, it removes results
+    # for references the pack no longer holds. Pairs with the reconciliation that
+    # reports them, which is read-only and runs on every exit path.
+    if args.prune_orphan_masks:
+        prune_orphan_masks(all_rows, mask_dir)
+        return reconcile(all_rows, mask_dir, args)
+
     rows = all_rows
     if args.only_taxid:
         want = set(args.only_taxid)
@@ -998,20 +1204,37 @@ def main() -> int:
         # in this run, so masking one of 186538's three files rewrote one row and
         # deleted the other two, leaving a taxid with three BEDs and one manifest
         # row. bed_path is unique per reference and is already a column.
+        # CARRIED FORWARD, BUT ONLY FOR REFERENCES THE PACK STILL HOLDS. The merge
+        # above is the fix for a truncation, and it over-corrected: it carried every
+        # old row unconditionally, so a reference REMOVED from the manifest kept its
+        # row for ever. That is how the human pack came to record 406 masking results
+        # for 375 references. Dropping a row whose reference is gone is not the
+        # truncation this merge exists to prevent - that one dropped rows whose BEDs
+        # were still on disk AND still named by the manifest.
         fresh = {str(row["bed_path"]) for row in summary}
+        current = {f"{ref_stem(r)}.mask.bed" for r in all_rows}
         carried: list[dict] = []
+        dropped = 0
         if mpath.exists():
             try:
                 with mpath.open() as fh:
                     for old in csv.DictReader(fh, delimiter="\t"):
-                        if str(old.get("bed_path", "")).strip() not in fresh:
-                            carried.append(old)
+                        bp = str(old.get("bed_path", "")).strip()
+                        if bp in fresh:
+                            continue
+                        if bp and Path(bp).name not in current:
+                            dropped += 1
+                            continue
+                        carried.append(old)
             except OSError as exc:
                 die(f"cannot read {mpath} to merge ({exc}). Refusing to continue: "
                     f"rewriting it from this run alone would drop "
                     f"{'the other genomes' if fresh else 'everything'} masked earlier.")
         if carried:
             log(f"carrying forward {len(carried)} manifest row(s) from earlier runs")
+        if dropped:
+            log(f"dropping {dropped} manifest row(s) for reference(s) this pack no "
+                f"longer holds (the BEDs stay until --prune-orphan-masks)")
 
         cols = list(summary[0])
         allrows = summary + [{c: old.get(c, "") for c in cols} for old in carried]

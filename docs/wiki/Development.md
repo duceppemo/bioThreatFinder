@@ -7,7 +7,7 @@ which states the two conventions that are not optional. This page is the mechani
 ## The suite
 
 ```bash
-python3 tests/test_pipeline.py                 # 512 checks, offline, no databases, ~30 s
+python3 tests/test_pipeline.py                 # 517 checks, offline, no databases, ~30 s
 python3 tests/test_pipeline.py --list          # the groups
 python3 tests/test_pipeline.py -k markerdb     # one group — SUBSTRING match, not an expression
 ```
@@ -17,8 +17,8 @@ time before.
 
 It is a self-contained runner, not pytest: fixture-driven, no network, no databases. Cases
 that compare against a built database skip with a message naming what to set, so a bare
-clone is a valid place to run it — 446 pass and 16 skip there. With `$BTF_DB` set and
-`samtools` on `PATH`, 512 pass.
+clone is a valid place to run it — 451 pass and 16 skip there. With `$BTF_DB` set and
+`samtools` on `PATH`, 517 pass.
 
 Per-script `--self-test` suites run as single cases from here, so `selftest:build_marker_db`
 alone covers 60+ assertions.

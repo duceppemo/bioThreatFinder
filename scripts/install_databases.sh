@@ -3,8 +3,8 @@
 # install_databases.sh - get a clone from nothing to a deployment that can run.
 #
 #   scripts/install_databases.sh --route minimal          # 62 GB, sylph stage 1
-#   scripts/install_databases.sh --route standard         # + Kraken2 PlusPF, 323 GB
-#   scripts/install_databases.sh --route full             # + Metabuli, 433 GB
+#   scripts/install_databases.sh --route standard         # + Kraken2 PlusPF, 177 GB
+#   scripts/install_databases.sh --route full             # + Metabuli, 286 GB
 #
 # TWO WAYS TO GET A DATABASE, AND THE SPLIT IS NOT ABOUT SIZE
 # -----------------------------------------------------------
@@ -23,7 +23,7 @@
 # ------------------------------
 # It is not small. A pipeline that can screen anything needs the reference pack (43 GB)
 # and, for human samples, the host genome (17 GB) - stage 2 maps against the pack and
-# sylph profiles it, so neither is optional. What minimal LEAVES OUT is the 261 GB Kraken2
+# sylph profiles it, so neither is optional. What minimal LEAVES OUT is the 115 GB Kraken2
 # index and the 110 GB Metabuli index. Stage 1 then runs on sylph alone, which is a real
 # configuration rather than a crippled one: D48 found 19 of 90 watchlist taxa have no node
 # in the Kraken2 index at all, so sylph is already the only arm that can see them.
@@ -65,8 +65,9 @@ Options:
   --route ROUTE        minimal | standard | full (default: ${ROUTE})
                          minimal   taxonomy + markers + reference pack + host genome
                                    + masking + sylph sketch           ~62 GB
-                         standard  + Kraken2 PlusPF                  ~323 GB
-                         full      + Metabuli                        ~433 GB
+                         standard  + Kraken2 PlusPF                 ~177 GB
+                                   (needs ~700 GiB FREE while building)
+                         full      + Metabuli                       ~286 GB
   --from-dir DIR       install the published archives from a local directory instead of
                        downloading them. Checksums are verified either way.
   --download-only      fetch and verify the published archives, build nothing
@@ -275,7 +276,10 @@ build_sketch() {
 }
 
 build_kraken2() {
-    log "Kraken2 PlusPF: (needs env btf-kraken2; 261 GB, most of a day)"
+    log "Kraken2 PlusPF: (needs env btf-kraken2; 115 GB finished, most of a day)"
+    log "  AND ~700 GiB FREE WHILE IT BUILDS - several times the finished size."
+    log "  build_kraken2_db.sh preflights that and refuses below it, so a disk sized"
+    log "  for the route total declines here rather than earlier."
     log "  NOTE the prebuilt indexes upstream are NOT equivalent: the capped variants"
     log "  (k2_pluspf_16_GB and friends) are built with --max-db-size and lose"
     log "  sensitivity, and any upstream index carries its own taxonomy snapshot rather"
