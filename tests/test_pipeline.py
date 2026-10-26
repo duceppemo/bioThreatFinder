@@ -4201,6 +4201,194 @@ def test_metabuli_coverage(tmp: Path) -> None:
            proc.stdout[-200:])
 
 
+def test_bundle_check(tmp: Path) -> None:
+    """D61. The bundles had a staleness predicate and no way to ask it anything.
+
+    D45 put `bundle_staleness` inside build_pack_refs.py, which is correct and is where the
+    builder needs it - but it sits after the watchlist has been resolved against NCBI and
+    the subtree queries have gone out, and `--dry-run` returns before reaching it. So the
+    one artifact stage 2 actually aligns against was the only database here that could not
+    be interrogated read-only: asking "are my bundles current?" meant starting a 43 GB
+    download tool.
+
+    The predicate is IMPORTED by the check, not copied. Two copies is the worse failure of
+    the two available - the check would answer with yesterday's rules while the builder
+    rebuilt, and an operator learns to ignore a check that disagrees with the thing it
+    checks.
+
+    Measured on the human pack: 80 of 90 bundles have no input record, because they were
+    built before the sidecar existed. For those D45 can only compare mtimes, which is blind
+    to a restore from backup or a re-download of the same accession - so metadata alone
+    answers "could not tell" for 89% of the pack. Reading the bundle answers exactly, by
+    comparing per-taxid-prefix contig counts and base totals against the manifest, and
+    takes 73 s over all 90.
+    """
+    chk = SCRIPTS / "check_pack_bundles.py"
+    record("bundlecheck:the bundles have a standalone check at all", chk.is_file(),
+           f"missing {chk}")
+    if not chk.is_file():
+        return
+    src = chk.read_text(encoding="utf-8")
+
+    # 15 cases over a synthetic pack, including the two that metadata cannot see.
+    proc = run([sys.executable, "-I", chk, "--self-test"])
+    record("bundlecheck:the mutation self-test passes", proc.returncode == 0,
+           (proc.stdout + proc.stderr)[-500:])
+
+    record("bundlecheck:the staleness predicate is imported, not reimplemented",
+           "def bundle_staleness" not in src and "builder.bundle_staleness" in src,
+           "a second copy of D45's predicate would drift from the builder's")
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import build_pack_refs as bpr                     # noqa: F401
+        import importlib.util as _ilu
+        spec = _ilu.spec_from_file_location("btf_check_pack_bundles", chk)
+        mod = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception as exc:
+        record("bundlecheck:<import failed>", False, f"{type(exc).__name__}: {exc}")
+        return
+    builder = mod.load_builder()
+    record("bundlecheck:the borrowed predicate really comes from the builder",
+           builder.bundle_staleness.__code__.co_filename.endswith("build_pack_refs.py")
+           and builder.index_staleness.__code__.co_filename.endswith("build_pack_refs.py"),
+           builder.bundle_staleness.__code__.co_filename)
+
+    # THE COUNTING RULE MUST MATCH fasta_stats EXACTLY. The manifest's genome_size and
+    # n_contigs were produced by it; a rule differing by the newline, or by a trailing
+    # space, would be off by a few bytes per contig and report every bundle on every
+    # deployment stale. That is the shape this project keeps hitting from the other side:
+    # a guard that cries wolf on a healthy pack gets switched off.
+    import gzip as _gz
+    frag = tmp / "countrule.fna.gz"
+    with _gz.open(frag, "wt") as fh:
+        fh.write(">c1 some description\nACGTACGTNN\nACGT\n>c2\nTTTT  \n")
+    want_bases, want_contigs = bpr.fasta_stats(frag)
+    with _gz.open(tmp / "asbundle.fna.gz", "wt") as out:
+        bpr.append_with_taxid_prefix(frag, 9999, out)
+    stats, unprefixed, collisions = mod.bundle_prefix_stats(tmp / "asbundle.fna.gz")
+    record("bundlecheck:the check counts bases exactly as fasta_stats does",
+           stats.get("9999") == (want_contigs, want_bases),
+           f"{stats} vs ({want_contigs}, {want_bases})")
+    record("bundlecheck:prefixed headers are not reported as unattributable",
+           not unprefixed and not collisions, f"{unprefixed} {collisions}")
+
+    record("bundlecheck:reading the bundles is the default, --quick is the weaker mode",
+           '"--quick", action="store_true"' in src and "metadata only" in src)
+    record("bundlecheck:--quick with no input record is UNDETERMINED, not CURRENT",
+           "verdict: UNDETERMINED" in src and "compared by timestamp only" in src,
+           "mtime cannot see a restore from backup; claiming CURRENT there would be the "
+           "false negative the check exists to prevent")
+    record("bundlecheck:a missing neighbour is reported as weakened, not stale",
+           "weakened, not stale" in src,
+           "4 of 90 bundles are missing a declared neighbour by construction - exit 3 on "
+           "that would cry wolf permanently")
+    record("bundlecheck:it says what it does NOT answer",
+           "refs.lock.tsv" in src and "which must reach NCBI" in src,
+           "bundles agreeing with the manifest is not the manifest agreeing with the lock")
+
+    # ---- and the built pack, one bundle of it, mutated ----
+    refs = btf_path("packs", "human", "refs", env="BTF_REFS_DIR")
+    comp_dir = refs / "competitive" if refs else None
+    manifest = refs / "manifest.tsv" if refs else None
+    if not (comp_dir and comp_dir.is_dir() and manifest and manifest.is_file()):
+        skip("bundlecheck:a real bundle is CURRENT and a 1 bp change is not",
+             f"no built pack at {refs} (set $BTF_DB or BTF_REFS_DIR)")
+        return
+
+    import csv as _csv
+    with manifest.open(newline="") as fh:
+        rows = list(_csv.DictReader(fh, delimiter="\t"))
+    wl = REPO / "packs" / "human" / "watchlist.resolved.tsv"
+    with wl.open(newline="") as fh:
+        wl_rows = list(_csv.DictReader(fh, delimiter="\t"))
+    by_taxid: dict[str, list[dict]] = {}
+    for r in rows:
+        if (r.get("path") or "").strip() and Path(r["path"]).is_file():
+            by_taxid.setdefault(r["taxid"].strip(), []).append(r)
+
+    # The smallest bundle whose every declared member is on disk: real data, one second.
+    pick = None
+    for w in sorted(wl_rows, key=lambda w: (comp_dir / f"{w['taxid'].strip()}.fna.gz")
+                    .stat().st_size
+                    if (comp_dir / f"{w['taxid'].strip()}.fna.gz").is_file() else 1 << 60):
+        tid = w["taxid"].strip()
+        if by_taxid.get(tid) and (comp_dir / f"{tid}.fna.gz").is_file():
+            pick = (tid, w)
+            break
+    if pick is None:
+        skip("bundlecheck:a real bundle is CURRENT and a 1 bp change is not",
+             "no target in the watchlist has both a bundle and a reference on disk")
+        return
+    tid, w = pick
+
+    slice_refs = tmp / "slice" / "refs"
+    (slice_refs / "competitive").mkdir(parents=True, exist_ok=True)
+    (tmp / "slice" / "packs" / "human").mkdir(parents=True, exist_ok=True)
+    members = {tid} | {str(n) for n in bpr.parse_neighbours(
+        w.get("near_neighbour_taxids", ""))}
+    cols = list(rows[0].keys())
+    with (slice_refs / "manifest.tsv").open("w") as fh:
+        fh.write("\t".join(cols) + "\n")
+        for r in rows:
+            if r["taxid"].strip() in members:
+                fh.write("\t".join((r.get(c) or "") for c in cols) + "\n")
+    with (tmp / "slice" / "packs" / "human" / "watchlist.resolved.tsv").open("w") as fh:
+        wcols = list(wl_rows[0].keys())
+        fh.write("\t".join(wcols) + "\n")
+        fh.write("\t".join((w.get(c) or "") for c in wcols) + "\n")
+    for name in (f"{tid}.fna.gz", f"{tid}.sr.mmi", f"{tid}.map-ont.mmi"):
+        tgt = comp_dir / name
+        if tgt.exists():
+            link = slice_refs / "competitive" / name
+            link.unlink(missing_ok=True)
+            link.symlink_to(tgt)
+
+    cmd = [sys.executable, "-I", chk, "--pack", "human",
+           "--packs-dir", tmp / "slice" / "packs", "--refs-dir", slice_refs]
+    proc = run(cmd)
+    record(f"bundlecheck:the built bundle for taxid {tid} is CURRENT",
+           proc.returncode == 0, f"exit {proc.returncode}: {proc.stdout[-600:]}")
+
+    # One base added to one manifest row, nothing else touched. This is D42's shape in
+    # miniature - the manifest claims something the bundle does not hold - and mtime,
+    # which is all 80 of 90 bundles have, cannot see it.
+    mpath = slice_refs / "manifest.tsv"
+    orig = mpath.read_text()
+    out_lines = []
+    bumped = False
+    for i, line in enumerate(orig.splitlines()):
+        f = line.split("\t")
+        if i and not bumped and f[cols.index("genome_size")].isdigit():
+            f[cols.index("genome_size")] = str(int(f[cols.index("genome_size")]) + 1)
+            bumped = True
+        out_lines.append("\t".join(f))
+    mpath.write_text("\n".join(out_lines) + "\n")
+    proc = run(cmd)
+    record("bundlecheck:one base of disagreement makes it STALE",
+           bumped and proc.returncode == 3 and "the manifest says" in proc.stdout,
+           f"exit {proc.returncode}: {proc.stdout[-600:]}")
+    mpath.write_text(orig)
+
+    # A neighbour dropped from the manifest: the bundle then holds sequence under a taxid
+    # nothing in the pack defines, which is how a removed watchlist entry leaves an aligner
+    # still contesting against it.
+    neighbours = [n for n in members if n != tid and by_taxid.get(n)]
+    if not neighbours:
+        skip("bundlecheck:a taxid in the bundle that nothing defines is caught",
+             f"taxid {tid}'s bundle has no neighbour on disk to remove")
+    else:
+        drop = sorted(neighbours)[0]
+        mpath.write_text("\n".join(
+            [l for i, l in enumerate(orig.splitlines())
+             if i == 0 or l.split("\t")[0].strip() != drop]) + "\n")
+        proc = run(cmd)
+        record("bundlecheck:a taxid in the bundle that nothing defines is caught",
+               proc.returncode == 3 and "in nothing that defines it" in proc.stdout,
+               f"exit {proc.returncode}: {proc.stdout[-600:]}")
+        mpath.write_text(orig)
+
+
 def test_sketch_authority(tmp: Path) -> None:
     """D59. The sketch's authority is the manifest, not the directory it reads.
 
@@ -5146,6 +5334,8 @@ def test_no_host_paths(tmp: Path) -> None:
     # is a check nobody runs on a fresh clone.
     for name, flag in (("build_marker_db.py", "--markers-dir"),
                        ("check_index_coverage.py", "--kraken2-db"),
+                       ("check_metabuli_coverage.py", "--metabuli-db"),
+                       ("check_pack_bundles.py", "--refs-dir"),
                        ("build_sylph_db.sh", "--refs-dir")):
         body = (SCRIPTS / name).read_text(encoding="utf-8")
         record(f"roots:{name} can be pointed at an artifact without a root",
@@ -5312,6 +5502,7 @@ CASES = {
     "refs": test_refs_manifest_integrity,
     "extrarefs": test_extra_refs_cover,
     "stale": test_bundle_staleness,
+    "bundlecheck": test_bundle_check,
     "sketch": test_sketch_freshness,
     "sketchauth": test_sketch_authority,
     "metabuli": test_metabuli_coverage,

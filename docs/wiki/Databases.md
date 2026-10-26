@@ -97,6 +97,7 @@ reported as a stale database.
 ```bash
 python3 scripts/build_marker_db.py      --pack human --check    # covers markers.tsv, on every claimed tier
 bash    scripts/build_sylph_db.sh       --pack human --check    # covers every reference the MANIFEST names
+python3 scripts/check_pack_bundles.py   --pack human            # do the competitive bundles still match the manifest
 python3 scripts/check_index_coverage.py --pack human            # can Kraken2 report every watchlist taxon at all
 python3 scripts/check_metabuli_coverage.py --pack human         # the same question for the Metabuli arm
 python3 scripts/mask_pack_refs.py       --pack human --dry-run  # does every reference have a masking result
@@ -124,9 +125,24 @@ configured deployment is a check nobody runs on a fresh clone.
 sequence at or below them in the prebuilt database that ships — every fungus, 19 of 20
 parasites. The arm is off by default, so this is not a run-time defect; it is what the arm
 would answer if switched on for those taxa. A different Metabuli database would answer
-differently. And the competitive bundles' predicate is a rebuild decision inside
-`build_pack_refs.py` rather than a standalone check, so asking "are my bundles current?"
-means invoking the builder.
+differently.
+
+**The bundle check reads the bundles, and that is the point.** Its staleness predicate is
+*imported* from `build_pack_refs.py`, so there is one predicate rather than two that can
+drift. But only 10 of the 90 bundles carry the `.inputs.tsv` record that predicate prefers —
+the other 80 were built before it existed, and for those it can only compare timestamps,
+which a restore from backup or a re-download of the same accession defeats. So the default
+opens every bundle and compares each taxid prefix's contig count and base total against the
+manifest: no sidecar needed, and stronger than one, because the sidecar records what the
+builder *believed* it wrote. 73 s for the pack, 2.1 GB read; `--quick` gives the
+metadata-only answer, which on this pack is honestly **1**.
+
+That pass also re-applies the two checks that otherwise only ever run during a rebuild —
+identical sequence under two taxid prefixes, which would give every read over it MAPQ 0, and
+a header with no `taxid|` prefix, which no read can be attributed to. All 90 bundles pass
+both. What it does **not** answer is whether the manifest matches `refs.lock.tsv`; the lock
+outranks the disk, and that comparison needs `build_pack_refs.py --from-lock`, which reaches
+NCBI.
 
 ## Publishing a database set
 

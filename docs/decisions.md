@@ -5752,3 +5752,96 @@ not quietly contradict it.
 And a sequenced clade is called **necessary, not sufficient** — one genome under a genus
 does not mean a species can be resolved, and the amino-acid route can place a read on a
 clade without resolving below it. The wording follows D48's.
+
+## D61 — The last predicate that could only be asked by invoking the builder
+
+**Date:** 2026-10-26
+**Evidence:** measured-here
+**Status:** done
+
+D45 gave the competitive bundles a staleness predicate, and it is correct. It lives in
+`build_pack_refs.py`, which is where the builder needs it — and that is also where it was
+unreachable. It sits after the watchlist has been resolved against NCBI and the per-taxon
+subtree queries have gone out, and `--dry-run` prints the plan and returns before reaching
+it. So the one artifact stage 2 actually aligns against was the only database here that
+could not be interrogated read-only: asking "are my bundles current?" meant starting a 43 GB
+download tool. `scripts/check_pack_bundles.py` asks it directly.
+
+### The predicate is imported, not reimplemented
+
+`bundle_staleness`, `index_staleness`, `read_bundle_inputs`, `assembly_key` and
+`parse_neighbours` are loaded from `build_pack_refs.py` by path. A second copy is the worse
+of the two failures available: the check would answer "current" under yesterday's rules while
+the builder rebuilt, or cry stale on a pack the builder is happy with, and either way an
+operator learns to ignore a check that disagrees with the thing it checks. The suite pins
+this by reading `__code__.co_filename` on the borrowed functions, not by grepping.
+
+### Why it reads the bundles by default
+
+**10 of 90 bundles have the `.inputs.tsv` sidecar. The other 80 were built before it
+existed.** That record is what makes D45 exact; without it D45 falls back to mtime, which
+cannot see a restore from backup, a copy that preserved timestamps, or a re-download of the
+same accession. Metadata alone therefore answers *could not tell* for 89% of this pack, and
+a check whose default answer is "could not tell" teaches nothing — so `--quick` is the
+option, not the default, and it exits **1** here rather than claiming CURRENT.
+
+The default compares contents against the manifest. The manifest records `genome_size` and
+`n_contigs` per accession, `append_with_taxid_prefix` copies sequence lines through
+untouched, and the check re-applies `fasta_stats`'s own counting rule — so per-taxid-prefix
+contig counts and base totals inside a bundle must equal the manifest's sums **exactly**.
+That needs no sidecar and is stronger than one: the sidecar records what the builder believed
+it wrote, while this reads what is there.
+
+Matching the counting rule to the byte matters in the other direction too. A rule differing
+by the newline would be off by a few bytes per contig and would report every bundle on every
+deployment stale — and a guard that cries wolf on a healthy pack gets switched off (D47,
+D52, D59, D60). The suite tests the equivalence functionally, against `fasta_stats` itself,
+rather than asserting that a particular expression appears in the source.
+
+### Measured, 2026-10-26
+
+- **All 90 bundles and 180 indexes match the manifest**, per taxid prefix. 73 s, 2.1 GB of
+  gzip read. `--quick` takes under a second and exits 1.
+- The pass also re-runs the two post-write checks that otherwise **only ever fire on a
+  rebuild**, so no bundle built before they existed had ever been subjected to them:
+  identical sequence under two taxid prefixes (D40's MAPQ-0 inversion, which turns a
+  target/neighbour pair into a systematic false negative) and a header with no `taxid|`
+  prefix (unattributable sequence — for a segmented virus, a lost segment). **Neither fires
+  on any of the 90.**
+- Mutation-tested against the real pack, not only against fixtures: +1 bp on one manifest
+  row ⇒ exit 3 naming the taxid and both totals; a neighbour's row deleted ⇒ exit 3, "in
+  nothing that defines it"; one of a target's two assemblies dropped ⇒ exit 3. The
+  self-test puts a synthetic pack through 15 cases, including the one only reading the
+  bundle catches: a reference added to the manifest with no sidecar and no mtime signal.
+
+### What is reported but is not staleness
+
+4 of 90 bundles are **missing a declared near neighbour** — Rift Valley fever, hepatitis E,
+*E. histolytica*, *G. intestinalis* — because those four neighbours have no assembly
+anywhere (D52). One bundle, *F. tularensis* 263, **lost a neighbour to de-duplication**
+because 264 resolves to the same assembly. Both are reported with their consequence (the
+first a false-positive risk, the second a pair that cannot be discriminated) and neither
+makes the check exit 3. They are permanent properties of the pack, and exit 3 on a permanent
+property is a check that gets ignored — the same reasoning that keeps D48's Kraken2 answer
+off the launch path.
+
+### What it does not answer
+
+Whether the manifest agrees with `refs.lock.tsv`. The lock outranks the disk (D53), that is
+a different authority, and answering it needs `build_pack_refs.py --from-lock`, which must
+reach NCBI. The check says so in its verdict rather than letting CURRENT be read as more
+than it is.
+
+With this, every database in the project answers a question about itself, and the
+read-only check table in `docs/operations.md` has no gap left in it.
+
+### Why it is not wired into launch
+
+`main.nf` warns at launch about the sketch, the marker database and masking (D46, D47,
+D34), and this one deliberately joins none of them. The deep pass costs 73 s on every run,
+and the metadata pass — the only one cheap enough — answers **1** on the shipped pack
+because 80 of 90 bundles have no input record. A launch banner that says *could not tell*
+on every run is how an operator learns to skip the banners that mean something, which is
+the same reason D48's Kraken2 coverage answer stays on demand. It becomes a candidate for
+launch if a full rebuild ever gives all 90 bundles a sidecar; until then it is a question
+the operator asks, and `docs/operations.md` is where it is asked.

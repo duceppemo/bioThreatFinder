@@ -38,14 +38,15 @@ Environments are entered with `conda activate <name>` from `envs/*.yml`.
 
 ## Read-only checks, all of them
 
-None of these write anything. The three database checks share an exit convention — **0**
+None of these write anything. The database checks share an exit convention — **0**
 the answer is yes, **3** no and it names what is wrong, **1** it could not tell — which
 distinguishes a bad answer from a failure to get one. Every command and exit code in this
-table was run against the shipped databases on 2026-10-22.
+table was run against the shipped databases on 2026-10-22; the Metabuli and competitive-bundle
+rows on 2026-10-26, when those two checks were written.
 
 | Check | Command | Exit | What it answers |
 |---|---|---|---|
-| Competitive bundles (D45) | applied by `build_pack_refs.py` itself when it decides what to rebuild | — | is each bundle's recorded input set, and each input's mtime, still what it was built from |
+| Competitive bundles (D45, D61) | `python3 scripts/check_pack_bundles.py --pack human` | 0/3/1 — **0 today**; 73 s, it reads all 90 bundles. `--quick` for the metadata-only answer, which is **1** on this pack | does every bundle, and every index, still match the manifest — per taxid prefix, contig count and base total |
 | sylph sketch (D46) | `bash scripts/build_sylph_db.sh --pack human --check` | 0/3/1 | does the sketch cover every pack reference |
 | Marker database (D47) | `python3 scripts/build_marker_db.py --pack human --check` | 0/3/1 | does the database cover `markers.tsv`, on every tier it claims |
 | Kraken2 index (D48) | `python3 scripts/check_index_coverage.py --pack human` | 0/3/1 — **3 today**, by design, see D48 | can the index report every watchlist taxon **at all** |
@@ -53,7 +54,7 @@ table was run against the shipped databases on 2026-10-22.
 | Masking completeness (D34) | `python3 scripts/mask_pack_refs.py --pack human --dry-run` | 0, or 1 if a reference has no result | does every reference have a masking result |
 | Threshold coherence | `python3 scripts/check_threshold_coherence.py` | report, always 0 | which per-taxon gates can never bind |
 | Conda specs | `bash scripts/check_conda_specs.sh` | 0 or nonzero | does every per-process pin still solve (network, minutes) |
-| The suite | `python3 tests/test_pipeline.py` | 0 or nonzero | 497 checks with samtools on `PATH` and `$BTF_DB` set; 434 pass and 15 skip on a bare clone with neither. No network, ~30 s |
+| The suite | `python3 tests/test_pipeline.py` | 0 or nonzero | 512 checks with samtools on `PATH` and `$BTF_DB` set; 446 pass and 16 skip on a bare clone with neither. No network, ~30 s |
 
 **Why there are this many.** Well over thirty bugs found in this project so far share one
 shape: *produces an empty or degraded result indistinguishable from a clean negative.* A
@@ -66,12 +67,25 @@ Only the sylph check needs a tool: `conda activate btf-sylph` first, or it exits
 stdlib Python and run from a bare clone — deliberately, since the head node has neither
 sylph nor kraken2 and the checks that matter at launch must work without them.
 
-**One gap left.** The bundle predicate (D45) is the one with no standalone read-only form — it is a
-rebuild decision inside the builder, so asking "are my bundles current?" means invoking the
-builder, whose `--dry-run` reaches the network. The answer is still correct whenever a build
-runs, which is where a repair would happen anyway.
+**No gap left.** The bundle predicate was the last one with no standalone read-only form —
+it is a rebuild decision inside the builder, so asking "are my bundles current?" used to mean
+invoking a 43 GB download tool whose `--dry-run` returns before reaching the predicate.
+`check_pack_bundles.py` (D61) now asks it directly, **importing** `bundle_staleness` and
+`index_staleness` from the builder rather than carrying a second copy that could drift.
 
-**Two gaps closed.** Metabuli now has a coverage check (D60), and it answers **3**: 63 of
+It defaults to reading the bundles because metadata alone cannot answer here: only **10 of
+90** bundles have the `.inputs.tsv` sidecar D45 added, the other 80 predating it, and for
+those D45 falls back to mtime — blind to a restore from backup or a re-download of the same
+accession. So `--quick` answers **1** on the shipped pack, honestly. Reading them compares
+each taxid prefix's contig count and base total against the manifest, which needs no sidecar
+and is stronger than one: the sidecar records what the builder believed it wrote. Measured
+2026-10-26: all 90 bundles and 180 indexes match, 73 s, and a 1 bp disagreement in one
+manifest row is detected. The same pass re-runs the two post-write checks that otherwise
+only ever fire on a rebuild — identical sequence under two taxid prefixes (D40's MAPQ-0
+inversion) and a header with no `taxid|` prefix — so the 80 bundles built before those
+checks existed have now been subjected to them. Neither fires.
+
+**Three gaps closed.** Metabuli now has a coverage check (D60), and it answers **3**: 63 of
 90 watchlist taxa have no sequence at or below them in the prebuilt `refseq_standard`
 database — every fungus, 19 of 20 parasites, 22 of 31 viruses and 9 of 26 bacteria. The arm
 is opt-in and off by default, so that is not a run-time defect; it is what the arm would
@@ -262,8 +276,9 @@ runnable example, because the failure it replaces was not a crash:
 | `--check` read a root that was not yours and reported a **healthy pack as having no database** | the default is the pack you built, so the bare form is correct |
 | an empty root silently joined into `/bioThreatFinder/packs/human/refs` — a real-looking path that exists nowhere | refused, with the two ways to answer |
 
-Three checks take the artifact's path directly and so work with **no environment at all**:
-`build_marker_db.py --markers-dir`, `check_index_coverage.py --kraken2-db`, and
+Every check takes the artifact's path directly and so works with **no environment at all**:
+`build_marker_db.py --markers-dir`, `check_index_coverage.py --kraken2-db`,
+`check_metabuli_coverage.py --metabuli-db`, `check_pack_bundles.py --refs-dir`, and
 `build_sylph_db.sh --refs-dir` + `--out`. That is deliberate: a check that needs a
 configured deployment is a check nobody runs on a fresh clone, and these are the ones a
 launch warning prints for someone to paste.
@@ -282,7 +297,7 @@ investigate.
 | Artifact | State |
 |---|---|
 | `taxdump/2026-09-29/` | **pinned**, md5-verified, `PROVENANCE.txt` inside. 3,016,439 nodes |
-| `packs/human/refs/` | 90/90 targets, 379 manifest rows / 375 with sequence, 90 competitive bundles + 180 indexes, 43 GB. All bundles verified free of duplicated sequence. The 4 rows without sequence are near neighbours that do not exist anywhere, carried with empty paths on purpose |
+| `packs/human/refs/` | 90/90 targets, 379 manifest rows / 375 with sequence, 90 competitive bundles + 180 indexes, 43 GB. All bundles re-read 2026-10-26: free of duplicated sequence, every header prefixed, and every taxid prefix's contig count and base total equal to the manifest's (D61). The 4 rows without sequence are near neighbours that do not exist anywhere, carried with empty paths on purpose |
 | `packs/human/refs/masked/` | complete — **20,040,354 bp** over all 375 references with sequence (0.348%); vector 104,184 bp / 45 contigs, crossgroup 81,196 / 50, host 2,737 / 5. The two vacuous rows were re-masked 2026-10-04 and both shared-assembly pairs now agree and carry `SHARED_SEQUENCE` flags. Per-source byte totals in D5 were double-counted and are upper bounds, not a partition |
 | `host/human/` | T2T-CHM13v2.0 + sr and map-ont indexes, 17 GB |
 | `sylph/` | `human_pack_refs.syldb`, 177 MB, **375 genomes** at c=200/k=31/min-spacing=30, rebuilt 2026-10-21 with sylph 1.0.0 and a `BTF_BUILD_MANIFEST.txt`. The 2026-09-29 hand-built sketch (359 genomes) is kept beside it as `human_pack_refs.bak-2026-09-29.syldb` — the `.syldb` suffix is deliberate, `sylph inspect` refuses any other extension. Reproducible since 2026-10-05 via `scripts/build_sylph_db.sh` (6 s at 32 threads) |
