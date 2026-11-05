@@ -829,6 +829,40 @@ def test_pack_integrity(tmp: Path) -> None:
     record("pack:rules compile and reference only real markers", p.returncode == 0,
            p.stderr.strip().splitlines()[-1] if p.returncode else "")
 
+    # The `group` column is a closed set because code branches on it (D63). Three
+    # checks: the shipped watchlist conforms, an unknown group is REFUSED, and a known
+    # one is not - the last so this guard cannot pass by rejecting everything.
+    sys.path.insert(0, str(BIN))
+    try:
+        import resolve_watchlist as _rw
+        known = _rw.KNOWN_GROUPS
+    finally:
+        sys.path.pop(0)
+    with (PACK / "watchlist.tsv").open() as fh:
+        wl_lines = [ln for ln in fh if not ln.startswith("#")]
+    seen = {(r.get("group") or "").strip()
+            for r in csv.DictReader(wl_lines, delimiter="\t")
+            if (r.get("name") or "").strip()}
+    record("pack:every watchlist group is a known group", seen <= known,
+           f"unknown: {sorted(seen - known)}")
+
+    hdr = ("name\trank\tgroup\tcategory\tmin_unique_reads\tmin_breadth\t"
+           "near_neighbours\tnotes\tsource")
+    for group, want_refusal in (("oomycete", True), ("bacteria", False)):
+        wl = tmp / f"wl_{group}.tsv"
+        wl.write_text(f"{hdr}\nBacillus anthracis\tspecies\t{group}\t"
+                      "high_consequence\t\t\t-\t-\tseed\n")
+        q = run([sys.executable, BIN / "resolve_watchlist.py", "--watchlist", wl,
+                 "--taxdump", "/nonexistent", "--out", tmp / f"o_{group}.tsv",
+                 "--descendants-out", tmp / f"d_{group}.tsv"])
+        refused = q.returncode != 0 and "not a known group" in q.stderr
+        if want_refusal:
+            record("pack:an unknown watchlist group is refused", refused,
+                   f"exit={q.returncode}")
+        else:
+            record("pack:a known watchlist group is not refused", not refused,
+                   q.stderr.strip().splitlines()[0] if refused else "")
+
     sys.path.insert(0, str(BIN))
     try:
         import btf_yaml

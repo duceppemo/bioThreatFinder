@@ -23,7 +23,11 @@
 # Columns:
 #   name              scientific name as it appears in NCBI taxonomy
 #   rank              expected taxonomic rank of the call
-#   group             bacteria | virus | parasite | fungus
+#   group             bacteria | virus | parasite | fungus - a CLOSED SET, validated
+#                     by bin/resolve_watchlist.py. Code branches on this column, so an
+#                     unrecognised value would silently take the bacterial identity
+#                     floor and the non-virus reference allowance. Adding a group is a
+#                     code change, not a data one - see docs/decisions.md D63.
 #   category          notifiable | high_consequence | emerging
 #   min_unique_reads  stage-2 override; blank = pack default
 #   min_breadth       stage-2 override; blank = pack default

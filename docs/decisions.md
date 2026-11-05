@@ -6205,3 +6205,53 @@ artifact, applied to the source.
 **Would reverse it:** nothing to reverse. The standing conclusion is narrower: CI's `ruff`
 and `shellcheck` steps should stop swallowing their exit codes, now that the output is known
 to be clean enough to enforce.
+
+## D63 — The watchlist `group` column is a closed set, because code branches on it
+
+**Date:** 2026-11-04
+**Evidence:** read-from-source (both branch sites verified in their own code) +
+measured-here (the guard mutation-tested in both directions before being kept)
+**Status:** done. Guard in `bin/resolve_watchlist.py`, three cases in the suite.
+
+Found while documenting how the plant pack would be built. Plant watchlists do not fit the
+four groups the human pack uses — oomycetes, phytoplasmas, viroids and nematodes all need a
+home — so the question was what happens to a row written `group = oomycete`. The answer was
+nothing: no error, no warning, no empty result.
+
+`group` is not descriptive. Two places branch on it, and each fails silently:
+
+- `bin/score_evidence.py` `resolve_identity_floor()` resolves
+  `platform + group -> platform default -> group -> global default`. An unrecognised group
+  reaches the **platform default**, which is the bacterial species-discrimination floor.
+- `scripts/build_pack_refs.py` grants `--max-per-taxon-virus` rather than
+  `--max-per-taxon` only when `group == "virus"` **exactly**, so anything virus-like under
+  another spelling gets one reference and loses divergent-lineage reads.
+
+Both produce a clean-looking run through the wrong gate — the shape this project keeps
+finding, here pointed at a column nobody thought of as load-bearing.
+
+**The validation lives in `read_watchlist()`**, which runs before the taxdump age check and
+before any names are loaded, so it fires on a bare clone with no databases. The value is
+stripped and then compared exactly: surrounding whitespace is invisible in a TSV and
+harmless to normalise, while case is visible and changes meaning where the comparison is
+`group == "virus"`, so `Bacteria` is refused with a note saying it differs only in case. An
+empty group is refused too — it took the default floor as silently as a misspelling. The
+offender list is capped at 12 rows, because a mis-set column tends to hit every row and an
+uncapped list scrolls the guidance off screen.
+
+**The rejected alternative matters more than the chosen one.** The obvious check is "every
+group used must have an entry in the pack's `min_read_identity_by_group`". That would fire
+on the correct shipped installation: `bacteria` deliberately has no entry and relies on the
+platform-default fallback. A guard that cries wolf gets switched off, so the check had to be
+membership in a declared set instead.
+
+**Adding a group is therefore NOT a pack-data-only change**, and the error message says so,
+naming all three steps: add it to `KNOWN_GROUPS`, give it floors in the pack's
+`min_read_identity_by_group` and `min_read_identity_by_platform` or confirm the platform
+default suits it, and decide its per-taxon reference count in `build_pack_refs.py`. This is
+the one place the "a pack is data, not code" property does not hold, and it is better stated
+than discovered.
+
+**Would reverse it:** removing both branch sites. If identity floors and per-taxon reference
+counts became fully per-taxon in the watchlist, `group` would be descriptive and the guard
+could go.
