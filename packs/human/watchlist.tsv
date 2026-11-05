@@ -3,7 +3,7 @@
 # KEYED BY NAME, NOT TAXID, ON PURPOSE.
 # NCBI taxonomy IDs get merged, split and retired. Hardcoding them rots
 # silently and a rotted taxid means a missed detection. Instead,
-# scripts/resolve_watchlist.py reconciles every name against the local taxdump
+# bin/resolve_watchlist.py reconciles every name against the local taxdump
 # at build time and writes watchlist.resolved.tsv with taxids attached. Any
 # name that does not resolve to exactly one node is a HARD ERROR - the pipeline
 # refuses to run on an unresolved watchlist.
@@ -11,7 +11,14 @@
 # This seed list covers organisms that appear on published notifiable-disease
 # and high-consequence-pathogen lists. It is a STARTING POINT and must be
 # reconciled against the authoritative list for your jurisdiction before
-# operational use - see scripts/fetch_authoritative_lists.py and docs/watchlist.md.
+# operational use. The procedure is "Watchlist provenance" at the end of
+# docs/roadmap.md, which names the authoritative list per domain; item D there
+# records which sources are machine-readable (ePATHogen, EPPO and the eCFR -
+# everything else is scrape-and-diff with no API). There is no fetcher script:
+# reconciliation is manual, and each row's `source` column records the list and
+# its version. NOTE: HPTA Schedules 2-5 were repealed on 2026-03-26, so the
+# ePATHogen registry - not the Act's schedules - is the legal source of Canadian
+# Risk Group assignments.
 #
 # Columns:
 #   name              scientific name as it appears in NCBI taxonomy
