@@ -35,6 +35,23 @@ REQUIRED_COLUMNS = [
     "min_unique_reads", "min_breadth", "near_neighbours", "notes", "source",
 ]
 
+# The `group` column is a CLOSED SET, because code BRANCHES on it rather than
+# merely reporting it:
+#   * bin/score_evidence.py resolve_identity_floor() looks the group up in the pack's
+#     min_read_identity_by_platform / min_read_identity_by_group and falls back to the
+#     PLATFORM DEFAULT when it finds neither. That fallback is correct for bacteria,
+#     which deliberately has no entry - and silently wrong for an unrecognised group,
+#     which inherits the bacterial species-discrimination floor.
+#   * scripts/build_pack_refs.py grants --max-per-taxon-virus rather than
+#     --max-per-taxon only when group == "virus" EXACTLY, so a group that merely looks
+#     like a virus gets one reference and loses divergent-lineage reads.
+# Neither failure raises, warns, or empties a result: the run looks clean and the gate
+# is simply the wrong one. So an unknown group is a hard error, here at the earliest
+# point that reads the file and before any taxdump is needed.
+#
+# Adding a group is therefore NOT a pack-data-only change. See docs/decisions.md D63.
+KNOWN_GROUPS = frozenset({"bacteria", "virus", "parasite", "fungus"})
+
 # NCBI name classes we accept, in order of preference. A scientific name always
 # wins; synonyms are accepted because virus and fungal taxonomy churns and the
 # official disease lists lag NCBI by years.
@@ -57,13 +74,51 @@ def read_watchlist(path: Path) -> list[dict]:
     missing = [c for c in REQUIRED_COLUMNS if c not in (reader.fieldnames or [])]
     if missing:
         sys.exit(f"ERROR: {path} is missing required columns: {', '.join(missing)}")
+    bad_groups: list[tuple[int, str]] = []
     for i, row in enumerate(reader, start=2):
         name = (row.get("name") or "").strip()
         if not name:
             continue
         row["name"] = name
         row["_line"] = i
+        # Stripped, then compared EXACTLY. Surrounding whitespace is invisible in a TSV
+        # and harmless to normalise; case is visible and changes meaning downstream,
+        # where the comparison is `group == "virus"`.
+        group = (row.get("group") or "").strip()
+        row["group"] = group
+        if group not in KNOWN_GROUPS:
+            bad_groups.append((i, group))
         rows.append(row)
+    if bad_groups:
+        lines = []
+        # Capped: the actionable part of this message is the guidance below it, and a
+        # mis-set column tends to hit every row, so an uncapped list scrolls it away.
+        shown, rest = bad_groups[:12], len(bad_groups) - 12
+        for ln, val in shown:
+            if not val:
+                note = "  (empty)"
+            elif val.lower() in KNOWN_GROUPS:
+                note = "  (differs only in case)"
+            else:
+                note = ""
+            lines.append(f"    line {ln}: {val!r}{note}")
+        if rest > 0:
+            lines.append(f"    ... and {rest} more row(s)")
+        sys.exit(
+            f"ERROR: {path} has {len(bad_groups)} row(s) whose `group` is not a known "
+            "group.\n"
+            + "\n".join(lines) + "\n"
+            f"  Known groups: {', '.join(sorted(KNOWN_GROUPS))}\n"
+            "  This is a hard error because nothing downstream would report it. An\n"
+            "  unrecognised group falls through resolve_identity_floor() to the PLATFORM\n"
+            "  default - the bacterial species-discrimination floor - and is given one\n"
+            "  reference per taxon rather than the virus allowance. No warning, no empty\n"
+            "  result: the wrong gate, quietly.\n"
+            "  To add a group (oomycete for the plant pack, say), do all three:\n"
+            "    1. add it to KNOWN_GROUPS in this script;\n"
+            "    2. give it floors in the pack's min_read_identity_by_group AND\n"
+            "       min_read_identity_by_platform, or confirm the platform default suits it;\n"
+            "    3. decide its per-taxon reference count in scripts/build_pack_refs.py.\n")
     if not rows:
         sys.exit(f"ERROR: {path} yielded no watchlist entries")
     return rows
